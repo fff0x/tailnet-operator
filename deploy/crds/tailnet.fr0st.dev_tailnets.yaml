@@ -87,6 +87,17 @@ spec:
                 description: Template for a TailnetEgress's tailnet hostname when
                   it sets none. {name} is the CR name.
                 type: string
+              ingressHostnameTemplate:
+                default: ingress-{name}
+                description: Template for a TailnetIngress's tailnet (MagicDNS) hostname
+                  when it sets none. {name} is the CR name.
+                type: string
+              ingressTagTemplate:
+                default: tag:ingress-{name}
+                description: |-
+                  Template for a TailnetIngress's tag when it sets none. {name} is the CR name.
+                  The tag IS the authorization — its grants (dst = this tag) decide which peers may reach it.
+                type: string
               proxy:
                 description: |-
                   ProxySpec are the defaults for the per-CR agent pods this Tailnet spawns. A TailnetEgress may

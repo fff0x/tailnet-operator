@@ -1,6 +1,7 @@
-// Command tailnet-operator is the control plane. It watches Tailnet (cluster-scoped) and
-// TailnetEgress (namespaced, only in its own namespace), mints and rotates Headscale keys, and
-// writes the per-CR agent Deployment + Services. It never speaks tailscale — the agent does.
+// Command tailnet-operator is the control plane. It watches Tailnet (cluster-scoped), TailnetEgress
+// (namespaced, in its own namespace) and TailnetIngress (namespaced, in any tenant namespace), mints
+// and rotates Headscale keys, and writes the per-CR agent Deployment + children. It never speaks
+// tailscale — the agent does.
 package main
 
 import (
@@ -43,18 +44,21 @@ func main() {
 	}
 	image := os.Getenv("OPERATOR_IMAGE") // agent default = operator's own image
 
-	// Namespace-scoped cache for everything namespaced: the operator only ever touches its own
-	// namespace, so a Role suffices and the cache stays small. Tailnet is cluster-scoped and left
-	// unfiltered — a later cluster-scoped TailnetIngress would watch the whole cluster the same way.
+	// Egress lives only in the operator namespace, so its CR and its Services stay namespace-scoped
+	// (a Role suffices, the cache stays small). Ingress CRs live in tenant namespaces and own
+	// children there, so TailnetIngress and the child types it manages (Secret/ConfigMap/Deployment/
+	// NetworkPolicy/Pod) are cached cluster-wide — this is the deliberate RBAC/cache widening the
+	// egress path avoids (see deploy/rbac.yaml). Service stays namespaced: only egress creates one.
 	nsCfg := map[string]cache.Config{ns: {}}
 	byObject := map[client.Object]cache.ByObject{
 		&tnv1.TailnetEgress{}:         {Namespaces: nsCfg},
-		&corev1.Secret{}:              {Namespaces: nsCfg},
-		&corev1.ConfigMap{}:           {Namespaces: nsCfg},
 		&corev1.Service{}:             {Namespaces: nsCfg},
-		&corev1.Pod{}:                 {Namespaces: nsCfg},
-		&appsv1.Deployment{}:          {Namespaces: nsCfg},
-		&networkingv1.NetworkPolicy{}: {Namespaces: nsCfg},
+		&tnv1.TailnetIngress{}:        {},
+		&corev1.Secret{}:              {},
+		&corev1.ConfigMap{}:           {},
+		&corev1.Pod{}:                 {},
+		&appsv1.Deployment{}:          {},
+		&networkingv1.NetworkPolicy{}: {},
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -83,6 +87,15 @@ func main() {
 		OperatorImage:     image,
 	}).SetupWithManager(mgr); err != nil {
 		l.Error(err, "setup TailnetEgress controller")
+		os.Exit(1)
+	}
+	if err := (&controller.TailnetIngressReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		OperatorNamespace: ns,
+		OperatorImage:     image,
+	}).SetupWithManager(mgr); err != nil {
+		l.Error(err, "setup TailnetIngress controller")
 		os.Exit(1)
 	}
 
