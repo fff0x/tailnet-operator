@@ -80,7 +80,8 @@ type TailnetStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Server",type=string,JSONPath=`.spec.server`
 // +kubebuilder:printcolumn:name="ApiKey",type=string,JSONPath=`.status.conditions[?(@.type=="ApiKeyValid")].status`
-// +kubebuilder:printcolumn:name="Expires",type=date,JSONPath=`.status.apiKeyExpiresAt`
+// Expires is a string, not a date: kubectl's date column renders future timestamps as "<invalid>".
+// +kubebuilder:printcolumn:name="Expires",type=string,JSONPath=`.status.apiKeyExpiresAt`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Tailnet is a cluster-scoped binding to one control server.
