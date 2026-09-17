@@ -18,6 +18,31 @@ rules:
   - apiGroups: ["tailnet.fr0st.dev"]
     resources: [tailnets/status]
     verbs: [get, update, patch]
+  # TailnetIngress is namespaced but lives in any tenant namespace, so it (and the children it owns)
+  # are managed cluster-wide. This is the deliberate widening the egress path avoids: an operator
+  # that provisions tenant namespaces needs cluster-wide write on Secrets/Deployments here.
+  - apiGroups: ["tailnet.fr0st.dev"]
+    resources: [tailnetingresses]
+    verbs: [get, list, watch]
+  - apiGroups: ["tailnet.fr0st.dev"]
+    resources: [tailnetingresses/status]
+    verbs: [get, update, patch]
+  - apiGroups: [""]
+    resources: [secrets, configmaps]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Scraped for /targets to report backend reachability.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

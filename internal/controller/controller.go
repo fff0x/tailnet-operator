@@ -31,10 +31,24 @@ var (
 		Name: "tailnetegress_routes_missing",
 		Help: "Number of target routes missing from a TailnetEgress netmap.",
 	}, []string{"namespace", "name"})
+
+	// ingressAuthKeyExpiresSeconds tracks each TailnetIngress's pre-auth key.
+	ingressAuthKeyExpiresSeconds = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "tailnetingress_authkey_expires_seconds",
+		Help: "Seconds until a TailnetIngress pre-auth key expires.",
+	}, []string{"namespace", "name"})
+
+	// ingressBackendsUnreachable is the count of a TailnetIngress's backends the agent could not
+	// reach on its last probe.
+	ingressBackendsUnreachable = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "tailnetingress_backends_unreachable",
+		Help: "Number of in-cluster backends a TailnetIngress agent could not reach.",
+	}, []string{"namespace", "name"})
 )
 
 func init() {
-	metrics.Registry.MustRegister(apiKeyExpiresSeconds, authKeyExpiresSeconds, routesMissing)
+	metrics.Registry.MustRegister(apiKeyExpiresSeconds, authKeyExpiresSeconds, routesMissing,
+		ingressAuthKeyExpiresSeconds, ingressBackendsUnreachable)
 }
 
 // ssaApply server-side-applies obj as the operator's field manager, taking ownership of the fields

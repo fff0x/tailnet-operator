@@ -56,6 +56,13 @@ type TailnetSpec struct {
 	// Template for a TailnetEgress's tailnet hostname when it sets none. {name} is the CR name.
 	// +kubebuilder:default="egress-{name}"
 	HostnameTemplate string `json:"hostnameTemplate,omitempty"`
+	// Template for a TailnetIngress's tag when it sets none. {name} is the CR name.
+	// The tag IS the authorization — its grants (dst = this tag) decide which peers may reach it.
+	// +kubebuilder:default="tag:ingress-{name}"
+	IngressTagTemplate string `json:"ingressTagTemplate,omitempty"`
+	// Template for a TailnetIngress's tailnet (MagicDNS) hostname when it sets none. {name} is the CR name.
+	// +kubebuilder:default="ingress-{name}"
+	IngressHostnameTemplate string `json:"ingressHostnameTemplate,omitempty"`
 }
 
 // TailnetStatus is the observed state of the control server binding.

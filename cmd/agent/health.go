@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"net"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -100,16 +98,17 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// loop probes every target by dialling it and closing immediately. A connect is enough: it proves
-// grant, route approval and the far-side path in one shot. A refusal (RST) still counts as reachable
-// — the host answered; only a timeout or dial error is unreachable.
+// loop probes every target by dialling it and closing immediately. A connect is enough: egress
+// proves grant, route approval and the far-side path in one shot; ingress proves the in-cluster
+// backend answers. A refusal (RST) still counts as reachable — the host answered; only a timeout or
+// dial error is unreachable. fw.dial picks the right leg, so the probe mirrors real traffic.
 func (p *prober) loop(ctx context.Context, ts *tsnet.Server, fw *forwarder, interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	probe := func() {
 		for _, t := range fw.current() {
 			dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			c, err := ts.Dial(dctx, "tcp", net.JoinHostPort(t.Address, strconv.Itoa(t.Port)))
+			c, err := fw.dial(dctx, t)
 			cancel()
 			res := probeResult{Name: t.Name, LastProbe: time.Now()}
 			if err != nil {

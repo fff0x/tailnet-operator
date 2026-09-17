@@ -1,7 +1,12 @@
-// Command tailnet-agent is the data plane: one per TailnetEgress CR. It joins the tailnet as a
-// userspace tsnet node (no NET_ADMIN, no /dev/net/tun), accepts --accept-routes so netstack will
-// emit toward subnet-routed hosts, and forwards a fixed set of local listen ports to off-cluster
-// addresses over the tailnet. No SOCKS5, no second container: tsnet.Dial is the whole hop.
+// Command tailnet-agent is the data plane: one per TailnetEgress or TailnetIngress CR. It joins the
+// tailnet as a userspace tsnet node (no NET_ADMIN, no /dev/net/tun) and forwards a fixed set of
+// connections. Direction is set by AGENT_MODE:
+//
+//	egress  (default) — listen on a local port, Dial the far address over the tailnet
+//	                    (needs --accept-routes so netstack emits toward subnet-routed hosts)
+//	ingress           — Listen on the tailnet, Dial an in-cluster backend with the normal netns
+//
+// No SOCKS5, no second container: one tsnet stack plus the process's own netns is the whole hop.
 package main
 
 import (
@@ -33,12 +38,16 @@ func main() {
 	authKey := os.Getenv("TS_AUTHKEY")
 	controlURL := os.Getenv("CONTROL_URL")
 	hostname := os.Getenv("TS_HOSTNAME")
+	mode := env("AGENT_MODE", "egress")
 	targetsFile := env("TARGETS_FILE", "/config/targets.json")
 	healthAddr := env("HEALTH_ADDR", ":9080")
 	probeInterval, _ := time.ParseDuration(env("PROBE_INTERVAL", "5m"))
 
 	if authKey == "" || controlURL == "" || hostname == "" {
 		log.Fatal("TS_AUTHKEY, CONTROL_URL and TS_HOSTNAME are required")
+	}
+	if mode != "egress" && mode != "ingress" {
+		log.Fatalf("AGENT_MODE must be egress or ingress, got %q", mode)
 	}
 	// Never phone home; the operator carries the status the netmap already knows.
 	os.Setenv("TS_NO_LOGS_NO_SUPPORT", "1")
@@ -69,18 +78,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("local client: %v", err)
 	}
-	// Required even in userspace: without RouteAll, netstack refuses to emit toward a subnet-routed
-	// address and every dial dies. Which routes actually arrive is decided by this node's grants —
-	// Headscale filters the netmap per node.
-	if _, err := lc.EditPrefs(ctx, &ipn.MaskedPrefs{
-		Prefs:       ipn.Prefs{RouteAll: true},
-		RouteAllSet: true,
-	}); err != nil {
-		log.Fatalf("edit prefs (RouteAll): %v", err)
+	// Egress only: without RouteAll, netstack refuses to emit toward a subnet-routed address and
+	// every Dial dies. Which routes actually arrive is decided by this node's grants — Headscale
+	// filters the netmap per node. Ingress dials in-cluster via the pod netns, so it needs none.
+	if mode == "egress" {
+		if _, err := lc.EditPrefs(ctx, &ipn.MaskedPrefs{
+			Prefs:       ipn.Prefs{RouteAll: true},
+			RouteAllSet: true,
+		}); err != nil {
+			log.Fatalf("edit prefs (RouteAll): %v", err)
+		}
 	}
-	log.Printf("tailnet-agent up: hostname=%s control=%s", hostname, controlURL)
+	log.Printf("tailnet-agent up: mode=%s hostname=%s control=%s", mode, hostname, controlURL)
 
-	fw := &forwarder{ts: ts, run: map[string]running{}}
+	fw := &forwarder{ts: ts, mode: mode, run: map[string]running{}}
 	defer fw.stopAll()
 
 	// First load must succeed; after that a bad reload is logged and the last good set stays up.
@@ -100,11 +111,14 @@ type running struct {
 	cancel context.CancelFunc
 }
 
-// forwarder owns the set of listeners and reconciles it against the desired targets.
+// forwarder owns the set of listeners and reconciles it against the desired targets. mode decides
+// which side of each hop is the tailnet: egress listens local and dials the tailnet; ingress listens
+// on the tailnet and dials the in-cluster backend.
 type forwarder struct {
-	ts  *tsnet.Server
-	mu  sync.Mutex
-	run map[string]running
+	ts   *tsnet.Server
+	mode string
+	mu   sync.Mutex
+	run  map[string]running
 }
 
 // current returns a snapshot of the running targets (for diffing and for the probe).
@@ -148,9 +162,16 @@ func (f *forwarder) reload(ctx context.Context, path string) error {
 	return nil
 }
 
-// listen binds one listen port and forwards every connection to the target over the tailnet.
+// listen binds one listen port and forwards every connection to the target. Egress binds a local
+// port; ingress binds the same port on the tailnet (tsnet netstack) so peers dial it by node name.
 func (f *forwarder) listen(ctx context.Context, t target) error {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", t.ListenPort))
+	var ln net.Listener
+	var err error
+	if f.mode == "ingress" {
+		ln, err = f.ts.Listen("tcp", fmt.Sprintf(":%d", t.ListenPort))
+	} else {
+		ln, err = net.Listen("tcp", fmt.Sprintf(":%d", t.ListenPort))
+	}
 	if err != nil {
 		return err
 	}
@@ -173,13 +194,25 @@ func (f *forwarder) listen(ctx context.Context, t target) error {
 func (f *forwarder) handle(ctx context.Context, client net.Conn, t target) {
 	dctx, dcancel := context.WithTimeout(ctx, 10*time.Second)
 	defer dcancel()
-	upstream, err := f.ts.Dial(dctx, "tcp", net.JoinHostPort(t.Address, strconv.Itoa(t.Port)))
+	upstream, err := f.dial(dctx, t)
 	if err != nil {
 		log.Printf("target %s: dial %s:%d: %v", t.Name, t.Address, t.Port, err)
 		client.Close()
 		return
 	}
 	pipe(client, upstream)
+}
+
+// dial opens the upstream leg of a hop: ingress dials the in-cluster backend with the process netns
+// (cluster DNS + ClusterIP), egress dials the far address over the tailnet. Shared by handle and the
+// health prober so both measure the same path.
+func (f *forwarder) dial(ctx context.Context, t target) (net.Conn, error) {
+	addr := net.JoinHostPort(t.Address, strconv.Itoa(t.Port))
+	if f.mode == "ingress" {
+		var d net.Dialer
+		return d.DialContext(ctx, "tcp", addr)
+	}
+	return f.ts.Dial(ctx, "tcp", addr)
 }
 
 func (f *forwarder) stopAll() {

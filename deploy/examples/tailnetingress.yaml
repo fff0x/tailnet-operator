@@ -1,0 +1,28 @@
+---
+# One ingress identity. Lives in the tenant namespace and exposes in-cluster Services on the tailnet
+# as a single userspace node with a MagicDNS name (here: ingress-shop). Each expose is a plain-TCP
+# listener on the node — L4, any protocol — forwarded to a Service in this same namespace. The tag
+# must already be declared in the tailnet policy WITH grants whose dst is the tag (they decide which
+# peers may reach it); the operator reports a missing grant, it never writes policy. A tailnet peer
+# then dials e.g. ingress-shop:5432 (node MagicDNS name + the expose port).
+apiVersion: tailnet.fr0st.dev/v1alpha1
+kind: TailnetIngress
+metadata:
+  name: shop
+  namespace: shop-dev
+spec:
+  tailnetRef:
+    name: hcloud
+  # tag: tag:ingress-shop      # default: tag:ingress-{name} from the Tailnet template
+  # hostname: ingress-shop     # default: ingress-{name} (the node's MagicDNS label)
+  exposes:
+    - name: postgres
+      port: 5432               # port the tailnet node listens on
+      backend:
+        service: shop-db-rw    # Service in this namespace
+        port: 5432
+    - name: redis
+      port: 6379
+      backend:
+        service: shop-redis
+        port: 6379

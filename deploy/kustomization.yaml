@@ -8,6 +8,7 @@ kind: Kustomization
 resources:
   - crds/tailnet.fr0st.dev_tailnets.yaml
   - crds/tailnet.fr0st.dev_tailnetegresses.yaml
+  - crds/tailnet.fr0st.dev_tailnetingresses.yaml
   - rbac.yaml
   - operator.yaml
   - servicemonitor.yaml

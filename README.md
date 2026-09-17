@@ -17,6 +17,10 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
 - **`TailnetEgress`** (namespaced) — one egress identity: a tag, a reusable ephemeral pre-auth key,
   a userspace agent pod and one Service per target. Consumers dial `<target>.<namespace>:<port>`.
   The operator **reports** a missing route/grant as status — it never writes tailnet policy.
+- **`TailnetIngress`** (namespaced) — the mirror: expose in-cluster **L4** Services *on* the tailnet
+  as one userspace node with a MagicDNS name. A tenant self-serves a database, broker or any TCP
+  service to tailnet peers (`<hostname>:<port>`) without an Envoy route, a subnet router or a
+  certificate — complementing, not replacing, the HTTP shared gateway.
 
 ## Quickstart
 
@@ -66,6 +70,33 @@ kubectl get tailnetegress isd-dev
 # isd-dev   tag:ns-isd-dev   egress-isd-dev   true    2m
 ```
 
+Expose the other direction — an in-cluster Service *on* the tailnet — with a `TailnetIngress` in the
+tenant's own namespace. Each expose is a plain-TCP listener on the node; the `tag`'s grants (with the
+tag as `dst`) decide which peers may dial it:
+
+```yaml
+apiVersion: tailnet.fr0st.dev/v1alpha1
+kind: TailnetIngress
+metadata:
+  name: shop
+  namespace: shop-dev
+spec:
+  tailnetRef: { name: hcloud }
+  # tag: tag:ingress-shop     # default: tag:ingress-{name} from the Tailnet template
+  exposes:
+    - { name: postgres, port: 5432, backend: { service: shop-db-rw, port: 5432 } }
+    - { name: redis,    port: 6379, backend: { service: shop-redis, port: 6379 } }
+```
+
+A tailnet peer then reaches the database at `ingress-shop:5432` (the node's MagicDNS name + the expose
+port) — any TCP protocol, no HTTP route and no certificate needed (WireGuard is the transport).
+
+```sh
+kubectl -n shop-dev get tailnetingress shop
+# NAME   TAG               HOSTNAME       READY   AGE
+# shop   tag:ingress-shop  ingress-shop   true    2m
+```
+
 ## Status
 
 Every kind reports readiness as Kubernetes conditions, so `kubectl describe` tells you exactly what
@@ -73,17 +104,20 @@ is (not) working — including the two silent failures of a hand-built proxy (a 
 before its approver existed, and Headscale not distributing routes like Tailscale SaaS), which here
 surface as a named reason per target instead of a hanging connection:
 
-| Kind            | Conditions                                                                       |
-| --------------- | -------------------------------------------------------------------------------- |
-| `Tailnet`       | `ApiReachable`, `ApiKeyValid` (+ `status.apiKeyExpiresAt`)                        |
-| `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `Ready`           |
+| Kind             | Conditions                                                                       |
+| ---------------- | -------------------------------------------------------------------------------- |
+| `Tailnet`        | `ApiReachable`, `ApiKeyValid` (+ `status.apiKeyExpiresAt`)                        |
+| `TailnetEgress`  | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `Ready`           |
+| `TailnetIngress` | `TagKnown`, `Registered`, `BackendsReachable`, `Ready`                            |
 
 `TailnetEgress.status.targets[]` carries a per-target `present`/`reachable` pair and a `reason` when
 a route is missing — `NotAdvertised`, `NotApproved` or `NoGrant` — pinpointing which of the four
-manual steps was skipped.
+manual steps was skipped. `TailnetIngress.status.exposes[]` carries a per-expose `reachable` flag and
+an `Unreachable` reason when the in-cluster backend does not answer.
 
 Metrics (controller-runtime registry): `tailnet_apikey_expires_seconds`,
-`tailnetegress_authkey_expires_seconds`, `tailnetegress_routes_missing`.
+`tailnetegress_authkey_expires_seconds`, `tailnetegress_routes_missing`,
+`tailnetingress_authkey_expires_seconds`, `tailnetingress_backends_unreachable`.
 
 ## How it works
 
@@ -94,9 +128,10 @@ server-side apply — no per-CR restart to add or remove a target:
   restarted pod re-register on its own; a deleted CR's node ages out by itself. The working API key
   is minted from the bootstrap key and rotated automatically.
 - **Data plane.** One agent pod per CR is a userspace [tsnet](https://tailscale.com/kb/1244/tsnet)
-  node with `--accept-routes`. For each target it opens a local listener and `Dial`s the off-cluster
-  address over the tailnet (`io.Copy` with half-close) — no SOCKS5, no second container. State is
-  in-memory and ephemeral by design.
+  node. `AGENT_MODE` sets the direction: **egress** takes `--accept-routes`, opens a local listener
+  and `Dial`s the off-cluster address over the tailnet; **ingress** listens *on* the tailnet and
+  `Dial`s an in-cluster backend through the pod's own netns. Same binary, `io.Copy` with half-close,
+  no SOCKS5, no second container. State is in-memory and ephemeral by design.
 - **Services & isolation.** One Service per target (named after the target) gives consumers a stable
   `host:port`; a NetworkPolicy restricts the proxy to `consumerNamespaces` (and lets the operator
   scrape its health port). Identity is per CR because **the tag is the authorization** — sharing a
@@ -123,9 +158,9 @@ CI is radicle-native: `.radicle/native.yaml` runs `ci-build`, which cross-compil
 
 | Path                  | What                                                                 |
 | --------------------- | -------------------------------------------------------------------- |
-| `api/v1alpha1`        | `Tailnet` + `TailnetEgress` CRD types                                |
+| `api/v1alpha1`        | `Tailnet` + `TailnetEgress` + `TailnetIngress` CRD types             |
 | `cmd/operator`        | control plane: reconcilers, key rotation, resource builders          |
-| `cmd/agent`           | `tailnet-agent`: tsnet node, per-target TCP forwarders, health/probe |
+| `cmd/agent`           | `tailnet-agent`: tsnet node, egress/ingress TCP forwarders, health/probe |
 | `internal/headscale`  | Headscale REST client (Bearer)                                       |
 | `internal/{keys,ports,routes,naming}` | pure functions: key rotation, port assignment, route diagnosis, templating (all tested) |
 | `deploy/`             | generated CRDs, RBAC, manager Deployment (kustomize)                 |
