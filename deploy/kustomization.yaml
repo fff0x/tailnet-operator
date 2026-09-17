@@ -1,0 +1,13 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Organisation-free. Override the namespace, the image (both operator and OPERATOR_IMAGE) and add a
+# NetworkPolicy for the operator egress in your own overlay — the operator needs kube-apiserver, DNS
+# and the Headscale API, which is only cleanly expressible per CNI.
+resources:
+  - crds/tailnet.fr0st.dev_tailnets.yaml
+  - crds/tailnet.fr0st.dev_tailnetegresses.yaml
+  - rbac.yaml
+  - operator.yaml
+  - servicemonitor.yaml

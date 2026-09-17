@@ -1,0 +1,48 @@
+---
+version: "3"
+
+vars:
+  # Injected into the OCI version label; ci-build overrides this too.
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+
+tasks:
+  default:
+    cmds:
+      - task: lint
+      - task: test
+
+  build:
+    desc: Build both binaries
+    cmds:
+      - go build ./...
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test ./...
+
+  lint:
+    desc: gofmt + go vet
+    cmds:
+      # gofmt -l prints unformatted files; make it fail the task if the list is non-empty.
+      - test -z "$(gofmt -l cmd internal api)"
+      - go vet ./...
+
+  crds:
+    desc: Regenerate DeepCopy + CRDs from the Go types
+    cmds:
+      - go tool controller-gen object crd paths=./api/... output:crd:dir=deploy/crds
+
+  image:
+    desc: Build the combined image (operator + agent)
+    vars:
+      TAG: '{{.TAG | default "tailnet/operator:dev"}}'
+    cmds:
+      - "docker build --build-arg APP_VERSION={{.VERSION}} -t {{.TAG}} ."
+
+  install:
+    desc: Apply CRDs + operator to the current kube-context
+    deps: [crds]
+    cmds:
+      - kubectl apply -k deploy

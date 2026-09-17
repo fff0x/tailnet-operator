@@ -1,0 +1,20 @@
+---
+# A control server the cluster talks to. Cluster-scoped: one per Headscale, shared by every
+# TailnetEgress. The bootstrap API key is read-only; the operator mints and rotates its own working
+# key from it into <name>-apikey, which is not managed by GitOps.
+apiVersion: tailnet.fr0st.dev/v1alpha1
+kind: Tailnet
+metadata:
+  name: hcloud
+spec:
+  server: https://ts.example.com
+  # In-cluster REST endpoint if it differs from the public login URL.
+  apiUrl: http://headscale.tailnet-system.svc:8080
+  apiSecretRef:
+    name: headscale-bootstrap
+    key: apiKey
+  # apiKeyLifetime: 720h   # working key, rotated at half-life
+  # authKeyLifetime: 168h  # per-CR pre-auth key, rotated at half-life
+  proxy:
+    mtu: 1200
+    probeInterval: 5m

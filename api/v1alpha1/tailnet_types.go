@@ -1,0 +1,106 @@
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// SecretKeyRef points at one key in a Secret in the operator's own namespace.
+type SecretKeyRef struct {
+	Name string `json:"name"`
+	// +kubebuilder:default="apiKey"
+	Key string `json:"key,omitempty"`
+}
+
+// ProxySpec are the defaults for the per-CR agent pods this Tailnet spawns. A TailnetEgress may
+// override image and resources.
+type ProxySpec struct {
+	// Container image carrying the tailnet-agent binary. Empty → the operator's own image, so a
+	// single pushed image serves both control and data plane.
+	// +optional
+	Image string `json:"image,omitempty"`
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	// tsnet outer path MTU. 1200 matches the pilot (hcloud Cilium ~1320 outer).
+	// +kubebuilder:default=1200
+	// +kubebuilder:validation:Minimum=576
+	// +kubebuilder:validation:Maximum=1500
+	MTU int32 `json:"mtu,omitempty"`
+	// How often the agent probes each target for reachability. "0s" disables probing.
+	// +kubebuilder:default="5m"
+	ProbeInterval metav1.Duration `json:"probeInterval,omitempty"`
+}
+
+// TailnetSpec describes a control server and how the operator authenticates to it.
+type TailnetSpec struct {
+	// Login/control URL, becomes the agent's ControlURL (e.g. https://ts.example.com).
+	Server string `json:"server"`
+	// In-cluster URL for the REST API if it differs from Server. Empty → Server.
+	// +optional
+	APIURL string `json:"apiUrl,omitempty"`
+	// Bootstrap API key, read only. The operator mints its own rotating working key from it and
+	// never writes back here — so this may live in GitOps without a rotation fight.
+	APISecretRef SecretKeyRef `json:"apiSecretRef"`
+	// Lifetime of the self-minted working API key. Rotated at half-life.
+	// +kubebuilder:default="720h"
+	APIKeyLifetime metav1.Duration `json:"apiKeyLifetime,omitempty"`
+	// Lifetime of the reusable ephemeral pre-auth keys handed to agents. Rotated at half-life.
+	// +kubebuilder:default="168h"
+	AuthKeyLifetime metav1.Duration `json:"authKeyLifetime,omitempty"`
+	// +optional
+	Proxy ProxySpec `json:"proxy,omitempty"`
+	// Template for a TailnetEgress's tag when it sets none. {name} is the CR name.
+	// The tag IS the authorization — its grants decide which routes the node sees.
+	// +kubebuilder:default="tag:egress-{name}"
+	TagTemplate string `json:"tagTemplate,omitempty"`
+	// Template for a TailnetEgress's tailnet hostname when it sets none. {name} is the CR name.
+	// +kubebuilder:default="egress-{name}"
+	HostnameTemplate string `json:"hostnameTemplate,omitempty"`
+}
+
+// TailnetStatus is the observed state of the control server binding.
+type TailnetStatus struct {
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// Reported control-server version, for the operator log and the printcolumn.
+	// +optional
+	Version string `json:"version,omitempty"`
+	// Expiry of the current working API key, drives the ApiKeyValid condition and its metric.
+	// +optional
+	APIKeyExpiresAt *metav1.Time `json:"apiKeyExpiresAt,omitempty"`
+	// Conditions: ApiReachable, ApiKeyValid.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster,shortName=tn
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Server",type=string,JSONPath=`.spec.server`
+// +kubebuilder:printcolumn:name="ApiKey",type=string,JSONPath=`.status.conditions[?(@.type=="ApiKeyValid")].status`
+// +kubebuilder:printcolumn:name="Expires",type=date,JSONPath=`.status.apiKeyExpiresAt`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// Tailnet is a cluster-scoped binding to one control server.
+type Tailnet struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   TailnetSpec   `json:"spec,omitempty"`
+	Status TailnetStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// TailnetList is a list of Tailnet.
+type TailnetList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Tailnet `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&Tailnet{}, &TailnetList{})
+}

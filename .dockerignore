@@ -1,0 +1,11 @@
+# Keep the build context small: only go sources + manifests are needed to build.
+.git/
+.gitignore
+.direnv/
+result
+result-*
+bin/
+dist/
+deploy/
+docs/
+*.md
