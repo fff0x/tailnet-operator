@@ -53,7 +53,10 @@ func main() {
 		AuthKey:    authKey,
 		ControlURL: controlURL,
 		Store:      store, // memory only: every start is a clean registration
-		Logf:       log.Printf,
+		// Explicit Dir: the published image is scratch (no $HOME), so tsnet's default
+		// os.UserConfigDir() would fail. Point it at a writable mount (emptyDir) instead.
+		Dir:  env("TS_STATE_DIR", "/state"),
+		Logf: log.Printf,
 	}
 	defer ts.Close()
 

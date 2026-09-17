@@ -35,7 +35,10 @@ tasks:
       - go tool controller-gen object crd paths=./api/... output:crd:dir=deploy/crds
 
   image:
-    desc: Build the combined image (operator + agent)
+    # Bundle mode (ARG BUNDLE=1): this produces a FROM-scratch image carrying /bundle, NOT a
+    # `docker run`-able container. ci-build repacks it into the signed multi-arch index; the
+    # authoritative build is CI. Locally this is only good for inspecting the /bundle layout.
+    desc: Build the bundle image (operator + agent, all arches)
     vars:
       TAG: '{{.TAG | default "tailnet/operator:dev"}}'
     cmds:

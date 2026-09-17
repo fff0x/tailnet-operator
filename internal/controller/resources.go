@@ -124,16 +124,23 @@ func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns string) *networkingv1.Networ
 }
 
 // nonRoot is the pod/container security context. Userspace tsnet needs no privileges and no device,
-// so this satisfies PodSecurity "restricted", not just "baseline".
+// so this satisfies PodSecurity "restricted", not just "baseline". RunAsUser is explicit because the
+// published image is scratch (no USER directive): without a numeric uid the kubelet cannot verify
+// RunAsNonRoot and refuses the pod.
 func nonRoot() (*corev1.PodSecurityContext, *corev1.SecurityContext) {
 	yes := true
 	no := false
+	uid := int64(65532)
 	pod := &corev1.PodSecurityContext{
 		RunAsNonRoot:   &yes,
+		RunAsUser:      &uid,
+		RunAsGroup:     &uid,
 		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}
 	container := &corev1.SecurityContext{
 		RunAsNonRoot:             &yes,
+		RunAsUser:                &uid,
+		RunAsGroup:               &uid,
 		AllowPrivilegeEscalation: &no,
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
@@ -141,8 +148,8 @@ func nonRoot() (*corev1.PodSecurityContext, *corev1.SecurityContext) {
 }
 
 // agentDeployment runs one agent pod. Recreate, not RollingUpdate: two pods would briefly share one
-// tailnet hostname and fight over the identity. No volume beyond the ConfigMap — the tailnet state
-// is in-memory and ephemeral by design.
+// tailnet hostname and fight over the identity. The tailnet identity is in-memory and ephemeral by
+// design; the only volumes are the targets ConfigMap and a throwaway emptyDir for tsnet's work Dir.
 func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string) *appsv1.Deployment {
 	replicas := int32(1)
 	podSec, cSec := nonRoot()
@@ -170,9 +177,10 @@ func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string)
 				Spec: corev1.PodSpec{
 					SecurityContext: podSec,
 					Containers: []corev1.Container{{
-						Name:            "agent",
-						Image:           image,
-						Command:         []string{"tailnet-agent"},
+						Name:  "agent",
+						Image: image,
+						// Absolute path: the scratch image has no PATH and the binary sits at /.
+						Command:         []string{"/tailnet-agent"},
 						SecurityContext: cSec,
 						Resources:       res,
 						Env: []corev1.EnvVar{
@@ -181,6 +189,11 @@ func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string)
 							{Name: "TS_DEBUG_MTU", Value: fmt.Sprintf("%d", mtu)},
 							{Name: "PROBE_INTERVAL", Value: probeInterval},
 							{Name: "TARGETS_FILE", Value: configMount + "/" + targetsFile},
+							// scratch carries no CA bundle: point Go at the one we bundled into the image.
+							{Name: "SSL_CERT_FILE", Value: "/ca-certificates.crt"},
+							// tsnet needs a writable Dir; scratch has no $HOME, so use the state emptyDir.
+							{Name: "TS_STATE_DIR", Value: "/state"},
+							{Name: "HOME", Value: "/state"},
 							{Name: "TS_AUTHKEY", ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{Name: authKeySecretName(eg.Name)},
@@ -196,14 +209,24 @@ func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string)
 							InitialDelaySeconds: 10,
 							PeriodSeconds:       20,
 						},
-						VolumeMounts: []corev1.VolumeMount{{Name: "targets", MountPath: configMount, ReadOnly: true}},
+						VolumeMounts: []corev1.VolumeMount{
+							{Name: "targets", MountPath: configMount, ReadOnly: true},
+							{Name: "state", MountPath: "/state"},
+						},
 					}},
-					Volumes: []corev1.Volume{{
-						Name: "targets",
-						VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
-							LocalObjectReference: corev1.LocalObjectReference{Name: targetsConfigMapName(eg.Name)},
-						}},
-					}},
+					Volumes: []corev1.Volume{
+						{
+							Name: "targets",
+							VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{Name: targetsConfigMapName(eg.Name)},
+							}},
+						},
+						// Writable scratch space for tsnet's Dir (emptyDir is world-writable, uid-agnostic).
+						{
+							Name:         "state",
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+						},
+					},
 				},
 			},
 		},
