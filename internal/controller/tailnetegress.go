@@ -240,7 +240,7 @@ func (r *TailnetEgressReconciler) applyChildren(ctx context.Context, eg *tnv1.Ta
 		return err
 	}
 	dep := agentDeployment(eg, tn, ns, image)
-	np := egressNetworkPolicy(eg, ns)
+	np := egressNetworkPolicy(eg, ns, r.OperatorNamespace)
 	for _, obj := range []client.Object{cm, dep, np} {
 		if err := controllerutil.SetControllerReference(eg, obj, r.Scheme); err != nil {
 			return err
