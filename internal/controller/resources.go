@@ -101,9 +101,12 @@ func targetService(eg *tnv1.TailnetEgress, ns string, t tnv1.Target, listenPort 
 }
 
 // egressNetworkPolicy is the only thing keeping the proxy pointed at its allowed namespaces now that
-// it no longer lives inside the namespace it serves. Ingress is restricted to consumerNamespaces;
-// egress stays open, because the pod must reach DERP and its peers to work at all.
-func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns string) *networkingv1.NetworkPolicy {
+// it no longer lives inside the namespace it serves. Consumers reach the proxy ports; the operator
+// (in operatorNS) reaches only the health port, because it scrapes /status and /targets to fill the
+// CR status — without that second rule the operator's own probe is blocked and every target shows a
+// false NoGrant/unreachable even when the data plane works. Egress stays open, because the pod must
+// reach DERP and its peers to work at all.
+func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns, operatorNS string) *networkingv1.NetworkPolicy {
 	peers := make([]networkingv1.NetworkPolicyPeer, 0, len(eg.Spec.ConsumerNamespaces))
 	for _, cns := range eg.Spec.ConsumerNamespaces {
 		peers = append(peers, networkingv1.NetworkPolicyPeer{
@@ -112,13 +115,26 @@ func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns string) *networkingv1.Networ
 			},
 		})
 	}
+	health := intstr.FromInt32(agentHealthPort)
 	return &networkingv1.NetworkPolicy{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
 		ObjectMeta: metav1.ObjectMeta{Name: eg.Name, Namespace: ns, Labels: objLabels(eg.Name)},
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: selectorLabels(eg.Name)},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
-			Ingress:     []networkingv1.NetworkPolicyIngressRule{{From: peers}},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				// Consumers: full access to the proxy ports.
+				{From: peers},
+				// Operator: health/status scrape only.
+				{
+					From: []networkingv1.NetworkPolicyPeer{{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"kubernetes.io/metadata.name": operatorNS},
+						},
+					}},
+					Ports: []networkingv1.NetworkPolicyPort{{Port: &health}},
+				},
+			},
 		},
 	}
 }
