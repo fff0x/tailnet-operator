@@ -1,0 +1,27 @@
+---
+# One egress identity. Lives in the operator's namespace; consumerNamespaces decides who may reach
+# its Services. The tag must already be declared (with grants) in the tailnet policy — the operator
+# reports a missing grant, it never writes policy. Each target becomes a Service named after it, so
+# a consumer dials <target>.<operator-namespace>:<port>.
+apiVersion: tailnet.fr0st.dev/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: isd-dev
+  namespace: tailnet-system
+spec:
+  tailnetRef:
+    name: hcloud
+  # tag: tag:ns-isd-dev      # default: tag:egress-{name} from the Tailnet template
+  # hostname: egress-isd-dev # default: egress-{name}
+  consumerNamespaces:
+    - isd-dev
+  targets:
+    - name: informix-lx10777
+      address: 10.90.106.200
+      port: 1528
+    - name: informix-lx50381
+      address: 10.90.106.226
+      port: 1528
+    - name: rabbitmq-1
+      address: 10.100.31.10
+      port: 5672

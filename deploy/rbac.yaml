@@ -1,0 +1,76 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tailnet-operator
+  namespace: tailnet-system
+---
+# Cluster-scoped only for the cluster-scoped kind. Everything else is namespaced (Role below), so
+# taking over the operator does not hand out cluster-wide write on Secrets or Deployments.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tailnet-operator
+rules:
+  - apiGroups: ["tailnet.fr0st.dev"]
+    resources: [tailnets]
+    verbs: [get, list, watch]
+  - apiGroups: ["tailnet.fr0st.dev"]
+    resources: [tailnets/status]
+    verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tailnet-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tailnet-operator
+subjects:
+  - kind: ServiceAccount
+    name: tailnet-operator
+    namespace: tailnet-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tailnet-operator
+  namespace: tailnet-system
+rules:
+  - apiGroups: ["tailnet.fr0st.dev"]
+    resources: [tailnetegresses]
+    verbs: [get, list, watch]
+  - apiGroups: ["tailnet.fr0st.dev"]
+    resources: [tailnetegresses/status]
+    verbs: [get, update, patch]
+  - apiGroups: [""]
+    resources: [secrets, configmaps, services]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Scraped for /status and /targets to classify missing routes.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tailnet-operator
+  namespace: tailnet-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tailnet-operator
+subjects:
+  - kind: ServiceAccount
+    name: tailnet-operator
+    namespace: tailnet-system
