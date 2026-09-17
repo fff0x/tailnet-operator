@@ -31,7 +31,8 @@ spec:
       containers:
         - name: operator
           image: ghcr.io/fr0st-dev/tailnet-operator:latest
-          args: []
+          # Absolute command: the published image is scratch (no ENTRYPOINT/PATH); the binary is at /.
+          command: ["/tailnet-operator"]
           env:
             - name: POD_NAMESPACE
               valueFrom:
@@ -57,6 +58,9 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
+            # Explicit uid: scratch has no USER directive, so the kubelet needs a numeric non-root id.
+            runAsUser: 65532
+            runAsGroup: 65532
             capabilities:
               drop: [ALL]
           resources:

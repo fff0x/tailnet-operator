@@ -1,14 +1,24 @@
 # syntax=docker/dockerfile:1
-# tailnet-operator — one combined image carrying both static binaries:
-#   * tailnet-operator  (control plane)  — pod command: ["tailnet-operator"]  (ENTRYPOINT)
-#   * tailnet-agent     (data plane)     — pod command: ["tailnet-agent"]
-# A single image keeps the radicle `ci-build` one-Dockerfile model (build + push + sign) intact.
+# tailnet-operator — published as a signed multi-arch bundle via ci-build's `build_bundle`.
+# ci-build builds this ONCE on the native (arm64) broker, `crane export`s the rootfs, and packs each
+# /bundle/<app>/<os>/<arch>/ group into its own platform-annotated FROM-scratch image, then folds
+# them into a signed multi-arch index `${CAT}/<app>` (= tailnet/operator). No QEMU: Go cross-compiles
+# amd64+arm64 from the native builder (CGO off). See ~/projects/src/radicle/ci-broker/ci-build.
+#
+# The PUBLISHED image is scratch (the base below is discarded): no ENTRYPOINT, no shell, no
+# /etc/passwd, no CA bundle. Consequences, all handled in the pod specs / this file:
+#   * binaries sit flat at / — pod specs use absolute commands (/tailnet-operator, /tailnet-agent).
+#   * the agent (tsnet -> https control URL) needs ca-certificates.crt (bundled) + SSL_CERT_FILE.
+#   * both containers must set an explicit numeric runAsUser (scratch has no USER directive).
 
 ##
-## BUILD — both binaries, static (CGO off), reproducible
+## BUILD — both binaries, static (CGO off), cross-compiled for every target arch.
 ##
 # renovate: datasource=docker depName=golang versioning=docker
 FROM docker.io/library/golang:1.26-alpine AS build
+
+# ca-certificates supplies the root CA bundle the (scratch) agent needs for its HTTPS control URL.
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /src
 
@@ -18,36 +28,27 @@ RUN go mod download
 
 COPY . .
 
-# Static, stripped. tsnet needs no cgo.
+# Static, stripped. tsnet needs no cgo. Cross-compile both binaries for each target arch into the
+# /bundle/<app>/<os>/<arch>/ layout build_bundle consumes; drop the CA bundle beside them so the
+# scratch image carries it at /ca-certificates.crt.
 ENV CGO_ENABLED=0
-RUN go build -trimpath -ldflags="-s -w" -o /out/tailnet-operator ./cmd/operator && \
-    go build -trimpath -ldflags="-s -w" -o /out/tailnet-agent    ./cmd/agent
+RUN set -eux; \
+    for arch in amd64 arm64; do \
+      d="/bundle/operator/linux/$arch"; mkdir -p "$d"; \
+      GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$d/tailnet-operator" ./cmd/operator; \
+      GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$d/tailnet-agent"    ./cmd/agent; \
+      cp /etc/ssl/certs/ca-certificates.crt "$d/ca-certificates.crt"; \
+    done
 
 ##
-## MAIN — distroless static, nonroot
+## MAIN — FROM scratch carrying only /bundle. build_bundle repacks each (os,arch) group into its own
+## platform-annotated scratch image and folds them into a signed multi-arch index.
 ##
-# renovate: datasource=docker depName=gcr.io/distroless/static-debian12
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM scratch
 
+# Opt-in for ci-build's generic build_bundle mode.
+ARG BUNDLE=1
 ARG CAT=tailnet
 ARG APP=operator
-# Fallback for a direct `docker build`; `task image` / ci-build injects the real version.
-ARG APP_VERSION=0.0.0
-ARG APP_DESCRIPTION="tailnet-operator — per-namespace tailnet egress via CRD"
 
-LABEL \
-  org.opencontainers.image.vendor="this-is-fine" \
-  org.opencontainers.image.url="https://this-is-fine.io" \
-  org.opencontainers.image.authors="Max 'ff0x' Reineke <ff0x@this-is-fine.io>" \
-  org.opencontainers.image.title="${CAT}-${APP}" \
-  org.opencontainers.image.version="${APP_VERSION}" \
-  org.opencontainers.image.description="$APP_DESCRIPTION" \
-  org.opencontainers.image.licenses="MIT"
-
-COPY --from=build /out/tailnet-operator /usr/bin/tailnet-operator
-COPY --from=build /out/tailnet-agent    /usr/bin/tailnet-agent
-
-# distroless nonroot is uid 65532; pod specs set the exact command per container.
-USER 65532:65532
-
-ENTRYPOINT ["tailnet-operator"]
+COPY --from=build /bundle /bundle
