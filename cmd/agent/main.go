@@ -94,8 +94,9 @@ func main() {
 	fw := &forwarder{ts: ts, mode: mode, run: map[string]running{}}
 	defer fw.stopAll()
 
-	// First load must succeed; after that a bad reload is logged and the last good set stays up.
-	if err := fw.reload(ctx, targetsFile); err != nil {
+	// First load must parse; after that a bad reload is logged and the last good set stays up.
+	// A listener that failed to bind is retried by watchTargets.
+	if _, err := fw.reload(ctx, targetsFile); err != nil {
 		log.Fatalf("initial targets load: %v", err)
 	}
 	go watchTargets(ctx, targetsFile, fw)
@@ -105,10 +106,18 @@ func main() {
 	log.Printf("shutting down")
 }
 
-// running is one active listener and the cancel that tears it down.
+// running is one active listener and the cancel for its in-flight dials.
 type running struct {
 	t      target
+	ln     net.Listener
 	cancel context.CancelFunc
+}
+
+// stop closes the listener synchronously. A rename keeps the listen port (ports.Assign hands the
+// freed port to the new name), so the old socket must be gone before reload binds the new one.
+func (r running) stop() {
+	r.cancel()
+	r.ln.Close()
 }
 
 // forwarder owns the set of listeners and reconciles it against the desired targets. mode decides
@@ -133,10 +142,12 @@ func (f *forwarder) current() map[string]target {
 }
 
 // reload reads the targets file and applies the diff: stop removed/changed, start new/changed.
-func (f *forwarder) reload(ctx context.Context, path string) error {
+// err is a load/parse error (the running set is left untouched); pending counts targets whose
+// listener failed to bind — they are absent from run and reappear in the next diff.
+func (f *forwarder) reload(ctx context.Context, path string) (pending int, err error) {
 	desired, err := loadTargets(path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	start, stop := diffTargets(f.current(), desired)
 
@@ -144,27 +155,30 @@ func (f *forwarder) reload(ctx context.Context, path string) error {
 	defer f.mu.Unlock()
 	for _, name := range stop {
 		if r, ok := f.run[name]; ok {
-			r.cancel()
+			r.stop()
 			delete(f.run, name)
 			log.Printf("target %s: listener stopped", name)
 		}
 	}
 	for _, t := range start {
 		lctx, lcancel := context.WithCancel(ctx)
-		if err := f.listen(lctx, t); err != nil {
+		ln, err := f.listen(lctx, t)
+		if err != nil {
 			lcancel()
+			pending++
 			log.Printf("target %s: listen :%d failed: %v", t.Name, t.ListenPort, err)
 			continue
 		}
-		f.run[t.Name] = running{t: t, cancel: lcancel}
+		f.run[t.Name] = running{t: t, ln: ln, cancel: lcancel}
 		log.Printf("target %s: :%d -> %s:%d", t.Name, t.ListenPort, t.Address, t.Port)
 	}
-	return nil
+	return pending, nil
 }
 
 // listen binds one listen port and forwards every connection to the target. Egress binds a local
 // port; ingress binds the same port on the tailnet (tsnet netstack) so peers dial it by node name.
-func (f *forwarder) listen(ctx context.Context, t target) error {
+// The caller owns the returned listener and closes it via running.stop.
+func (f *forwarder) listen(ctx context.Context, t target) (net.Listener, error) {
 	var ln net.Listener
 	var err error
 	if f.mode == "ingress" {
@@ -173,22 +187,18 @@ func (f *forwarder) listen(ctx context.Context, t target) error {
 		ln, err = net.Listen("tcp", fmt.Sprintf(":%d", t.ListenPort))
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	go func() {
-		<-ctx.Done()
-		ln.Close()
-	}()
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
-				return // listener closed on ctx cancel
+				return // listener closed by running.stop
 			}
 			go f.handle(ctx, c, t)
 		}
 	}()
-	return nil
+	return ln, nil
 }
 
 func (f *forwarder) handle(ctx context.Context, client net.Conn, t target) {
@@ -219,7 +229,7 @@ func (f *forwarder) stopAll() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for name, r := range f.run {
-		r.cancel()
+		r.stop()
 		delete(f.run, name)
 	}
 }
@@ -246,11 +256,13 @@ func pipe(a, b net.Conn) {
 	b.Close()
 }
 
-// watchTargets re-applies the target set when the mounted file's mtime changes. Polling, not
-// fsnotify: a ConfigMap mount updates via a symlink swap that fsnotify handles awkwardly, the set is
-// tiny, and 10s of lag on adding a target is invisible in practice. ponytail: 10s poll, not events.
+// watchTargets re-applies the target set when the mounted file's mtime changes, and keeps retrying
+// while any listener failed to bind. Polling, not fsnotify: a ConfigMap mount updates via a symlink
+// swap that fsnotify handles awkwardly, the set is tiny, and 10s of lag on adding a target is
+// invisible in practice. ponytail: 10s poll, not events.
 func watchTargets(ctx context.Context, path string, fw *forwarder) {
 	var last time.Time
+	var retry bool
 	if fi, err := os.Stat(path); err == nil {
 		last = fi.ModTime()
 	}
@@ -262,13 +274,15 @@ func watchTargets(ctx context.Context, path string, fw *forwarder) {
 			return
 		case <-tick.C:
 			fi, err := os.Stat(path)
-			if err != nil || !fi.ModTime().After(last) {
+			if err != nil || (!retry && !fi.ModTime().After(last)) {
 				continue
 			}
 			last = fi.ModTime()
-			if err := fw.reload(ctx, path); err != nil {
+			pending, err := fw.reload(ctx, path)
+			if err != nil {
 				log.Printf("reload after change failed, keeping last good set: %v", err)
 			}
+			retry = pending > 0
 		}
 	}
 }

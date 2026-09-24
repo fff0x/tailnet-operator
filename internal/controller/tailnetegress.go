@@ -269,6 +269,30 @@ func (r *TailnetEgressReconciler) applyChildren(ctx context.Context, eg *tnv1.Ta
 			return err
 		}
 	}
+	return r.pruneServices(ctx, eg, ns)
+}
+
+// pruneServices deletes this CR's Services whose target no longer exists. The GC cannot do it: the
+// owner (the CR) lives on, only one entry of spec.targets went away — and the stale Service would
+// keep pointing at whatever now sits on its old listen port.
+func (r *TailnetEgressReconciler) pruneServices(ctx context.Context, eg *tnv1.TailnetEgress, ns string) error {
+	want := make(map[string]bool, len(eg.Spec.Targets))
+	for _, t := range eg.Spec.Targets {
+		want[t.Name] = true
+	}
+	var svcs corev1.ServiceList
+	if err := r.List(ctx, &svcs, client.InNamespace(ns), client.MatchingLabels(selectorLabels(eg.Name))); err != nil {
+		return err
+	}
+	for i := range svcs.Items {
+		svc := &svcs.Items[i]
+		if want[svc.Name] || !ownedBy(svc, eg.UID) {
+			continue
+		}
+		if err := r.Delete(ctx, svc, client.Preconditions{UID: &svc.UID}); client.IgnoreNotFound(err) != nil {
+			return err
+		}
+	}
 	return nil
 }
 
