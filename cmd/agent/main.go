@@ -91,7 +91,7 @@ func main() {
 	}
 	log.Printf("tailnet-agent up: mode=%s hostname=%s control=%s", mode, hostname, controlURL)
 
-	fw := &forwarder{ts: ts, mode: mode, run: map[string]running{}}
+	fw := &forwarder{ts: ts, mode: mode, run: map[string]running{}, changed: make(chan struct{}, 1)}
 	defer fw.stopAll()
 
 	// First load must parse; after that a bad reload is logged and the last good set stays up.
@@ -128,6 +128,9 @@ type forwarder struct {
 	mode string
 	mu   sync.Mutex
 	run  map[string]running
+	// changed gets a non-blocking signal whenever a listener was started; the prober drains it.
+	// nil (tests) is fine: the send falls through to default.
+	changed chan struct{}
 }
 
 // current returns a snapshot of the running targets (for diffing and for the probe).
@@ -171,6 +174,10 @@ func (f *forwarder) reload(ctx context.Context, path string) (pending int, err e
 		}
 		f.run[t.Name] = running{t: t, ln: ln, cancel: lcancel}
 		log.Printf("target %s: :%d -> %s:%d", t.Name, t.ListenPort, t.Address, t.Port)
+		select {
+		case f.changed <- struct{}{}:
+		default:
+		}
 	}
 	return pending, nil
 }
