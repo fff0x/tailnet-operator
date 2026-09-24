@@ -42,10 +42,12 @@ func (p *prober) snapshot() []probeResult {
 	return out
 }
 
-func (p *prober) set(r probeResult) {
+// replace swaps the whole result set, so a target that stopped running (removed, renamed, or failed
+// to bind) disappears instead of reporting its last result forever.
+func (p *prober) replace(results map[string]probeResult) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.results[r.Name] = r
+	p.results = results
 }
 
 // serveHealth runs the :9080 endpoints and, unless disabled, the periodic reachability probe.
@@ -98,35 +100,43 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// loop probes every target by dialling it and closing immediately. A connect is enough: egress
-// proves grant, route approval and the far-side path in one shot; ingress proves the in-cluster
-// backend answers. A refusal (RST) still counts as reachable — the host answered; only a timeout or
-// dial error is unreachable. fw.dial picks the right leg, so the probe mirrors real traffic.
+// probe dials every running target and closes immediately. A connect is enough: egress proves
+// grant, route approval and the far-side path in one shot; ingress proves the in-cluster backend
+// answers. A refusal (RST) still counts as reachable — the host answered; only a timeout or dial
+// error is unreachable. fw.dial picks the right leg, so the probe mirrors real traffic.
+func (p *prober) probe(ctx context.Context, fw *forwarder) {
+	cur := fw.current()
+	results := make(map[string]probeResult, len(cur))
+	for _, t := range cur {
+		dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		c, err := fw.dial(dctx, t)
+		cancel()
+		res := probeResult{Name: t.Name, LastProbe: time.Now()}
+		if err != nil {
+			res.Error = err.Error()
+		} else {
+			res.Reachable = true
+			c.Close()
+		}
+		results[t.Name] = res
+	}
+	p.replace(results)
+}
+
+// loop probes on the interval and whenever the forwarder started a listener, so a new or renamed
+// target is judged right away instead of after up to one full interval.
 func (p *prober) loop(ctx context.Context, ts *tsnet.Server, fw *forwarder, interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
-	probe := func() {
-		for _, t := range fw.current() {
-			dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			c, err := fw.dial(dctx, t)
-			cancel()
-			res := probeResult{Name: t.Name, LastProbe: time.Now()}
-			if err != nil {
-				res.Error = err.Error()
-			} else {
-				res.Reachable = true
-				c.Close()
-			}
-			p.set(res)
-		}
-	}
-	probe() // once at startup, don't wait a full interval for the first result
+	p.probe(ctx, fw) // once at startup, don't wait a full interval for the first result
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			probe()
+			p.probe(ctx, fw)
+		case <-fw.changed:
+			p.probe(ctx, fw)
 		}
 	}
 }
