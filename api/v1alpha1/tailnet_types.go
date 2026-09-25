@@ -31,6 +31,21 @@ type ProxySpec struct {
 	ProbeInterval metav1.Duration `json:"probeInterval,omitempty"`
 }
 
+// DNSSpec turns CR names into DNS records. The operator renders a CoreDNS `hosts` file into a
+// ConfigMap in its own namespace; the cluster mounts it into a resolver that is authoritative for
+// the zones involved (see README "DNS names"). Both fields empty → no records are rendered.
+type DNSSpec struct {
+	// Name of the ConfigMap (operator namespace, key "hosts") that receives the rendered hosts file.
+	// Empty → the feature is off and a previously rendered ConfigMap is removed.
+	// +optional
+	HostsConfigMap string `json:"hostsConfigMap,omitempty"`
+	// Template for a TailnetIngress's DNS name; {name} is the CR name, {namespace} its namespace.
+	// Keep the result one label below your gateway's wildcard certificate, e.g.
+	// "{name}-{namespace}.hcloud-1.tailnet.example.internal". Empty → ingresses get no name.
+	// +optional
+	IngressNameTemplate string `json:"ingressNameTemplate,omitempty"`
+}
+
 // TailnetSpec describes a control server and how the operator authenticates to it.
 type TailnetSpec struct {
 	// Login/control URL, becomes the agent's ControlURL (e.g. https://ts.example.com).
@@ -63,6 +78,9 @@ type TailnetSpec struct {
 	// Template for a TailnetIngress's tailnet (MagicDNS) hostname when it sets none. {name} is the CR name.
 	// +kubebuilder:default="ingress-{name}"
 	IngressHostnameTemplate string `json:"ingressHostnameTemplate,omitempty"`
+	// DNS records rendered from egress aliases and ingress names. Off when empty.
+	// +optional
+	DNS DNSSpec `json:"dns,omitempty"`
 }
 
 // TailnetStatus is the observed state of the control server binding.

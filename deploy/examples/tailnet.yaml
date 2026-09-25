@@ -18,3 +18,11 @@ spec:
   proxy:
     mtu: 1200
     probeInterval: 5m
+  # DNS names (optional). The operator renders a CoreDNS `hosts` file into this ConfigMap (operator
+  # namespace, key "hosts"): every TailnetEgress target alias -> its Service ClusterIP, every
+  # TailnetIngress dnsName -> the node's tailnet IPs. Mount it into a resolver that is authoritative
+  # for the zones (README "DNS names"). Keep the ingress name ONE label below your gateway's
+  # wildcard certificate, e.g. *.hcloud-1.tailnet.example.internal.
+  dns:
+    hostsConfigMap: tailnet-dns-hosts
+    ingressNameTemplate: "{name}-{namespace}.hcloud-1.tailnet.example.internal"

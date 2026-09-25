@@ -21,6 +21,8 @@ func ingress(name, ns string, exposes ...tnv1.Expose) *tnv1.TailnetIngress {
 func TestExposesConfigMap(t *testing.T) {
 	in := ingress("shop", "shop-dev",
 		tnv1.Expose{Name: "postgres", Port: 5432, Backend: tnv1.Backend{Service: "shop-db-rw", Port: 5555}},
+		// HTTPS funnel: the backend is the shared Envoy in another namespace.
+		tnv1.Expose{Name: "https", Port: 443, Backend: tnv1.Backend{Service: "envoy-tailnet", Namespace: "envoy-gateway-system", Port: 443}},
 	)
 	cm, err := exposesConfigMap(in, in.Namespace)
 	if err != nil {
@@ -30,17 +32,22 @@ func TestExposesConfigMap(t *testing.T) {
 	if err := json.Unmarshal([]byte(cm.Data[targetsFile]), &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("want 1 target, got %d", len(got))
+	want := []agentTarget{
+		{
+			Name:       "postgres",
+			Address:    "shop-db-rw.shop-dev.svc.cluster.local",
+			Port:       5555, // backend port
+			ListenPort: 5432, // tailnet listen port
+		},
+		{Name: "https", Address: "envoy-tailnet.envoy-gateway-system.svc.cluster.local", Port: 443, ListenPort: 443},
 	}
-	want := agentTarget{
-		Name:       "postgres",
-		Address:    "shop-db-rw.shop-dev.svc.cluster.local",
-		Port:       5555, // backend port
-		ListenPort: 5432, // tailnet listen port
+	if len(got) != len(want) {
+		t.Fatalf("want %d targets, got %d", len(want), len(got))
 	}
-	if got[0] != want {
-		t.Fatalf("target = %+v, want %+v", got[0], want)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("target[%d] = %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }
 

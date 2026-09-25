@@ -20,6 +20,13 @@ type Target struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port"`
+	// Extra DNS names that resolve to this target's Service ClusterIP, rendered into the Tailnet's
+	// dns.hostsConfigMap. Use them when the far end routes by name (TLS SNI, HTTP Host): a consumer
+	// dialling the alias sends the real hostname, and the L4 tunnel passes it through untouched.
+	// +optional
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
+	// +kubebuilder:validation:items:MaxLength=253
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 // TailnetEgressSpec is the desired egress into a tailnet for one identity.

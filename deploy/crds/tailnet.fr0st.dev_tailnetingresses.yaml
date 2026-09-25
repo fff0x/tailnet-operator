@@ -23,6 +23,9 @@ spec:
     - jsonPath: .status.hostname
       name: Hostname
       type: string
+    - jsonPath: .status.dnsName
+      name: DNS
+      type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
@@ -69,13 +72,21 @@ spec:
                         Backend is the in-cluster Service an Expose forwards to. Same namespace as the CR on purpose: a
                         tenant exposes exactly what lives in its own namespace, never a Service it does not own.
                       properties:
+                        namespace:
+                          description: |-
+                            Namespace of the Service. Empty → the CR's namespace. Set it to funnel HTTPS through a
+                            shared gateway (e.g. Envoy in envoy-gateway-system) so TLS terminates there while the tailnet
+                            identity stays per app.
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
                         port:
                           format: int32
                           maximum: 65535
                           minimum: 1
                           type: integer
                         service:
-                          description: Service name in the CR's own namespace.
+                          description: Service name; in the CR's own namespace unless
+                            Namespace is set.
                           pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                           type: string
                       required:
@@ -253,6 +264,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              dnsName:
+                description: |-
+                  DNS name rendered from the Tailnet's dns.ingressNameTemplate; resolves to TailnetIPs via the
+                  hosts ConfigMap. Empty when no template is set.
+                type: string
               exposes:
                 items:
                   description: ExposeStatus is the per-expose observed state.

@@ -36,9 +36,13 @@ func ingressObjLabels(crName string) map[string]string {
 func exposesConfigMap(in *tnv1.TailnetIngress, ns string) (*corev1.ConfigMap, error) {
 	out := make([]agentTarget, 0, len(in.Spec.Exposes))
 	for _, e := range in.Spec.Exposes {
+		bns := e.Backend.Namespace
+		if bns == "" {
+			bns = ns
+		}
 		out = append(out, agentTarget{
 			Name:       e.Name,
-			Address:    fmt.Sprintf("%s.%s.svc.cluster.local", e.Backend.Service, ns),
+			Address:    fmt.Sprintf("%s.%s.svc.cluster.local", e.Backend.Service, bns),
 			Port:       e.Backend.Port,
 			ListenPort: e.Port,
 		})

@@ -29,6 +29,20 @@ func ValidateTag(tag string) error {
 	return nil
 }
 
+// RenderDNSName substitutes {name} and {namespace}; everything else (zone, cluster) is literal in
+// the template, because the operator knows neither.
+func RenderDNSName(tmpl, name, namespace string) string {
+	return strings.ReplaceAll(Render(tmpl, name), "{namespace}", namespace)
+}
+
+// ValidateDNSName checks a rendered DNS name is a DNS-1123 subdomain (≤253, lowercase labels).
+func ValidateDNSName(n string) error {
+	if errs := apivalidation.IsDNS1123Subdomain(n); len(errs) > 0 {
+		return fmt.Errorf("dns name %q: %s", n, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 // ValidateHostname checks a tailnet hostname is a DNS-1123 label (≤63, no leading/trailing hyphen).
 func ValidateHostname(h string) error {
 	if errs := apivalidation.IsDNS1123Label(h); len(errs) > 0 {

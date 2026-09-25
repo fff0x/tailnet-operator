@@ -82,6 +82,22 @@ spec:
                 description: Lifetime of the reusable ephemeral pre-auth keys handed
                   to agents. Rotated at half-life.
                 type: string
+              dns:
+                description: DNS records rendered from egress aliases and ingress
+                  names. Off when empty.
+                properties:
+                  hostsConfigMap:
+                    description: |-
+                      Name of the ConfigMap (operator namespace, key "hosts") that receives the rendered hosts file.
+                      Empty → the feature is off and a previously rendered ConfigMap is removed.
+                    type: string
+                  ingressNameTemplate:
+                    description: |-
+                      Template for a TailnetIngress's DNS name; {name} is the CR name, {namespace} its namespace.
+                      Keep the result one label below your gateway's wildcard certificate, e.g.
+                      "{name}-{namespace}.hcloud-1.tailnet.example.internal". Empty → ingresses get no name.
+                    type: string
+                type: object
               hostnameTemplate:
                 default: egress-{name}
                 description: Template for a TailnetEgress's tailnet hostname when
