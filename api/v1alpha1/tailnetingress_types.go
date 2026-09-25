@@ -8,9 +8,15 @@ import (
 // Backend is the in-cluster Service an Expose forwards to. Same namespace as the CR on purpose: a
 // tenant exposes exactly what lives in its own namespace, never a Service it does not own.
 type Backend struct {
-	// Service name in the CR's own namespace.
+	// Service name; in the CR's own namespace unless Namespace is set.
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Service string `json:"service"`
+	// Namespace of the Service. Empty → the CR's namespace. Set it to funnel HTTPS through a
+	// shared gateway (e.g. Envoy in envoy-gateway-system) so TLS terminates there while the tailnet
+	// identity stays per app.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Namespace string `json:"namespace,omitempty"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port"`
@@ -74,6 +80,10 @@ type TailnetIngressStatus struct {
 	NodeID string `json:"nodeId,omitempty"`
 	// +optional
 	TailnetIPs []string `json:"tailnetIps,omitempty"`
+	// DNS name rendered from the Tailnet's dns.ingressNameTemplate; resolves to TailnetIPs via the
+	// hosts ConfigMap. Empty when no template is set.
+	// +optional
+	DNSName string `json:"dnsName,omitempty"`
 	// Expiry of the reusable pre-auth key currently in the agent's Secret.
 	// +optional
 	AuthKeyExpiresAt *metav1.Time `json:"authKeyExpiresAt,omitempty"`
@@ -91,6 +101,7 @@ type TailnetIngressStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Tag",type=string,JSONPath=`.spec.tag`
 // +kubebuilder:printcolumn:name="Hostname",type=string,JSONPath=`.status.hostname`
+// +kubebuilder:printcolumn:name="DNS",type=string,JSONPath=`.status.dnsName`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

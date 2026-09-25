@@ -93,9 +93,11 @@ port) — any TCP protocol, no HTTP route and no certificate needed (WireGuard i
 
 ```sh
 kubectl -n shop-dev get tailnetingress shop
-# NAME   TAG               HOSTNAME       READY   AGE
-# shop   tag:ingress-shop  ingress-shop   true    2m
+# NAME   TAG               HOSTNAME       DNS                                        READY   AGE
+# shop   tag:ingress-shop  ingress-shop   shop-shop-dev.hcloud-1.tailnet.example.internal   true    2m
 ```
+
+The `DNS` column is filled once the `Tailnet` has a `dns.ingressNameTemplate` — see [DNS names](#dns-names).
 
 ## Status
 
@@ -113,11 +115,89 @@ surface as a named reason per target instead of a hanging connection:
 `TailnetEgress.status.targets[]` carries a per-target `present`/`reachable` pair and a `reason` when
 a route is missing — `NotAdvertised`, `NotApproved` or `NoGrant` — pinpointing which of the four
 manual steps was skipped. `TailnetIngress.status.exposes[]` carries a per-expose `reachable` flag and
-an `Unreachable` reason when the in-cluster backend does not answer.
+an `Unreachable` reason when the in-cluster backend does not answer; `status.dnsName` is the
+rendered DNS name (empty without a template), `InvalidDNSName` the reason when the template renders
+something that is not a DNS name.
 
 Metrics (controller-runtime registry): `tailnet_apikey_expires_seconds`,
 `tailnetegress_authkey_expires_seconds`, `tailnetegress_routes_missing`,
 `tailnetingress_authkey_expires_seconds`, `tailnetingress_backends_unreachable`.
+
+## DNS names
+
+An L4 tunnel carries TLS untouched — so whatever name the client dials becomes the SNI/Host the far
+end sees. `informix.tailnet-system.svc` is fine for a database; it is wrong for `api.konzern.intern`
+behind a name-routing reverse proxy. Likewise a `TailnetIngress` node is only an IP until something
+gives it a name. Both get one declaratively; the operator **serves no DNS** — it renders a CoreDNS
+[`hosts`](https://coredns.io/plugins/hosts/) file into a ConfigMap, and the cluster mounts it into a
+resolver that is already authoritative for the zones:
+
+```yaml
+kind: Tailnet
+spec:
+  dns:
+    hostsConfigMap: tailnet-dns-hosts   # operator namespace, key "hosts"; empty → feature off
+    ingressNameTemplate: "{name}-{namespace}.hcloud-1.tailnet.example.internal"
+```
+
+| Source                                 | Record                                        |
+| -------------------------------------- | --------------------------------------------- |
+| `TailnetEgress.spec.targets[].aliases` | alias → the target Service's ClusterIP        |
+| `TailnetIngress` (template rendered)   | `status.dnsName` → the node's tailnet IPs     |
+
+```
+# managed by tailnet-operator (Tailnet hcloud) — do not edit
+10.43.12.7    api.konzern.intern
+100.64.0.42   shop-shop-dev.hcloud-1.tailnet.example.internal
+```
+
+Wire it into the CoreDNS that answers for those zones (in a Headscale setup typically the sidecar
+your split-DNS entry delegates `<cluster>.<domain>` to); mount the ConfigMap `optional: true` so
+the resolver starts before the operator has rendered anything:
+
+```corefile
+hcloud-1.tailnet.example.internal:53 {
+    hosts /etc/tailnet-dns/hosts { fallthrough }   # operator records win …
+    template IN A { answer "{{ .Name }} 30 IN A 10.0.0.80" }   # … the wildcard catches the rest
+}
+konzern.intern:53 {
+    hosts /etc/tailnet-dns/hosts { fallthrough }
+    forward . 10.90.0.53                           # everything else: the site's DNS
+}
+```
+
+Freshness is ConfigMap propagation (≤ ~1 min) plus the `hosts` reload (5 s). A name claimed by two
+CRs keeps the first (sorted by kind/namespace/name) and logs the loser. If the operator dies, the
+last file stays valid — the data path never depends on it.
+
+**Why one label.** A gateway's wildcard certificate `*.hcloud-1.<domain>` covers exactly one label,
+so `{name}-{namespace}.hcloud-1.<domain>` works with the certificate you already have, while
+`{name}.{namespace}.hcloud-1.<domain>` would need one per namespace. Which brings us to HTTPS:
+
+**HTTPS through a `TailnetIngress`.** The node is L4 and has no certificate — TLS still terminates
+at the shared gateway. What the ingress adds is a **per-app tailnet identity**: its own node, its own
+tag, its own grant, instead of every HTTP app hiding behind the gateway's single IP. Point an expose
+at the gateway's Service and give the tenant's HTTPRoute the rendered name:
+
+```yaml
+kind: TailnetIngress                      # in the tenant namespace
+spec:
+  exposes:
+    - name: https
+      port: 443
+      backend: { service: envoy-hcloud-1-tailnet, namespace: envoy-gateway-system, port: 443 }
+---
+kind: HTTPRoute
+spec:
+  parentRefs: [{ name: shared-gateway-tailnet, namespace: envoy-gateway-system, sectionName: hcloud-1-https }]
+  hostnames: ["shop-shop-dev.hcloud-1.tailnet.example.internal"]   # = status.dnsName
+```
+
+Peer → name → node IP (Headscale grant `dst = tag:ingress-shop`) → Envoy (SNI matches the wildcard,
+route by Host) → app. Envoy sees the agent pod as the client; authorisation is the tailnet policy's
+job here, not Envoy's. For plain TCP exposes the name simply resolves to the node and the peer dials
+`<dnsName>:<port>`. Note that in-cluster pods usually cannot route tailnet `100.x` addresses — ingress
+names are for tailnet peers, pods use the Service.
 
 ## How it works
 
@@ -136,6 +216,9 @@ server-side apply — no per-CR restart to add or remove a target:
   `host:port`; a NetworkPolicy restricts the proxy to `consumerNamespaces` (and lets the operator
   scrape its health port). Identity is per CR because **the tag is the authorization** — sharing a
   node between namespaces would collapse both grants onto it.
+- **Names.** A fourth reconciler folds egress aliases and ingress names into one CoreDNS `hosts`
+  ConfigMap per `Tailnet` (see [DNS names](#dns-names)); the resolver is the cluster's, not the
+  operator's.
 - **Policy stays in Git.** The operator reads the policy to pre-check the tag and to diagnose routes,
   but never writes it: a missing grant is a status line, an event and a metric.
 

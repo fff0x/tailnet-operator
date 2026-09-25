@@ -98,6 +98,14 @@ func main() {
 		l.Error(err, "setup TailnetIngress controller")
 		os.Exit(1)
 	}
+	if err := (&controller.TailnetDNSReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		OperatorNamespace: ns,
+	}).SetupWithManager(mgr); err != nil {
+		l.Error(err, "setup TailnetDNS controller")
+		os.Exit(1)
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		l.Error(err, "add healthz")

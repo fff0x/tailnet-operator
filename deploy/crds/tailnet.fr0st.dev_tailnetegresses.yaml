@@ -152,6 +152,16 @@ spec:
                       description: IPv4/IPv6 address or MagicDNS name of the host
                         at the far site.
                       type: string
+                    aliases:
+                      description: |-
+                        Extra DNS names that resolve to this target's Service ClusterIP, rendered into the Tailnet's
+                        dns.hostsConfigMap. Use them when the far end routes by name (TLS SNI, HTTP Host): a consumer
+                        dialling the alias sends the real hostname, and the L4 tunnel passes it through untouched.
+                      items:
+                        maxLength: 253
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                      type: array
                     name:
                       description: DNS label; used verbatim as the Service name, so
                         consumers dial <name>.<ns>:<port>.

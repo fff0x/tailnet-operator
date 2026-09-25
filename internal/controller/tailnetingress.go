@@ -78,6 +78,15 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.fail(ctx, &in, "InvalidHostname", err)
 	}
 	in.Status.Hostname = hostname
+	// DNS name: rendered here (this reconciler has the Tailnet), consumed by the DNS reconciler.
+	in.Status.DNSName = ""
+	if tmpl := tn.Spec.DNS.IngressNameTemplate; tmpl != "" {
+		dnsName := naming.RenderDNSName(tmpl, in.Name, in.Namespace)
+		if err := naming.ValidateDNSName(dnsName); err != nil {
+			return r.fail(ctx, &in, "InvalidDNSName", err)
+		}
+		in.Status.DNSName = dnsName
+	}
 
 	// TagKnown: refuse to mint for a tag the policy never declared (a typo mints a useless node).
 	policy, err := hs.GetPolicy(ctx)

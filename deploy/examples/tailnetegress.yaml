@@ -25,3 +25,11 @@ spec:
     - name: rabbitmq-1
       address: 10.100.31.10
       port: 5672
+    # A target that routes by name (TLS SNI / HTTP Host) behind a reverse proxy at the far site:
+    # consumers must dial the real hostname, so publish it as an alias of the Service ClusterIP via
+    # Tailnet.spec.dns.hostsConfigMap. The L4 tunnel passes the SNI through untouched.
+    - name: api-konzern
+      address: 10.90.200.10
+      port: 443
+      aliases:
+        - api.konzern.intern

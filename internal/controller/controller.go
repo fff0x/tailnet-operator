@@ -1,4 +1,4 @@
-// Package controller holds the two reconcilers and the resources they write. The operator only ever
+// Package controller holds the reconcilers (Tailnet, TailnetEgress, TailnetIngress, TailnetDNS) and the resources they write. The operator only ever
 // writes Kubernetes objects and talks to the Headscale REST API; it never speaks tailscale itself —
 // the agent does that, and reports back over HTTP, mirroring the tor-operator's split.
 package controller

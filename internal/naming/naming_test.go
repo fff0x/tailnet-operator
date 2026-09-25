@@ -39,6 +39,21 @@ func TestValidateTag(t *testing.T) {
 	}
 }
 
+func TestRenderDNSName(t *testing.T) {
+	got := RenderDNSName("{name}-{namespace}.hcloud-1.tailnet.example.internal", "shop", "webshop")
+	if want := "shop-webshop.hcloud-1.tailnet.example.internal"; got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	if err := ValidateDNSName(got); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	for _, s := range []string{"", "Shop.x", "a..b", "-a.b", "a.b-"} {
+		if err := ValidateDNSName(s); err == nil {
+			t.Errorf("ValidateDNSName(%q) expected error, got nil", s)
+		}
+	}
+}
+
 func TestValidateHostname(t *testing.T) {
 	if err := ValidateHostname("egress-isd-dev"); err != nil {
 		t.Errorf("unexpected error: %v", err)

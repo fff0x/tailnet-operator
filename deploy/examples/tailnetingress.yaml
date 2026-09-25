@@ -26,3 +26,13 @@ spec:
       backend:
         service: shop-redis
         port: 6379
+    # HTTPS funnel: TLS still terminates at the shared Envoy gateway (wildcard cert, HTTPRoute by
+    # Host), but the tailnet identity — and therefore the policy grant — is this app's own node.
+    # Requires Tailnet.spec.dns.ingressNameTemplate; the rendered status.dnsName resolves to this
+    # node and is the hostname the tenant puts on its HTTPRoute.
+    # - name: https
+    #   port: 443
+    #   backend:
+    #     service: envoy-hcloud-1-tailnet
+    #     namespace: envoy-gateway-system   # cross-namespace backend
+    #     port: 443
