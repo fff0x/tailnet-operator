@@ -34,7 +34,7 @@ Point the operator at your Headscale, using a bootstrap API key stored in a Secr
 apiVersion: tailnet.fr0st.dev/v1alpha1
 kind: Tailnet
 metadata:
-  name: hcloud
+  name: corp
 spec:
   server: https://ts.example.com                    # the agents' ControlURL
   apiUrl: http://headscale.tailnet-system.svc:8080  # in-cluster REST endpoint
@@ -50,24 +50,24 @@ a missing grant as a status reason rather than editing policy:
 apiVersion: tailnet.fr0st.dev/v1alpha1
 kind: TailnetEgress
 metadata:
-  name: isd-dev
+  name: billing-dev
   namespace: tailnet-system
 spec:
-  tailnetRef: { name: hcloud }
-  # tag: tag:ns-isd-dev       # default: tag:egress-{name} from the Tailnet template
-  consumerNamespaces: [isd-dev]
+  tailnetRef: { name: corp }
+  # tag: tag:ns-billing-dev       # default: tag:egress-{name} from the Tailnet template
+  consumerNamespaces: [billing-dev]
   targets:
-    - { name: informix-lx10777, address: 10.90.106.200, port: 1528 }
-    - { name: rabbitmq-1,       address: 10.100.31.10,  port: 5672 }
+    - { name: oracle-db-1, address: 10.0.10.20, port: 1521 }
+    - { name: broker-1,       address: 10.0.20.10,  port: 5672 }
 ```
 
-A workload in `isd-dev` then connects to `informix-lx10777.tailnet-system.svc:1528` — plain TCP in,
+A workload in `billing-dev` then connects to `oracle-db-1.tailnet-system.svc:1521` — plain TCP in,
 tailnet out.
 
 ```sh
-kubectl get tailnetegress isd-dev
+kubectl get tailnetegress billing-dev
 # NAME      TAG              HOSTNAME         READY   AGE
-# isd-dev   tag:ns-isd-dev   egress-isd-dev   true    2m
+# billing-dev   tag:ns-billing-dev   egress-billing-dev   true    2m
 ```
 
 Expose the other direction — an in-cluster Service *on* the tailnet — with a `TailnetIngress` in the
@@ -81,7 +81,7 @@ metadata:
   name: shop
   namespace: shop-dev
 spec:
-  tailnetRef: { name: hcloud }
+  tailnetRef: { name: corp }
   # tag: tag:ingress-shop     # default: tag:ingress-{name} from the Tailnet template
   exposes:
     - { name: postgres, port: 5432, backend: { service: shop-db-rw, port: 5432 } }
@@ -94,7 +94,7 @@ port) — any TCP protocol, no HTTP route and no certificate needed (WireGuard i
 ```sh
 kubectl -n shop-dev get tailnetingress shop
 # NAME   TAG               HOSTNAME       DNS                                        READY   AGE
-# shop   tag:ingress-shop  ingress-shop   shop-shop-dev.hcloud-1.tailnet.example.internal   true    2m
+# shop   tag:ingress-shop  ingress-shop   shop-shop-dev.prod-1.tailnet.example.internal   true    2m
 ```
 
 The `DNS` column is filled once the `Tailnet` has a `dns.ingressNameTemplate` — see [DNS names](#dns-names).
@@ -126,7 +126,7 @@ Metrics (controller-runtime registry): `tailnet_apikey_expires_seconds`,
 ## DNS names
 
 An L4 tunnel carries TLS untouched — so whatever name the client dials becomes the SNI/Host the far
-end sees. `informix.tailnet-system.svc` is fine for a database; it is wrong for `api.konzern.intern`
+end sees. `db.tailnet-system.svc` is fine for a database; it is wrong for `api.corp.example`
 behind a name-routing reverse proxy. Likewise a `TailnetIngress` node is only an IP until something
 gives it a name. Both get one declaratively; the operator **serves no DNS** — it renders a CoreDNS
 [`hosts`](https://coredns.io/plugins/hosts/) file into a ConfigMap, and the cluster mounts it into a
@@ -137,7 +137,7 @@ kind: Tailnet
 spec:
   dns:
     hostsConfigMap: tailnet-dns-hosts   # operator namespace, key "hosts"; empty → feature off
-    ingressNameTemplate: "{name}-{namespace}.hcloud-1.tailnet.example.internal"
+    ingressNameTemplate: "{name}-{namespace}.prod-1.tailnet.example.internal"
 ```
 
 | Source                                 | Record                                        |
@@ -146,9 +146,9 @@ spec:
 | `TailnetIngress` (template rendered)   | `status.dnsName` → the node's tailnet IPs     |
 
 ```
-# managed by tailnet-operator (Tailnet hcloud) — do not edit
-10.43.12.7    api.konzern.intern
-100.64.0.42   shop-shop-dev.hcloud-1.tailnet.example.internal
+# managed by tailnet-operator (Tailnet corp) — do not edit
+10.43.12.7    api.corp.example
+100.64.0.42   shop-shop-dev.prod-1.tailnet.example.internal
 ```
 
 Wire it into the CoreDNS that answers for those zones (in a Headscale setup typically the sidecar
@@ -156,13 +156,13 @@ your split-DNS entry delegates `<cluster>.<domain>` to); mount the ConfigMap `op
 the resolver starts before the operator has rendered anything:
 
 ```corefile
-hcloud-1.tailnet.example.internal:53 {
+prod-1.tailnet.example.internal:53 {
     hosts /etc/tailnet-dns/hosts { fallthrough }   # operator records win …
     template IN A { answer "{{ .Name }} 30 IN A 10.0.0.80" }   # … the wildcard catches the rest
 }
-konzern.intern:53 {
+corp.example:53 {
     hosts /etc/tailnet-dns/hosts { fallthrough }
-    forward . 10.90.0.53                           # everything else: the site's DNS
+    forward . 10.0.0.53                           # everything else: the site's DNS
 }
 ```
 
@@ -170,9 +170,9 @@ Freshness is ConfigMap propagation (≤ ~1 min) plus the `hosts` reload (5 s). A
 CRs keeps the first (sorted by kind/namespace/name) and logs the loser. If the operator dies, the
 last file stays valid — the data path never depends on it.
 
-**Why one label.** A gateway's wildcard certificate `*.hcloud-1.<domain>` covers exactly one label,
-so `{name}-{namespace}.hcloud-1.<domain>` works with the certificate you already have, while
-`{name}.{namespace}.hcloud-1.<domain>` would need one per namespace. Which brings us to HTTPS:
+**Why one label.** A gateway's wildcard certificate `*.prod-1.<domain>` covers exactly one label,
+so `{name}-{namespace}.prod-1.<domain>` works with the certificate you already have, while
+`{name}.{namespace}.prod-1.<domain>` would need one per namespace. Which brings us to HTTPS:
 
 **HTTPS through a `TailnetIngress`.** The node is L4 and has no certificate — TLS still terminates
 at the shared gateway. What the ingress adds is a **per-app tailnet identity**: its own node, its own
@@ -185,12 +185,12 @@ spec:
   exposes:
     - name: https
       port: 443
-      backend: { service: envoy-hcloud-1-tailnet, namespace: envoy-gateway-system, port: 443 }
+      backend: { service: envoy-prod-1-tailnet, namespace: envoy-gateway-system, port: 443 }
 ---
 kind: HTTPRoute
 spec:
-  parentRefs: [{ name: shared-gateway-tailnet, namespace: envoy-gateway-system, sectionName: hcloud-1-https }]
-  hostnames: ["shop-shop-dev.hcloud-1.tailnet.example.internal"]   # = status.dnsName
+  parentRefs: [{ name: shared-gateway-tailnet, namespace: envoy-gateway-system, sectionName: prod-1-https }]
+  hostnames: ["shop-shop-dev.prod-1.tailnet.example.internal"]   # = status.dnsName
 ```
 
 Peer → name → node IP (Headscale grant `dst = tag:ingress-shop`) → Envoy (SNI matches the wildcard,

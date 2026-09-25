@@ -21,7 +21,7 @@ type ProxySpec struct {
 	Image string `json:"image,omitempty"`
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
-	// tsnet outer path MTU. 1200 matches the pilot (hcloud Cilium ~1320 outer).
+	// tsnet outer path MTU. 1200 leaves headroom for a ~1320-byte outer path (typical cloud CNI overlay).
 	// +kubebuilder:default=1200
 	// +kubebuilder:validation:Minimum=576
 	// +kubebuilder:validation:Maximum=1500
@@ -41,7 +41,7 @@ type DNSSpec struct {
 	HostsConfigMap string `json:"hostsConfigMap,omitempty"`
 	// Template for a TailnetIngress's DNS name; {name} is the CR name, {namespace} its namespace.
 	// Keep the result one label below your gateway's wildcard certificate, e.g.
-	// "{name}-{namespace}.hcloud-1.tailnet.example.internal". Empty → ingresses get no name.
+	// "{name}-{namespace}.prod-1.tailnet.example.internal". Empty → ingresses get no name.
 	// +optional
 	IngressNameTemplate string `json:"ingressNameTemplate,omitempty"`
 }

@@ -5,7 +5,7 @@
 apiVersion: tailnet.fr0st.dev/v1alpha1
 kind: Tailnet
 metadata:
-  name: hcloud
+  name: corp
 spec:
   server: https://ts.example.com
   # In-cluster REST endpoint if it differs from the public login URL.
@@ -22,7 +22,7 @@ spec:
   # namespace, key "hosts"): every TailnetEgress target alias -> its Service ClusterIP, every
   # TailnetIngress dnsName -> the node's tailnet IPs. Mount it into a resolver that is authoritative
   # for the zones (README "DNS names"). Keep the ingress name ONE label below your gateway's
-  # wildcard certificate, e.g. *.hcloud-1.tailnet.example.internal.
+  # wildcard certificate, e.g. *.prod-1.tailnet.example.internal.
   dns:
     hostsConfigMap: tailnet-dns-hosts
-    ingressNameTemplate: "{name}-{namespace}.hcloud-1.tailnet.example.internal"
+    ingressNameTemplate: "{name}-{namespace}.prod-1.tailnet.example.internal"

@@ -11,7 +11,7 @@ func set(xs ...string) map[string]bool {
 }
 
 func TestClassify(t *testing.T) {
-	r := "10.90.106.200/32"
+	r := "10.0.10.20/32"
 	cases := []struct {
 		name                         string
 		netmap, advertised, approved map[string]bool
