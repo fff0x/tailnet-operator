@@ -1,6 +1,6 @@
 // Package ports assigns each target a stable local listen port. Stable is the point: a target keeps
 // its port across reconciles so the agent never rebinds a listener it did not have to, and two
-// targets on the same upstream port (two Informix on 1528) still get distinct local ports.
+// targets on the same upstream port (two databases on 1521) still get distinct local ports.
 package ports
 
 // Base is the first local listen port. Well above the well-known range, low enough to read at a

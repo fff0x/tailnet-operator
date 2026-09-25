@@ -12,7 +12,7 @@ metadata:
   namespace: shop-dev
 spec:
   tailnetRef:
-    name: hcloud
+    name: corp
   # tag: tag:ingress-shop      # default: tag:ingress-{name} from the Tailnet template
   # hostname: ingress-shop     # default: ingress-{name} (the node's MagicDNS label)
   exposes:
@@ -33,6 +33,6 @@ spec:
     # - name: https
     #   port: 443
     #   backend:
-    #     service: envoy-hcloud-1-tailnet
+    #     service: envoy-prod-1-tailnet
     #     namespace: envoy-gateway-system   # cross-namespace backend
     #     port: 443

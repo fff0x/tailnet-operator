@@ -95,7 +95,7 @@ spec:
                     description: |-
                       Template for a TailnetIngress's DNS name; {name} is the CR name, {namespace} its namespace.
                       Keep the result one label below your gateway's wildcard certificate, e.g.
-                      "{name}-{namespace}.hcloud-1.tailnet.example.internal". Empty → ingresses get no name.
+                      "{name}-{namespace}.prod-1.tailnet.example.internal". Empty → ingresses get no name.
                     type: string
                 type: object
               hostnameTemplate:
@@ -126,8 +126,8 @@ spec:
                     type: string
                   mtu:
                     default: 1200
-                    description: tsnet outer path MTU. 1200 matches the pilot (hcloud
-                      Cilium ~1320 outer).
+                    description: tsnet outer path MTU. 1200 leaves headroom for a
+                      ~1320-byte outer path (typical cloud CNI overlay).
                     format: int32
                     maximum: 1500
                     minimum: 576
