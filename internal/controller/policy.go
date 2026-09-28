@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -40,6 +41,10 @@ const (
 	rolePolicyRender = "policy-rendered"
 
 	policyRequeue = 5 * time.Minute
+	// policyRetry is the wait after the first rejected/failed write; it doubles per consecutive
+	// failure up to policyRequeue. A rejection caused by a node re-registering (test src "resolved
+	// to no IP addresses") clears within seconds; a broken base ends up at the regular 5-min cadence.
+	policyRetry = 15 * time.Second
 )
 
 // TailnetPolicyReconciler owns the control server's policy for a Tailnet: it renders the base
@@ -52,12 +57,34 @@ type TailnetPolicyReconciler struct {
 	Scheme            *runtime.Scheme
 	Recorder          record.EventRecorder
 	OperatorNamespace string
+
+	mu       sync.Mutex
+	failures map[string]int // consecutive rejected/failed writes per Tailnet
+}
+
+// retryAfter records one more failed write for the Tailnet and returns the backoff before the next try.
+func (r *TailnetPolicyReconciler) retryAfter(name string) time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.failures == nil {
+		r.failures = map[string]int{}
+	}
+	n := r.failures[name]
+	r.failures[name] = n + 1
+	return min(policyRetry<<min(n, 10), policyRequeue)
+}
+
+func (r *TailnetPolicyReconciler) clearRetry(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.failures, name)
 }
 
 func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 	var tn tnv1.Tailnet
 	if err := r.Get(ctx, req.NamespacedName, &tn); err != nil {
+		r.clearRetry(req.Name)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	spec := tn.Spec.Policy
@@ -185,6 +212,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	now := metav1.Now()
 	if liveHash == hash {
+		r.clearRetry(tn.Name)
 		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 			renderedCond(t)
 			if t.Status.Policy.AppliedHash != hash {
@@ -213,17 +241,19 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if len(emsg) > 1024 {
 			emsg = emsg[:1024] + "…"
 		}
+		retryIn := r.retryAfter(tn.Name)
 		if reason == "ApplyFailed" {
-			// Transport error (Headscale restarting, NetworkPolicy): transient, retried on the next requeue.
-			l.Info("policy write failed; previous policy stays active, retrying", "reason", reason, "error", err.Error())
+			// Transport error (Headscale restarting, NetworkPolicy): transient, retried with backoff.
+			l.Info("policy write failed; previous policy stays active, retrying", "reason", reason, "retryIn", retryIn, "error", err.Error())
 		} else {
-			l.Error(err, "policy write rejected; previous policy stays active", "reason", reason)
+			l.Error(err, "policy write rejected; previous policy stays active", "reason", reason, "retryIn", retryIn)
 		}
-		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
+		return ctrl.Result{RequeueAfter: retryIn}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 			renderedCond(t)
 			setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionFalse, reason, emsg)
 		})
 	}
+	r.clearRetry(tn.Name)
 	l.Info("policy applied", "tailnet", tn.Name, "hash", hash[:12], "tags", sum.Tags, "grants", sum.Grants, "routes", sum.Routes)
 	return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 		renderedCond(t)

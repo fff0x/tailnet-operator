@@ -387,6 +387,7 @@ Version notes:
 | Version | Notes |
 | --- | --- |
 | v0.2.0 | **Breaking:** API group `tailnet.fr0st.dev` → `tailnet.this-is-fine.io` (CRDs, RBAC, every CR). No conversion: apply new CRDs + RBAC + image and re-create the CRs under the new group, then delete the old CRDs — children (agents, keys, Services, hosts ConfigMap) are owned by the CR and are rebuilt, agents re-register (1–2 min). With Flux: one commit that swaps CRD files, RBAC, image and CRs; prune removes the old CRDs; tenant CRs follow in a second commit. Also: `ProbeFailed` reason, `status.tag` (TAG column), ingress DNS names publish IPv4 only, MagicDNS name restored to the hostname after a duplicate, transient `ApplyFailed` logged at info, status-only updates no longer re-trigger reconciles. |
+| v0.2.1 | Rejected/failed policy writes are retried with backoff (15 s doubling to 5 min) instead of a fixed 5 min — a base test whose `src` is momentarily unresolvable (node re-registering) heals in seconds. `tailnet_policy_apply_errors_total` therefore counts more increments per outage: raise `TailnetPolicyApplyErrors` to `>= 6` per 30 min (a permanent failure gets there in ~8 min, a hiccup under 4 min stays at ≤ 5). |
 | v0.1.1 | Route diagnosis is prefix-aware: a target covered by an aggregate advertised route (`10.0.0.0/24` for `10.0.10.20`) is `Present`, no longer `NotAdvertised`. |
 | v0.1.0 | `Tailnet.spec.policy` (operator-owned policy, DryRun/Apply), `TailnetIngress.spec.allowFrom`, new conditions `PolicyRendered`/`PolicyApplied`/`PolicyGranted`, reasons `PolicyPending`/`PolicyDenied`. Existing clusters are unaffected until `policy.baseConfigMap` is set. |
 | v0.0.6 | `Tailnet.spec.dns`, `TailnetEgress.spec.targets[].aliases`, `TailnetIngress.status.dnsName`, `Backend.namespace`. |
@@ -396,7 +397,7 @@ Version notes:
 | Situation | Action |
 | --- | --- |
 | A render is wrong but not yet applied (`DryRun`) | fix the base or the CR; nothing reached Headscale |
-| Headscale rejected the render (`PolicyApplied=False/PolicyRejected`) | the previous policy is still active; read the message, fix, the next reconcile retries |
+| Headscale rejected the render (`PolicyApplied=False/PolicyRejected`) | the previous policy is still active; read the message, fix — the write is retried with backoff (15 s doubling to 5 min), a base/CR change retries at once |
 | The operator must stop writing | `policy.mode: DryRun` — the operator only renders from now on |
 | Restore the Git policy on the server | `kubectl -n tailnet-system exec deploy/headscale -- headscale policy set -f /acl/policy` (mode DryRun first, or it is overwritten within 5 min) |
 | Leave database mode | `HEADSCALE_POLICY_MODE=file`, restart; the mounted file is authoritative again |

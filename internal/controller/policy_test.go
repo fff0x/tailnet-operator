@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -82,5 +83,24 @@ func TestPolicyOwned(t *testing.T) {
 	tn.Spec.Policy.Mode = "Apply"
 	if !policyOwned(tn) {
 		t.Fatal("Apply must be owned")
+	}
+}
+
+// A rejected write is retried at 15s doubling to the regular 5-min cadence; success resets the
+// backoff and each Tailnet counts on its own.
+func TestPolicyRetryBackoff(t *testing.T) {
+	r := &TailnetPolicyReconciler{}
+	want := []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, policyRequeue, policyRequeue}
+	for i, w := range want {
+		if got := r.retryAfter("a"); got != w {
+			t.Fatalf("attempt %d: got %s, want %s", i, got, w)
+		}
+	}
+	if got := r.retryAfter("b"); got != policyRetry {
+		t.Fatalf("other tailnet: got %s, want %s", got, policyRetry)
+	}
+	r.clearRetry("a")
+	if got := r.retryAfter("a"); got != policyRetry {
+		t.Fatalf("after clear: got %s, want %s", got, policyRetry)
 	}
 }
