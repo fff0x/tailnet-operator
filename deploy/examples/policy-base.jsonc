@@ -1,0 +1,47 @@
+// Base policy for an operator-owned Headscale policy (Tailnet.spec.policy.baseConfigMap).
+//
+// Humans own this file (Git → ConfigMap, key "policy"). The operator appends, never edits:
+//   tagOwners           one entry per TailnetEgress/TailnetIngress tag  (value: policy.tagOwners)
+//   autoApprovers.routes one /32 per TailnetEgress target              (value: policy.routeApprovers)
+//   grants              one per (TailnetEgress, port) and one per TailnetIngress with allowFrom
+// A key that already exists here wins. Comments are lost in the rendered copy; keep them here.
+//
+// The `tests` block is your seat belt: Headscale evaluates it before storing a policy and rejects
+// the write when a test fails — a broken base (or render) then never reaches the tailnet.
+{
+  "groups": {
+    "group:operator": ["alice@", "bob@"]
+  },
+
+  "tagOwners": {
+    // Subnet routers (your gateways). Everything the operator generates is owned by group:operator.
+    "tag:fabric": ["group:operator"]
+  },
+
+  "hosts": {
+    "site-dns": "10.0.0.53/32",
+    "site-lan": "10.0.0.0/24"
+  },
+
+  "autoApprovers": {
+    // The gateway advertises the site LAN; operator-generated /32s for egress targets land here too.
+    "routes": {
+      "10.0.0.0/24": ["tag:fabric"]
+    }
+  },
+
+  "grants": [
+    // Members: own devices, ICMP everywhere, the site resolver.
+    { "src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"] },
+    { "src": ["autogroup:member"], "dst": ["*"], "ip": ["icmp:*"] },
+    { "src": ["autogroup:member", "tag:fabric"], "dst": ["site-dns"], "ip": ["udp:53", "tcp:53"] },
+    // Kubernetes API through the gateway.
+    { "src": ["autogroup:member"], "dst": ["tag:fabric"], "ip": ["tcp:6443"] }
+  ],
+
+  "tests": [
+    // Must keep passing after every render — otherwise Headscale refuses the policy.
+    { "src": "alice@", "accept": ["site-dns:53"] },
+    { "src": "alice@", "deny": ["site-dns:22"] }
+  ]
+}

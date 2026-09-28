@@ -1,6 +1,8 @@
-// Package controller holds the reconcilers (Tailnet, TailnetEgress, TailnetIngress, TailnetDNS) and the resources they write. The operator only ever
-// writes Kubernetes objects and talks to the Headscale REST API; it never speaks tailscale itself —
-// the agent does that, and reports back over HTTP, mirroring the tor-operator's split.
+// Package controller holds the reconcilers (Tailnet, TailnetEgress, TailnetIngress, TailnetDNS,
+// TailnetPolicy) and the resources they write. The operator only ever writes Kubernetes objects and
+// talks to the Headscale REST API (nodes, keys and — when enabled — the policy document); it never
+// speaks tailscale itself — the agent does that, and reports back over HTTP, mirroring the
+// tor-operator's split.
 package controller
 
 import (
@@ -44,11 +46,24 @@ var (
 		Name: "tailnetingress_backends_unreachable",
 		Help: "Number of in-cluster backends a TailnetIngress agent could not reach.",
 	}, []string{"namespace", "name"})
+
+	// policyAppliedTimestamp is when the rendered policy was last written to (or found identical
+	// on) the control server; alert when it stops moving while the rendered hash changes.
+	policyAppliedTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "tailnet_policy_applied_timestamp_seconds",
+		Help: "Unix time the rendered policy was last applied to the control server.",
+	}, []string{"tailnet"})
+
+	// policyApplyErrors counts rejected or failed policy writes.
+	policyApplyErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "tailnet_policy_apply_errors_total",
+		Help: "Policy writes the control server rejected or that failed.",
+	}, []string{"tailnet"})
 )
 
 func init() {
 	metrics.Registry.MustRegister(apiKeyExpiresSeconds, authKeyExpiresSeconds, routesMissing,
-		ingressAuthKeyExpiresSeconds, ingressBackendsUnreachable)
+		ingressAuthKeyExpiresSeconds, ingressBackendsUnreachable, policyAppliedTimestamp, policyApplyErrors)
 }
 
 // ssaApply server-side-applies obj as the operator's field manager, taking ownership of the fields

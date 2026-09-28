@@ -26,6 +26,9 @@ spec:
     - jsonPath: .status.apiKeyExpiresAt
       name: Expires
       type: string
+    - jsonPath: .status.conditions[?(@.type=="PolicyApplied")].reason
+      name: Policy
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -114,6 +117,57 @@ spec:
                   Template for a TailnetIngress's tag when it sets none. {name} is the CR name.
                   The tag IS the authorization — its grants (dst = this tag) decide which peers may reach it.
                 type: string
+              policy:
+                description: Policy generation from CRs. Off when baseConfigMap is
+                  empty.
+                properties:
+                  baseConfigMap:
+                    description: |-
+                      ConfigMap (operator namespace, key "policy") holding the base policy in HuJSON.
+                      Empty → the feature is off and nothing is rendered or written.
+                    type: string
+                  ingressSourceAllowlist:
+                    description: |-
+                      Glob patterns a TailnetIngress.spec.allowFrom entry must match, e.g. ["group:*"]. Ingress CRs
+                      live in tenant namespaces, so this is the admin's veto over who tenants may grant access to.
+                      Empty → no ingress grants are generated (only the tag is declared).
+                    items:
+                      type: string
+                    type: array
+                  mode:
+                    default: DryRun
+                    description: |-
+                      DryRun renders into renderedConfigMap only; Apply also writes the control server when the
+                      live policy differs. Start with DryRun, compare, then switch.
+                    enum:
+                    - DryRun
+                    - Apply
+                    type: string
+                  renderedConfigMap:
+                    description: |-
+                      ConfigMap (operator namespace, key "policy") that receives the rendered policy for review.
+                      Empty → "<baseConfigMap>-rendered".
+                    type: string
+                  routeApprovers:
+                    description: |-
+                      Approvers for the generated autoApprovers.routes entries (one /32 per egress target), i.e.
+                      the tag your subnet routers carry, e.g. ["tag:fabric"]. Required when on.
+                    items:
+                      type: string
+                    type: array
+                  tagOwners:
+                    description: Owners of the generated tags (tagOwners value), e.g.
+                      ["group:operator"]. Required when on.
+                    items:
+                      type: string
+                    type: array
+                type: object
+                x-kubernetes-validations:
+                - message: policy.tagOwners and policy.routeApprovers are required
+                    when baseConfigMap is set
+                  rule: '!has(self.baseConfigMap) || size(self.baseConfigMap) == 0
+                    || (has(self.tagOwners) && size(self.tagOwners) > 0 && has(self.routeApprovers)
+                    && size(self.routeApprovers) > 0)'
               proxy:
                 description: |-
                   ProxySpec are the defaults for the per-CR agent pods this Tailnet spawns. A TailnetEgress may
@@ -222,7 +276,8 @@ spec:
                 format: date-time
                 type: string
               conditions:
-                description: 'Conditions: ApiReachable, ApiKeyValid.'
+                description: 'Conditions: ApiReachable, ApiKeyValid, PolicyRendered,
+                  PolicyApplied.'
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -284,6 +339,36 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              policy:
+                description: Policy rendering/apply state; conditions PolicyRendered
+                  and PolicyApplied carry the reasons.
+                properties:
+                  appliedAt:
+                    format: date-time
+                    type: string
+                  appliedHash:
+                    description: sha256 of the policy last written to (or found identical
+                      on) the control server.
+                    type: string
+                  generated:
+                    description: PolicyGenerated counts what the operator added to
+                      the base policy.
+                    properties:
+                      grants:
+                        type: integer
+                      routes:
+                        type: integer
+                      tags:
+                        type: integer
+                    required:
+                    - grants
+                    - routes
+                    - tags
+                    type: object
+                  renderedHash:
+                    description: sha256 of the canonical rendered policy.
+                    type: string
+                type: object
               version:
                 description: Reported control-server version, for the operator log
                   and the printcolumn.

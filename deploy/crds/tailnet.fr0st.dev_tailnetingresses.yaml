@@ -62,6 +62,14 @@ spec:
               mirror of TailnetEgress: instead of dialling out over the tailnet, the node listens on the tailnet
               and forwards inbound connections to in-cluster backends.
             properties:
+              allowFrom:
+                description: |-
+                  Peers allowed to reach this node (policy grant src), e.g. ["group:team-a"]. Only used when
+                  the Tailnet generates policy; every entry must match Tailnet.spec.policy.ingressSourceAllowlist,
+                  otherwise the CR gets PolicyDenied and no grant is written.
+                items:
+                  type: string
+                type: array
               exposes:
                 items:
                   description: Expose publishes one in-cluster backend on the tailnet

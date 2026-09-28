@@ -46,6 +46,41 @@ type DNSSpec struct {
 	IngressNameTemplate string `json:"ingressNameTemplate,omitempty"`
 }
 
+// PolicySpec lets the operator own the control server's policy (Headscale "database" policy mode).
+// A human-written base document stays in Git; the operator appends what the CRs imply — tagOwners
+// for every egress/ingress tag, autoApprovers for every egress target /32 and one grant per
+// (egress, port) or ingress — and writes the union with PUT /api/v1/policy. Base entries always win
+// over generated ones; the operator never removes anything from the base.
+// Exactly one operator may run in Apply mode against a control server.
+// +kubebuilder:validation:XValidation:rule="!has(self.baseConfigMap) || size(self.baseConfigMap) == 0 || (has(self.tagOwners) && size(self.tagOwners) > 0 && has(self.routeApprovers) && size(self.routeApprovers) > 0)",message="policy.tagOwners and policy.routeApprovers are required when baseConfigMap is set"
+type PolicySpec struct {
+	// ConfigMap (operator namespace, key "policy") holding the base policy in HuJSON.
+	// Empty → the feature is off and nothing is rendered or written.
+	// +optional
+	BaseConfigMap string `json:"baseConfigMap,omitempty"`
+	// ConfigMap (operator namespace, key "policy") that receives the rendered policy for review.
+	// Empty → "<baseConfigMap>-rendered".
+	// +optional
+	RenderedConfigMap string `json:"renderedConfigMap,omitempty"`
+	// DryRun renders into renderedConfigMap only; Apply also writes the control server when the
+	// live policy differs. Start with DryRun, compare, then switch.
+	// +kubebuilder:validation:Enum=DryRun;Apply
+	// +kubebuilder:default=DryRun
+	Mode string `json:"mode,omitempty"`
+	// Owners of the generated tags (tagOwners value), e.g. ["group:operator"]. Required when on.
+	// +optional
+	TagOwners []string `json:"tagOwners,omitempty"`
+	// Approvers for the generated autoApprovers.routes entries (one /32 per egress target), i.e.
+	// the tag your subnet routers carry, e.g. ["tag:fabric"]. Required when on.
+	// +optional
+	RouteApprovers []string `json:"routeApprovers,omitempty"`
+	// Glob patterns a TailnetIngress.spec.allowFrom entry must match, e.g. ["group:*"]. Ingress CRs
+	// live in tenant namespaces, so this is the admin's veto over who tenants may grant access to.
+	// Empty → no ingress grants are generated (only the tag is declared).
+	// +optional
+	IngressSourceAllowlist []string `json:"ingressSourceAllowlist,omitempty"`
+}
+
 // TailnetSpec describes a control server and how the operator authenticates to it.
 type TailnetSpec struct {
 	// Login/control URL, becomes the agent's ControlURL (e.g. https://ts.example.com).
@@ -81,10 +116,37 @@ type TailnetSpec struct {
 	// DNS records rendered from egress aliases and ingress names. Off when empty.
 	// +optional
 	DNS DNSSpec `json:"dns,omitempty"`
+	// Policy generation from CRs. Off when baseConfigMap is empty.
+	// +optional
+	Policy PolicySpec `json:"policy,omitempty"`
+}
+
+// PolicyGenerated counts what the operator added to the base policy.
+type PolicyGenerated struct {
+	Tags   int `json:"tags"`
+	Grants int `json:"grants"`
+	Routes int `json:"routes"`
+}
+
+// PolicyStatus reports the rendered and applied policy.
+type PolicyStatus struct {
+	// sha256 of the canonical rendered policy.
+	// +optional
+	RenderedHash string `json:"renderedHash,omitempty"`
+	// sha256 of the policy last written to (or found identical on) the control server.
+	// +optional
+	AppliedHash string `json:"appliedHash,omitempty"`
+	// +optional
+	AppliedAt *metav1.Time `json:"appliedAt,omitempty"`
+	// +optional
+	Generated PolicyGenerated `json:"generated,omitempty"`
 }
 
 // TailnetStatus is the observed state of the control server binding.
 type TailnetStatus struct {
+	// Policy rendering/apply state; conditions PolicyRendered and PolicyApplied carry the reasons.
+	// +optional
+	Policy *PolicyStatus `json:"policy,omitempty"`
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 	// Reported control-server version, for the operator log and the printcolumn.
@@ -93,7 +155,7 @@ type TailnetStatus struct {
 	// Expiry of the current working API key, drives the ApiKeyValid condition and its metric.
 	// +optional
 	APIKeyExpiresAt *metav1.Time `json:"apiKeyExpiresAt,omitempty"`
-	// Conditions: ApiReachable, ApiKeyValid.
+	// Conditions: ApiReachable, ApiKeyValid, PolicyRendered, PolicyApplied.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -107,6 +169,7 @@ type TailnetStatus struct {
 // +kubebuilder:printcolumn:name="ApiKey",type=string,JSONPath=`.status.conditions[?(@.type=="ApiKeyValid")].status`
 // Expires is a string, not a date: kubectl's date column renders future timestamps as "<invalid>".
 // +kubebuilder:printcolumn:name="Expires",type=string,JSONPath=`.status.apiKeyExpiresAt`
+// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.status.conditions[?(@.type=="PolicyApplied")].reason`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Tailnet is a cluster-scoped binding to one control server.

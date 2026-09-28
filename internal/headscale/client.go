@@ -179,6 +179,17 @@ func (c *Client) GetPolicy(ctx context.Context) (string, error) {
 	return out.Policy, nil
 }
 
+// SetPolicy replaces the whole policy document (HuJSON). Only accepted when the control server
+// runs policy mode "database"; in file mode Headscale rejects the write. The server validates the
+// document (syntax, references, the `tests` block) before storing it, so a rejected write leaves the
+// previous policy active.
+func (c *Client) SetPolicy(ctx context.Context, policy string) error {
+	body := struct {
+		Policy string `json:"policy"`
+	}{Policy: policy}
+	return c.do(ctx, http.MethodPut, "/api/v1/policy", body, nil)
+}
+
 // PrefixOf returns the prefix segment of a full API key secret (everything before the first "."),
 // which is what ExpireAPIKey and the list endpoint use to identify a key.
 func PrefixOf(fullKey string) string {

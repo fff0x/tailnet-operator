@@ -48,6 +48,11 @@ type TailnetIngressSpec struct {
 	Hostname string `json:"hostname,omitempty"`
 	// +kubebuilder:validation:MinItems=1
 	Exposes []Expose `json:"exposes"`
+	// Peers allowed to reach this node (policy grant src), e.g. ["group:team-a"]. Only used when
+	// the Tailnet generates policy; every entry must match Tailnet.spec.policy.ingressSourceAllowlist,
+	// otherwise the CR gets PolicyDenied and no grant is written.
+	// +optional
+	AllowFrom []string `json:"allowFrom,omitempty"`
 	// Override the Tailnet's default agent image.
 	// +optional
 	Image string `json:"image,omitempty"`
