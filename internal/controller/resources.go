@@ -10,7 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	tnv1 "fr0st.dev/tailnet-operator/api/v1alpha1"
+	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
 )
 
 const (
@@ -76,7 +76,7 @@ func authKeySecret(eg *tnv1.TailnetEgress, ns, key, expiresAt string) *corev1.Se
 			Name:        authKeySecretName(eg.Name),
 			Namespace:   ns,
 			Labels:      objLabels(eg.Name),
-			Annotations: map[string]string{"tailnet.fr0st.dev/expires-at": expiresAt},
+			Annotations: map[string]string{"tailnet.this-is-fine.io/expires-at": expiresAt},
 		},
 		Type:       corev1.SecretTypeOpaque,
 		StringData: map[string]string{authKeySecretKey: key},

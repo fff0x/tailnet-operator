@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"sort"
 	"strings"
 	"time"
@@ -12,13 +13,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tnv1 "fr0st.dev/tailnet-operator/api/v1alpha1"
+	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
 )
 
 // hostsKey is the ConfigMap key carrying the rendered hosts file.
@@ -135,6 +138,13 @@ func (r *TailnetDNSReconciler) collect(ctx context.Context, tn string) ([]hostEn
 		}
 		src := "tailnetingress/" + in.Namespace + "/" + in.Name
 		for _, ip := range in.Status.TailnetIPs {
+			// ponytail: IPv4 only. Clients prefer AAAA, but tsnet/netstack agents (and pod-hosted
+			// routers) do not accept tailnet IPv6 in the clusters seen so far, and Headscale's own
+			// MagicDNS publishes A records only — an AAAA here turns a working service into a
+			// connect timeout. Upgrade path: a Tailnet.spec.dns switch once IPv6 is verified.
+			if a, err := netip.ParseAddr(ip); err == nil && a.Is6() {
+				continue
+			}
 			out = append(out, hostEntry{Name: in.Status.DNSName, IP: ip, Source: src})
 		}
 	}
@@ -188,7 +198,7 @@ func (r *TailnetDNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("tailnetdns").
-		For(&tnv1.Tailnet{}).
+		For(&tnv1.Tailnet{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&corev1.ConfigMap{}).
 		Watches(&tnv1.TailnetEgress{}, handler.EnqueueRequestsFromMapFunc(byRef)).
 		Watches(&tnv1.TailnetIngress{}, handler.EnqueueRequestsFromMapFunc(byRef)).

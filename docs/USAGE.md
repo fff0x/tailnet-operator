@@ -35,7 +35,7 @@ domain `tailnet.example.internal`, tenant namespaces `billing-dev` / `billing`, 
 subnet router.*
 
 ```yaml
-apiVersion: tailnet.fr0st.dev/v1alpha1
+apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: TailnetEgress
 metadata:
   name: billing-dev            # = tenant name by convention; one CR per tenant namespace
@@ -67,6 +67,7 @@ Not `READY`? Read the reason of the target, then the condition:
 | `NotAdvertised` | no node advertises a route covering `10.0.10.20` | add the host (`/32`) or its subnet to the router's `--advertise-routes` |
 | `NotApproved` | advertised, not approved | `headscale nodes approve-routes …` or fix `autoApprovers` |
 | `NoGrant` | tag has no grant to `10.0.10.20/32:1521` | add the grant (file mode) — generated automatically when the operator owns the policy |
+| `ProbeFailed` | the operator could not scrape the agent (`/status`, `/targets`) | agent pod down, or a NetworkPolicy between operator and agent — the other reasons are unknown until this is fixed |
 | `TargetsReachable=False` | TCP to the host fails (`dial …: context deadline exceeded` in the agent log) | site firewall: router address → target port; host down |
 
 Isolation check — a pod in a *foreign* namespace must time out:
@@ -148,7 +149,7 @@ kubectl -n tailnet-system get svc -l app.kubernetes.io/instance=billing-dev
 port-forward.*
 
 ```yaml
-apiVersion: tailnet.fr0st.dev/v1alpha1
+apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: TailnetIngress
 metadata:
   name: shop

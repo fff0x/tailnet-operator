@@ -1,4 +1,4 @@
-module fr0st.dev/tailnet-operator
+module this-is-fine.io/tailnet-operator
 
 go 1.26.6
 

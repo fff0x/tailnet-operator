@@ -81,6 +81,9 @@ type TailnetIngressStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 	// +optional
 	Hostname string `json:"hostname,omitempty"`
+	// Effective tag (spec.tag or the Tailnet template) — what the policy and the node carry.
+	// +optional
+	Tag string `json:"tag,omitempty"`
 	// +optional
 	NodeID string `json:"nodeId,omitempty"`
 	// +optional
@@ -104,7 +107,7 @@ type TailnetIngressStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced,shortName=tning
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Tag",type=string,JSONPath=`.spec.tag`
+// +kubebuilder:printcolumn:name="Tag",type=string,JSONPath=`.status.tag`
 // +kubebuilder:printcolumn:name="Hostname",type=string,JSONPath=`.status.hostname`
 // +kubebuilder:printcolumn:name="DNS",type=string,JSONPath=`.status.dnsName`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`

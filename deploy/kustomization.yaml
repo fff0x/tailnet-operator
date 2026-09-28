@@ -6,9 +6,9 @@ kind: Kustomization
 # NetworkPolicy for the operator egress in your own overlay — the operator needs kube-apiserver, DNS
 # and the Headscale API, which is only cleanly expressible per CNI.
 resources:
-  - crds/tailnet.fr0st.dev_tailnets.yaml
-  - crds/tailnet.fr0st.dev_tailnetegresses.yaml
-  - crds/tailnet.fr0st.dev_tailnetingresses.yaml
+  - crds/tailnet.this-is-fine.io_tailnets.yaml
+  - crds/tailnet.this-is-fine.io_tailnetegresses.yaml
+  - crds/tailnet.this-is-fine.io_tailnetingresses.yaml
   - rbac.yaml
   - operator.yaml
   - servicemonitor.yaml

@@ -14,15 +14,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	tnv1 "fr0st.dev/tailnet-operator/api/v1alpha1"
-	"fr0st.dev/tailnet-operator/internal/headscale"
-	"fr0st.dev/tailnet-operator/internal/keys"
-	"fr0st.dev/tailnet-operator/internal/naming"
-	pol "fr0st.dev/tailnet-operator/internal/policy"
+	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	"this-is-fine.io/tailnet-operator/internal/headscale"
+	"this-is-fine.io/tailnet-operator/internal/keys"
+	"this-is-fine.io/tailnet-operator/internal/naming"
+	pol "this-is-fine.io/tailnet-operator/internal/policy"
 )
 
 // TailnetIngressReconciler turns one CR into an ingress identity: a tag, a pre-auth key and an agent
@@ -79,6 +81,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.fail(ctx, &in, "InvalidHostname", err)
 	}
 	in.Status.Hostname = hostname
+	in.Status.Tag = tag
 	// DNS name: rendered here (this reconciler has the Tailnet), consumed by the DNS reconciler.
 	in.Status.DNSName = ""
 	if tmpl := tn.Spec.DNS.IngressNameTemplate; tmpl != "" {
@@ -153,11 +156,14 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	r.associateNode(ctx, &in, hs, nodes, tag, hostname)
 
-	probes := r.scrapeExposeProbes(ctx, ns, in.Name)
-	r.computeExposeStatus(&in, probes)
+	probes, probeErr := r.scrapeExposeProbes(ctx, ns, in.Name)
+	r.computeExposeStatus(&in, probes, probeErr)
 
 	in.Status.ObservedGeneration = in.Generation
 	if err := r.Status().Update(ctx, &in); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return ctrl.Result{}, err
 	}
 	l.V(1).Info("reconciled", "hostname", hostname, "nodeId", in.Status.NodeID)
@@ -275,12 +281,13 @@ func (r *TailnetIngressReconciler) associateNode(ctx context.Context, in *tnv1.T
 			_ = hs.DeleteNode(ctx, candidates[i].ID)
 		}
 	}
+	restoreGivenName(ctx, hs, online, hostname)
 }
 
 // computeExposeStatus fills per-expose backend reachability and the roll-up conditions. Ready needs
 // a registered node AND every backend reachable — an ingress that no peer can dial to a dead backend
 // is not ready even though the node is up.
-func (r *TailnetIngressReconciler) computeExposeStatus(in *tnv1.TailnetIngress, probes map[string]bool) {
+func (r *TailnetIngressReconciler) computeExposeStatus(in *tnv1.TailnetIngress, probes map[string]bool, probeErr error) {
 	var es []tnv1.ExposeStatus
 	unreachable := 0
 	for _, e := range in.Spec.Exposes {
@@ -289,6 +296,9 @@ func (r *TailnetIngressReconciler) computeExposeStatus(in *tnv1.TailnetIngress, 
 		if !reachable {
 			reason = "Unreachable"
 			unreachable++
+		}
+		if probeErr != nil {
+			reason = string(probeFailed)
 		}
 		es = append(es, tnv1.ExposeStatus{
 			Name:       e.Name,
@@ -307,6 +317,9 @@ func (r *TailnetIngressReconciler) computeExposeStatus(in *tnv1.TailnetIngress, 
 		brStatus, brReason, brMsg = metav1.ConditionFalse, "Unreachable",
 			fmt.Sprintf("%d backend(s) not reachable — see status.exposes[].reason", unreachable)
 	}
+	if probeErr != nil {
+		brReason, brMsg = string(probeFailed), "agent not scraped: "+truncate(probeErr.Error(), 256)
+	}
 	setCond(&in.Status.Conditions, in.Generation, "BackendsReachable", brStatus, brReason, brMsg)
 
 	ready := unreachable == 0 && in.Status.NodeID != ""
@@ -319,23 +332,12 @@ func (r *TailnetIngressReconciler) computeExposeStatus(in *tnv1.TailnetIngress, 
 }
 
 // scrapeExposeProbes reads the agent's /targets and returns reachability by expose name.
-func (r *TailnetIngressReconciler) scrapeExposeProbes(ctx context.Context, ns, name string) map[string]bool {
-	out := map[string]bool{}
+func (r *TailnetIngressReconciler) scrapeExposeProbes(ctx context.Context, ns, name string) (map[string]bool, error) {
 	ip := r.agentPodIP(ctx, ns, name)
 	if ip == "" {
-		return out
+		return nil, errNoAgentPod
 	}
-	var results []struct {
-		Name      string `json:"name"`
-		Reachable bool   `json:"reachable"`
-	}
-	if err := scrapeJSON(ctx, ip, "targets", &results); err != nil {
-		return out
-	}
-	for _, res := range results {
-		out[res.Name] = res.Reachable
-	}
-	return out
+	return scrapeProbes(ctx, ip)
 }
 
 func (r *TailnetIngressReconciler) agentPodIP(ctx context.Context, ns, name string) string {
@@ -354,7 +356,7 @@ func (r *TailnetIngressReconciler) agentPodIP(ctx context.Context, ns, name stri
 // SetupWithManager registers the TailnetIngress controller and its owned children.
 func (r *TailnetIngressReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tnv1.TailnetIngress{}).
+		For(&tnv1.TailnetIngress{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&corev1.Secret{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&appsv1.Deployment{}).
