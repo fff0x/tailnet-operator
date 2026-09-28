@@ -63,8 +63,9 @@ You can maintain these by hand (policy mode `file`, the operator only *reads* th
 [`deploy/examples/policy-base.jsonc`](../deploy/examples/policy-base.jsonc) is a minimal base that
 works for both.
 
-Two things always stay outside the policy: the router must **advertise** the target route
-(`--advertise-routes=10.0.10.20/32,…` on the subnet router), and the site firewall must allow the
+Two things always stay outside the policy: the router must **advertise** a route covering the
+target (`--advertise-routes=10.0.10.20/32,…` per host, or an aggregate such as `10.0.10.0/24`; the
+generated `/32` approval is then redundant but harmless), and the site firewall must allow the
 router's address to the target port.
 
 ### 2.3 Policy mode
@@ -362,6 +363,7 @@ Version notes:
 
 | Version | Notes |
 | --- | --- |
+| v0.1.1 | Route diagnosis is prefix-aware: a target covered by an aggregate advertised route (`10.0.0.0/24` for `10.0.10.20`) is `Present`, no longer `NotAdvertised`. |
 | v0.1.0 | `Tailnet.spec.policy` (operator-owned policy, DryRun/Apply), `TailnetIngress.spec.allowFrom`, new conditions `PolicyRendered`/`PolicyApplied`/`PolicyGranted`, reasons `PolicyPending`/`PolicyDenied`. Existing clusters are unaffected until `policy.baseConfigMap` is set. |
 | v0.0.6 | `Tailnet.spec.dns`, `TailnetEgress.spec.targets[].aliases`, `TailnetIngress.status.dnsName`, `Backend.namespace`. |
 
