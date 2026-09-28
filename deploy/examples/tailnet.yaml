@@ -26,3 +26,13 @@ spec:
   dns:
     hostsConfigMap: tailnet-dns-hosts
     ingressNameTemplate: "{name}-{namespace}.prod-1.tailnet.example.internal"
+  # Operator-owned policy (optional; needs Headscale policy mode "database", docs/INSTALL.md §7).
+  # The base document (policy-base.jsonc) lives in Git -> ConfigMap; the operator appends tagOwners,
+  # /32 route approvals and grants derived from the CRs and writes the union. Start in DryRun, read
+  # <baseConfigMap>-rendered, then switch to Apply.
+  policy:
+    baseConfigMap: headscale-policy
+    mode: DryRun
+    tagOwners: [group:operator]
+    routeApprovers: [tag:fabric]
+    ingressSourceAllowlist: ["group:*"]

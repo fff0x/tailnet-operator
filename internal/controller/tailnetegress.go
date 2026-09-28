@@ -92,8 +92,11 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	tagKnown := strings.Contains(policy, `"`+tag+`"`)
 	if !tagKnown {
-		setCond(&eg.Status.Conditions, eg.Generation, "TagKnown", metav1.ConditionFalse, "Unknown",
-			fmt.Sprintf("tag %q is not declared in the tailnet policy; not minting a key", tag))
+		reason, msg := "Unknown", fmt.Sprintf("tag %q is not declared in the tailnet policy; not minting a key", tag)
+		if policyOwned(&tn) {
+			reason, msg = "PolicyPending", fmt.Sprintf("tag %q not yet in the live policy; the Tailnet policy controller declares it on its next apply", tag)
+		}
+		setCond(&eg.Status.Conditions, eg.Generation, "TagKnown", metav1.ConditionFalse, reason, msg)
 		setCond(&eg.Status.Conditions, eg.Generation, "Ready", metav1.ConditionFalse, "TagUnknown",
 			"tag not in policy")
 		eg.Status.ObservedGeneration = eg.Generation

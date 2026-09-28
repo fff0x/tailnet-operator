@@ -1,7 +1,8 @@
 ---
 # One egress identity. Lives in the operator's namespace; consumerNamespaces decides who may reach
-# its Services. The tag must already be declared (with grants) in the tailnet policy — the operator
-# reports a missing grant, it never writes policy. Each target becomes a Service named after it, so
+# its Services. The tag needs tagOwners, a /32 route approval and a grant per target in the tailnet
+# policy: with Tailnet.spec.policy the operator generates them; without it an admin writes them and
+# the operator only reports what is missing. Each target becomes a Service named after it, so
 # a consumer dials <target>.<operator-namespace>:<port>.
 apiVersion: tailnet.fr0st.dev/v1alpha1
 kind: TailnetEgress

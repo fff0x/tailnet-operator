@@ -53,7 +53,7 @@ func (r *TailnetDNSReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, err
 		}
 		for i := range cms.Items {
-			if cm := &cms.Items[i]; ownedBy(cm, tn.UID) {
+			if cm := &cms.Items[i]; ownedBy(cm, tn.UID) && cm.Labels[roleLabel] != rolePolicyRender {
 				if err := r.Delete(ctx, cm, client.Preconditions{UID: &cm.UID}); client.IgnoreNotFound(err) != nil {
 					return ctrl.Result{}, err
 				}
@@ -80,7 +80,7 @@ func (r *TailnetDNSReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	cm := &corev1.ConfigMap{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: r.OperatorNamespace, Labels: map[string]string{"app.kubernetes.io/managed-by": fieldOwner}},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: r.OperatorNamespace, Labels: map[string]string{"app.kubernetes.io/managed-by": fieldOwner, roleLabel: roleDNSHosts}},
 		Data:       map[string]string{hostsKey: renderHosts(tn.Name, entries, l.Info)},
 	}
 	if err := controllerutil.SetControllerReference(&tn, cm, r.Scheme); err != nil {

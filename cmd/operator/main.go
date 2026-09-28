@@ -106,6 +106,15 @@ func main() {
 		l.Error(err, "setup TailnetDNS controller")
 		os.Exit(1)
 	}
+	if err := (&controller.TailnetPolicyReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		Recorder:          mgr.GetEventRecorderFor("tailnet-operator"),
+		OperatorNamespace: ns,
+	}).SetupWithManager(mgr); err != nil {
+		l.Error(err, "setup TailnetPolicy controller")
+		os.Exit(1)
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		l.Error(err, "add healthz")
