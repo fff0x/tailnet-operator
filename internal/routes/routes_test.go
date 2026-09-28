@@ -13,7 +13,7 @@ func set(xs ...string) map[string]bool {
 func TestClassify(t *testing.T) {
 	r := "10.0.10.20/32"
 	cases := []struct {
-		name                         string
+		name, route                  string
 		netmap, advertised, approved map[string]bool
 		want                         Reason
 	}{
@@ -23,6 +23,28 @@ func TestClassify(t *testing.T) {
 			advertised: set(r),
 			approved:   set(r),
 			want:       Present,
+		},
+		{
+			name:       "covered by an aggregate LAN route",
+			netmap:     set("10.0.0.0/8"),
+			advertised: set("10.0.0.0/8"),
+			approved:   set("10.0.0.0/8"),
+			want:       Present,
+		},
+		{
+			name:       "aggregate advertised and approved, not in netmap",
+			netmap:     set("192.168.0.0/16"),
+			advertised: set("10.0.0.0/8"),
+			approved:   set("10.0.0.0/8"),
+			want:       NoGrant,
+		},
+		{
+			name:       "a narrower prefix does not cover a wider one",
+			route:      "10.0.10.0/24",
+			netmap:     set(),
+			advertised: set("10.0.10.20/32", "10.0.10.0/25"),
+			approved:   set(),
+			want:       NotAdvertised,
 		},
 		{
 			name:       "nobody advertises it",
@@ -47,7 +69,11 @@ func TestClassify(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		if got := Classify(r, c.netmap, c.advertised, c.approved); got != c.want {
+		route := c.route
+		if route == "" {
+			route = r
+		}
+		if got := Classify(route, c.netmap, c.advertised, c.approved); got != c.want {
 			t.Errorf("%s: got %q want %q", c.name, got, c.want)
 		}
 	}

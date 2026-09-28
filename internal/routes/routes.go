@@ -4,6 +4,8 @@
 // like Tailscale SaaS — both surface here as a named reason instead of a hanging connection.
 package routes
 
+import "net/netip"
+
 // Reason is why a target route is (not) usable. Empty means present.
 type Reason string
 
@@ -29,15 +31,36 @@ const (
 //
 // The order matters: a prefix can be advertised without being approved, and approved without
 // reaching a given node's netmap. Each check rules out the cause below it.
+//
+// A set "has" the route when any of its prefixes covers it: a target 10.0.10.20/32 is served by an
+// advertised 10.0.10.20/32 as well as by an aggregate 10.0.0.0/24 — Headscale distributes the
+// aggregate to every node whose grants overlap it, so exact-match would misreport NotAdvertised.
 func Classify(route string, netmap, advertised, approved map[string]bool) Reason {
-	if netmap[route] {
+	if covers(netmap, route) {
 		return Present
 	}
-	if !advertised[route] {
+	if !covers(advertised, route) {
 		return NotAdvertised
 	}
-	if !approved[route] {
+	if !covers(approved, route) {
 		return NotApproved
 	}
 	return NoGrant
+}
+
+func covers(set map[string]bool, route string) bool {
+	if set[route] {
+		return true
+	}
+	want, err := netip.ParsePrefix(route)
+	if err != nil {
+		return false
+	}
+	for s := range set {
+		p, err := netip.ParsePrefix(s)
+		if err == nil && p.Bits() <= want.Bits() && p.Contains(want.Addr()) {
+			return true
+		}
+	}
+	return false
 }
