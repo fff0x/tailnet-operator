@@ -2,7 +2,7 @@
 # A control server the cluster talks to. Cluster-scoped: one per Headscale, shared by every
 # TailnetEgress. The bootstrap API key is read-only; the operator mints and rotates its own working
 # key from it into <name>-apikey, which is not managed by GitOps.
-apiVersion: tailnet.fr0st.dev/v1alpha1
+apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: Tailnet
 metadata:
   name: corp

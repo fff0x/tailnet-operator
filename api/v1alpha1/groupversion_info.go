@@ -8,7 +8,7 @@
 // control server, its API and image all come from the CR. That is the whole point — the operator is
 // meant to run against any Headscale.
 // +kubebuilder:object:generate=true
-// +groupName=tailnet.fr0st.dev
+// +groupName=tailnet.this-is-fine.io
 package v1alpha1
 
 import (
@@ -17,7 +17,7 @@ import (
 )
 
 // GroupVersion is the API group/version for all kinds in this package.
-var GroupVersion = schema.GroupVersion{Group: "tailnet.fr0st.dev", Version: "v1alpha1"}
+var GroupVersion = schema.GroupVersion{Group: "tailnet.this-is-fine.io", Version: "v1alpha1"}
 
 // SchemeBuilder registers the kinds into a runtime.Scheme.
 var SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}

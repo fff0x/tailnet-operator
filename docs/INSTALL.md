@@ -86,13 +86,16 @@ kubectl -n tailnet-system rollout status deploy/tailnet-operator
 
 `deploy/` is organisation-free. In your own overlay set the image (both the container image and
 `OPERATOR_IMAGE`, which the agents use), and add a NetworkPolicy for the operator: it needs the
-kube-apiserver, cluster DNS and the Headscale API. Run **one replica** — the operator holds no
+kube-apiserver, cluster DNS, the Headscale API and the agent pods' health port (`:8080`, for the
+route/probe diagnosis — otherwise every CR reports `ProbeFailed`). With Cilium note that
+`toEndpoints` selectors are **namespace-scoped**: to reach ingress agents in tenant namespaces add
+`k8s:io.kubernetes.pod.namespace: {operator: Exists}` to the selector. Run **one replica** — the operator holds no
 lease, and two would race the key rotation (and, in [§7](#7-operator-owned-policy), the policy).
 
 Then bind the cluster to your control server:
 
 ```yaml
-apiVersion: tailnet.fr0st.dev/v1alpha1
+apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: Tailnet
 metadata:
   name: corp
@@ -120,7 +123,7 @@ exists and the API answers. The `POLICY` column stays empty until [§7](#7-opera
 3. Apply the CR **in the operator namespace** (egress CRs are admin resources):
 
 ```yaml
-apiVersion: tailnet.fr0st.dev/v1alpha1
+apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: TailnetEgress
 metadata:
   name: billing-dev
@@ -229,7 +232,7 @@ the last file stays valid — the data path never depends on it.
 A `TailnetIngress` is a plain-TCP node on the tailnet. For TCP services nothing else is needed:
 
 ```yaml
-apiVersion: tailnet.fr0st.dev/v1alpha1
+apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: TailnetIngress
 metadata:
   name: shop
@@ -320,7 +323,10 @@ with an empty policy table Headscale answers `GET /api/v1/policy` with 500 and a
 
 1. Add a `tests` block to the base (see the example) — Headscale rejects any write whose tests fail.
 2. Set `policy.mode: database` in the Headscale config (`HEADSCALE_POLICY_MODE=database`); keep the
-   file mounted for the import and for rollback.
+   file mounted for the import and for rollback. If Stakater Reloader (or similar) restarts Headscale
+   on ConfigMap changes, exclude the policy ConfigMap (`configmap.reloader.stakater.com/reload` with
+   an explicit list instead of `reloader.stakater.com/auto`) — in database mode a base edit needs no
+   restart, and every restart is a policy-less window plus `ApplyFailed` noise.
 3. Restart Headscale and import immediately:
 
    ```sh
@@ -353,6 +359,23 @@ does not change (the union is the same), but the base gets shorter and cannot dr
 metrics `tailnet_policy_applied_timestamp_seconds` and `tailnet_policy_apply_errors_total` back an
 alert (`time() - applied > 900` while `renderedHash != appliedHash`).
 
+### 7.5 Base `tests` — what they can and cannot assert
+
+Headscale evaluates the base's `tests` on every write, including the operator's `PUT`. A failing
+test rejects the whole document (`PolicyApplied=False/PolicyRejected`) and the previous policy
+stays live. Rules found on Headscale v0.29:
+
+- `dst` must be a single host or IP (`"site-dns:53"`), no CIDR.
+- `src` must resolve to **existing nodes** — a generated tag has no node until the operator applied
+  the tag, so it deadlocks as `src`. Use long-lived tagged nodes (a router, a bot).
+- A member `src` (`alice@`) evaluates as ALLOWED for every `dst` and discriminates nothing.
+- The base must pass `headscale policy check -f` **on its own** (that is also the rollback import), so
+  tests cannot assert generated grants — only that the base never widens what a tenant proxy may do.
+
+```sh
+kubectl -n tailnet-system exec -i deploy/headscale -c headscale -- headscale policy check -f /dev/stdin < policy.jsonc
+```
+
 ## 8. Upgrade
 
 1. Apply the new CRDs first (`deploy/crds/`), then the Deployment with the new image (operator and
@@ -363,6 +386,7 @@ Version notes:
 
 | Version | Notes |
 | --- | --- |
+| v0.2.0 | **Breaking:** API group `tailnet.fr0st.dev` → `tailnet.this-is-fine.io` (CRDs, RBAC, every CR). No conversion: apply new CRDs + RBAC + image and re-create the CRs under the new group, then delete the old CRDs — children (agents, keys, Services, hosts ConfigMap) are owned by the CR and are rebuilt, agents re-register (1–2 min). With Flux: one commit that swaps CRD files, RBAC, image and CRs; prune removes the old CRDs; tenant CRs follow in a second commit. Also: `ProbeFailed` reason, `status.tag` (TAG column), ingress DNS names publish IPv4 only, MagicDNS name restored to the hostname after a duplicate, transient `ApplyFailed` logged at info, status-only updates no longer re-trigger reconciles. |
 | v0.1.1 | Route diagnosis is prefix-aware: a target covered by an aggregate advertised route (`10.0.0.0/24` for `10.0.10.20`) is `Present`, no longer `NotAdvertised`. |
 | v0.1.0 | `Tailnet.spec.policy` (operator-owned policy, DryRun/Apply), `TailnetIngress.spec.allowFrom`, new conditions `PolicyRendered`/`PolicyApplied`/`PolicyGranted`, reasons `PolicyPending`/`PolicyDenied`. Existing clusters are unaffected until `policy.baseConfigMap` is set. |
 | v0.0.6 | `Tailnet.spec.dns`, `TailnetEgress.spec.targets[].aliases`, `TailnetIngress.status.dnsName`, `Backend.namespace`. |

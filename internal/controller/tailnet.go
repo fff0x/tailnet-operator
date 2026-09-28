@@ -12,18 +12,20 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	tnv1 "fr0st.dev/tailnet-operator/api/v1alpha1"
-	"fr0st.dev/tailnet-operator/internal/headscale"
-	"fr0st.dev/tailnet-operator/internal/keys"
+	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	"this-is-fine.io/tailnet-operator/internal/headscale"
+	"this-is-fine.io/tailnet-operator/internal/keys"
 )
 
 const (
-	annExpiresAt = "tailnet.fr0st.dev/expires-at"
-	annPrefix    = "tailnet.fr0st.dev/prefix"
+	annExpiresAt = "tailnet.this-is-fine.io/expires-at"
+	annPrefix    = "tailnet.this-is-fine.io/prefix"
 	apiKeyData   = "apiKey"
 )
 
@@ -206,6 +208,9 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	apiKeyExpiresSeconds.WithLabelValues(tn.Name).Set(time.Until(exp).Seconds())
 
 	if err := r.Status().Update(ctx, &tn); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil // another controller wrote the status; re-read and retry
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -235,7 +240,7 @@ func setCond(conds *[]metav1.Condition, gen int64, t string, status metav1.Condi
 // SetupWithManager registers the Tailnet controller.
 func (r *TailnetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tnv1.Tailnet{}).
+		For(&tnv1.Tailnet{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&corev1.Secret{}).
 		Complete(r)
 }

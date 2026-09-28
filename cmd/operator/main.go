@@ -19,8 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	tnv1 "fr0st.dev/tailnet-operator/api/v1alpha1"
-	"fr0st.dev/tailnet-operator/internal/controller"
+	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	"this-is-fine.io/tailnet-operator/internal/controller"
 )
 
 func main() {

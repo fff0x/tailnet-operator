@@ -4,27 +4,24 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
-  name: tailnetingresses.tailnet.fr0st.dev
+  name: tailnetegresses.tailnet.this-is-fine.io
 spec:
-  group: tailnet.fr0st.dev
+  group: tailnet.this-is-fine.io
   names:
-    kind: TailnetIngress
-    listKind: TailnetIngressList
-    plural: tailnetingresses
+    kind: TailnetEgress
+    listKind: TailnetEgressList
+    plural: tailnetegresses
     shortNames:
-    - tning
-    singular: tailnetingress
+    - tneg
+    singular: tailnetegress
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.tag
+    - jsonPath: .status.tag
       name: Tag
       type: string
     - jsonPath: .status.hostname
       name: Hostname
-      type: string
-    - jsonPath: .status.dnsName
-      name: DNS
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
@@ -36,8 +33,8 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          TailnetIngress exposes in-cluster L4 services on the tailnet as one tsnet node with a MagicDNS
-          name. It lives in the tenant namespace; the tag's grants decide which tailnet peers may reach it.
+          TailnetEgress is a per-identity egress into a Tailnet. It lives in the operator's namespace; a
+          NetworkPolicy decides which namespaces may use it.
         properties:
           apiVersion:
             description: |-
@@ -57,72 +54,19 @@ spec:
           metadata:
             type: object
           spec:
-            description: |-
-              TailnetIngressSpec exposes in-cluster L4 services on the tailnet as one tsnet node. It is the
-              mirror of TailnetEgress: instead of dialling out over the tailnet, the node listens on the tailnet
-              and forwards inbound connections to in-cluster backends.
+            description: TailnetEgressSpec is the desired egress into a tailnet for
+              one identity.
             properties:
-              allowFrom:
-                description: |-
-                  Peers allowed to reach this node (policy grant src), e.g. ["group:team-a"]. Only used when
-                  the Tailnet generates policy; every entry must match Tailnet.spec.policy.ingressSourceAllowlist,
-                  otherwise the CR gets PolicyDenied and no grant is written.
+              consumerNamespaces:
+                description: Namespaces whose pods may reach this proxy's Services
+                  (NetworkPolicy ingress).
                 items:
                   type: string
-                type: array
-              exposes:
-                items:
-                  description: Expose publishes one in-cluster backend on the tailnet
-                    node, listening on Port.
-                  properties:
-                    backend:
-                      description: |-
-                        Backend is the in-cluster Service an Expose forwards to. Same namespace as the CR on purpose: a
-                        tenant exposes exactly what lives in its own namespace, never a Service it does not own.
-                      properties:
-                        namespace:
-                          description: |-
-                            Namespace of the Service. Empty → the CR's namespace. Set it to funnel HTTPS through a
-                            shared gateway (e.g. Envoy in envoy-gateway-system) so TLS terminates there while the tailnet
-                            identity stays per app.
-                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                          type: string
-                        port:
-                          format: int32
-                          maximum: 65535
-                          minimum: 1
-                          type: integer
-                        service:
-                          description: Service name; in the CR's own namespace unless
-                            Namespace is set.
-                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                          type: string
-                      required:
-                      - port
-                      - service
-                      type: object
-                    name:
-                      description: DNS label; identifies the expose in status and
-                        in the agent config.
-                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                      type: string
-                    port:
-                      description: Port the tailnet node listens on — what a tailnet
-                        peer dials on this node's MagicDNS name/IP.
-                      format: int32
-                      maximum: 65535
-                      minimum: 1
-                      type: integer
-                  required:
-                  - backend
-                  - name
-                  - port
-                  type: object
                 minItems: 1
                 type: array
               hostname:
-                description: Explicit tailnet (MagicDNS) hostname. Empty → rendered
-                  from the Tailnet's ingressHostnameTemplate.
+                description: Explicit tailnet hostname. Empty → rendered from the
+                  Tailnet's hostnameTemplate.
                 type: string
               image:
                 description: Override the Tailnet's default agent image.
@@ -188,8 +132,8 @@ spec:
                 type: object
               tag:
                 description: |-
-                  Explicit tailnet tag. Empty → rendered from the Tailnet's ingressTagTemplate. The tag is the
-                  authorization: policy grants with dst = this tag decide which peers may reach the node.
+                  Explicit tailnet tag. Empty → rendered from the Tailnet's tagTemplate. The tag is the
+                  authorization: its grants in the tailnet policy decide which routes this node receives.
                 type: string
               tailnetRef:
                 description: TailnetRef selects a cluster-scoped Tailnet by name.
@@ -199,12 +143,49 @@ spec:
                 required:
                 - name
                 type: object
+              targets:
+                items:
+                  description: Target is one off-cluster host reachable over the tailnet,
+                    published as a Service.
+                  properties:
+                    address:
+                      description: IPv4/IPv6 address or MagicDNS name of the host
+                        at the far site.
+                      type: string
+                    aliases:
+                      description: |-
+                        Extra DNS names that resolve to this target's Service ClusterIP, rendered into the Tailnet's
+                        dns.hostsConfigMap. Use them when the far end routes by name (TLS SNI, HTTP Host): a consumer
+                        dialling the alias sends the real hostname, and the L4 tunnel passes it through untouched.
+                      items:
+                        maxLength: 253
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                      type: array
+                    name:
+                      description: DNS label; used verbatim as the Service name, so
+                        consumers dial <name>.<ns>:<port>.
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    port:
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                  required:
+                  - address
+                  - name
+                  - port
+                  type: object
+                minItems: 1
+                type: array
             required:
-            - exposes
+            - consumerNamespaces
             - tailnetRef
+            - targets
             type: object
           status:
-            description: TailnetIngressStatus is the observed state.
+            description: TailnetEgressStatus is the observed state.
             properties:
               authKeyExpiresAt:
                 description: Expiry of the reusable pre-auth key currently in the
@@ -212,7 +193,7 @@ spec:
                 format: date-time
                 type: string
               conditions:
-                description: 'Conditions: TagKnown, Registered, BackendsReachable,
+                description: 'Conditions: TagKnown, Registered, RoutesGranted, TargetsReachable,
                   Ready.'
                 items:
                   description: Condition contains details for one aspect of the current
@@ -272,37 +253,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              dnsName:
-                description: |-
-                  DNS name rendered from the Tailnet's dns.ingressNameTemplate; resolves to TailnetIPs via the
-                  hosts ConfigMap. Empty when no template is set.
-                type: string
-              exposes:
-                items:
-                  description: ExposeStatus is the per-expose observed state.
-                  properties:
-                    backend:
-                      description: The in-cluster backend the agent dials, as service:port.
-                      type: string
-                    listenPort:
-                      description: Port the tailnet node listens on for this expose.
-                      format: int32
-                      type: integer
-                    name:
-                      type: string
-                    reachable:
-                      description: True once the agent last dialled the backend successfully.
-                      type: boolean
-                    reason:
-                      description: Empty when reachable; "Unreachable" otherwise.
-                      type: string
-                  required:
-                  - backend
-                  - listenPort
-                  - name
-                  - reachable
-                  type: object
-                type: array
               hostname:
                 type: string
               nodeId:
@@ -310,9 +260,45 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              tag:
+                description: Effective tag (spec.tag or the Tailnet template) — what
+                  the policy and the node carry.
+                type: string
               tailnetIps:
                 items:
                   type: string
+                type: array
+              targets:
+                items:
+                  description: TargetStatus is the per-target observed state.
+                  properties:
+                    listenPort:
+                      description: Local port the agent listens on and the Service
+                        forwards to.
+                      format: int32
+                      type: integer
+                    name:
+                      type: string
+                    present:
+                      description: True once that route is present in the pod's netmap.
+                      type: boolean
+                    reachable:
+                      description: True once the agent last dialled the target successfully.
+                      type: boolean
+                    reason:
+                      description: 'When the route is missing: NotAdvertised, NotApproved
+                        or NoGrant. Empty when present.'
+                      type: string
+                    route:
+                      description: The /32 or /128 this target needs in the netmap.
+                      type: string
+                  required:
+                  - listenPort
+                  - name
+                  - present
+                  - reachable
+                  - route
+                  type: object
                 type: array
             type: object
         type: object

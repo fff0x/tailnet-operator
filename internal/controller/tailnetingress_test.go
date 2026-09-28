@@ -6,7 +6,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	tnv1 "fr0st.dev/tailnet-operator/api/v1alpha1"
+	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
 )
 
 func ingress(name, ns string, exposes ...tnv1.Expose) *tnv1.TailnetIngress {
@@ -72,7 +72,7 @@ func TestComputeExposeStatus(t *testing.T) {
 	// Node up, one backend down -> BackendsReachable False, Ready False, reason on b.
 	in := ingress("x", "ns", exposes...)
 	in.Status.NodeID = "1"
-	r.computeExposeStatus(in, map[string]bool{"a": true, "b": false})
+	r.computeExposeStatus(in, map[string]bool{"a": true, "b": false}, nil)
 	if s := condStatus(in.Status.Conditions, "BackendsReachable"); s != metav1.ConditionFalse {
 		t.Fatalf("BackendsReachable = %s, want False", s)
 	}
@@ -92,15 +92,35 @@ func TestComputeExposeStatus(t *testing.T) {
 	// Node up, all backends reachable -> Ready True.
 	in2 := ingress("y", "ns", exposes...)
 	in2.Status.NodeID = "1"
-	r.computeExposeStatus(in2, map[string]bool{"a": true, "b": true})
+	r.computeExposeStatus(in2, map[string]bool{"a": true, "b": true}, nil)
 	if s := condStatus(in2.Status.Conditions, "Ready"); s != metav1.ConditionTrue {
 		t.Fatalf("Ready = %s, want True", s)
 	}
 
 	// All backends reachable but not registered -> Ready False (no node yet).
 	in3 := ingress("z", "ns", exposes...)
-	r.computeExposeStatus(in3, map[string]bool{"a": true, "b": true})
+	r.computeExposeStatus(in3, map[string]bool{"a": true, "b": true}, nil)
 	if s := condStatus(in3.Status.Conditions, "Ready"); s != metav1.ConditionFalse {
 		t.Fatalf("Ready (no node) = %s, want False", s)
 	}
+
+	// Agent not scrapable -> ProbeFailed, not Unreachable (nothing is known about the backends).
+	in4 := ingress("w", "ns", exposes...)
+	in4.Status.NodeID = "1"
+	r.computeExposeStatus(in4, nil, errNoAgentPod)
+	if got := condReason(in4.Status.Conditions, "BackendsReachable"); got != "ProbeFailed" {
+		t.Fatalf("BackendsReachable reason = %s, want ProbeFailed", got)
+	}
+	if in4.Status.Exposes[0].Reason != "ProbeFailed" {
+		t.Fatalf("expose reason = %s, want ProbeFailed", in4.Status.Exposes[0].Reason)
+	}
+}
+
+func condReason(conds []metav1.Condition, typ string) string {
+	for _, c := range conds {
+		if c.Type == typ {
+			return c.Reason
+		}
+	}
+	return ""
 }

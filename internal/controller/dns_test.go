@@ -1,8 +1,16 @@
 package controller
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
 )
 
 // renderHosts must be deterministic (sorted), keep both address families of one source, drop a
@@ -32,5 +40,25 @@ func TestRenderHosts(t *testing.T) {
 	empty := renderHosts("corp", nil, warn)
 	if strings.Count(empty, "\n") != 1 || !strings.HasPrefix(empty, "# managed by") {
 		t.Fatalf("empty render = %q", empty)
+	}
+}
+
+// Ingress names publish IPv4 only: an AAAA would be preferred by clients and time out (see collect).
+func TestCollectIngressIPv4Only(t *testing.T) {
+	s := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(s)
+	_ = tnv1.AddToScheme(s)
+	in := &tnv1.TailnetIngress{ObjectMeta: metav1.ObjectMeta{Name: "shop", Namespace: "shop-dev"},
+		Spec: tnv1.TailnetIngressSpec{TailnetRef: tnv1.TailnetRef{Name: "corp"}}}
+	in.Status.DNSName = "shop-shop-dev.prod-1.tailnet.example.internal"
+	in.Status.TailnetIPs = []string{"100.64.0.42", "fd7a:115c:a1e0::2a"}
+	r := &TailnetDNSReconciler{Client: fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(in).WithStatusSubresource(in).Build(), Scheme: s, OperatorNamespace: "tailnet-system"}
+
+	got, err := r.collect(context.Background(), "corp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].IP != "100.64.0.42" {
+		t.Fatalf("entries = %+v, want only the IPv4 one", got)
 	}
 }

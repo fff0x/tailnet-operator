@@ -16,16 +16,18 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tnv1 "fr0st.dev/tailnet-operator/api/v1alpha1"
-	"fr0st.dev/tailnet-operator/internal/headscale"
-	"fr0st.dev/tailnet-operator/internal/naming"
-	"fr0st.dev/tailnet-operator/internal/policy"
+	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	"this-is-fine.io/tailnet-operator/internal/headscale"
+	"this-is-fine.io/tailnet-operator/internal/naming"
+	"this-is-fine.io/tailnet-operator/internal/policy"
 )
 
 const (
@@ -33,7 +35,7 @@ const (
 	policyKey = "policy"
 	// roleLabel tells the operator's ConfigMaps apart (dns hosts file vs rendered policy) so one
 	// feature switching off never deletes the other's output.
-	roleLabel        = "tailnet.fr0st.dev/role"
+	roleLabel        = "tailnet.this-is-fine.io/role"
 	roleDNSHosts     = "dns-hosts"
 	rolePolicyRender = "policy-rendered"
 
@@ -62,6 +64,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if spec.BaseConfigMap == "" {
 		return ctrl.Result{}, r.off(ctx, &tn)
 	}
+	policyApplyErrors.WithLabelValues(tn.Name).Add(0) // series exists before the first error → increase() works
 
 	// Base document.
 	var baseCM corev1.ConfigMap
@@ -210,7 +213,12 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if len(emsg) > 1024 {
 			emsg = emsg[:1024] + "…"
 		}
-		l.Error(err, "policy write rejected; previous policy stays active", "reason", reason)
+		if reason == "ApplyFailed" {
+			// Transport error (Headscale restarting, NetworkPolicy): transient, retried on the next requeue.
+			l.Info("policy write failed; previous policy stays active, retrying", "reason", reason, "error", err.Error())
+		} else {
+			l.Error(err, "policy write rejected; previous policy stays active", "reason", reason)
+		}
 		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 			renderedCond(t)
 			setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionFalse, reason, emsg)
@@ -391,10 +399,12 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("tailnetpolicy").
-		For(&tnv1.Tailnet{}).
+		// The render depends on specs only; status writes (ours every reconcile, the CRs' every 30 s)
+		// must not re-trigger it.
+		For(&tnv1.Tailnet{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&corev1.ConfigMap{}).
-		Watches(&tnv1.TailnetEgress{}, handler.EnqueueRequestsFromMapFunc(byRef)).
-		Watches(&tnv1.TailnetIngress{}, handler.EnqueueRequestsFromMapFunc(byRef)).
+		Watches(&tnv1.TailnetEgress{}, handler.EnqueueRequestsFromMapFunc(byRef), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&tnv1.TailnetIngress{}, handler.EnqueueRequestsFromMapFunc(byRef), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(byBase)).
 		Complete(r)
 }

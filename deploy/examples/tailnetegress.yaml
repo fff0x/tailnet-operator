@@ -4,7 +4,7 @@
 # policy: with Tailnet.spec.policy the operator generates them; without it an admin writes them and
 # the operator only reports what is missing. Each target becomes a Service named after it, so
 # a consumer dials <target>.<operator-namespace>:<port>.
-apiVersion: tailnet.fr0st.dev/v1alpha1
+apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: TailnetEgress
 metadata:
   name: billing-dev

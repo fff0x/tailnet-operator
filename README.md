@@ -10,7 +10,7 @@ from those CRs — without a per-workload `tailscale`+`socat` sidecar, without `
 `/dev/net/tun`, and without hand-editing the policy for every target.
 
 Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime) ·
-[tsnet](https://tailscale.com/kb/1244/tsnet) · MIT
+[tsnet](https://tailscale.com/kb/1244/tsnet) · [MIT](LICENSE) · © Max 'ff0x' Reineke
 
 | | |
 | --- | --- |
@@ -41,7 +41,7 @@ Installation (Headscale key, `kubectl apply -k deploy`, CoreDNS) is in
 [docs/INSTALL.md](docs/INSTALL.md). With that in place, three manifests:
 
 ```yaml
-apiVersion: tailnet.fr0st.dev/v1alpha1
+apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: Tailnet
 metadata:
   name: corp
@@ -59,7 +59,7 @@ spec:
     routeApprovers: [tag:fabric]
     ingressSourceAllowlist: ["group:*"]
 ---
-apiVersion: tailnet.fr0st.dev/v1alpha1
+apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: TailnetEgress
 metadata:
   name: billing-dev
@@ -71,7 +71,7 @@ spec:
     - { name: db-1,     address: 10.0.10.20, port: 1521 }
     - { name: api-corp, address: 10.0.30.10, port: 443, aliases: [api.corp.example] }
 ---
-apiVersion: tailnet.fr0st.dev/v1alpha1
+apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: TailnetIngress
 metadata:
   name: shop
@@ -86,13 +86,13 @@ spec:
 ```sh
 kubectl get tailnet,tailnetegress,tailnetingress -A
 # NAME                             SERVER                   APIKEY   EXPIRES                POLICY    AGE
-# tailnet.tailnet.fr0st.dev/corp   https://ts.example.com   True     2026-10-28T12:00:00Z   Applied   3d
+# tailnet.tailnet.this-is-fine.io/corp   https://ts.example.com   True     2026-10-28T12:00:00Z   Applied   3d
 #
 # NAMESPACE        NAME                                          TAG                      HOSTNAME             READY   AGE
-# tailnet-system   tailnetegress.tailnet.fr0st.dev/billing-dev   tag:egress-billing-dev   egress-billing-dev   True    2m
+# tailnet-system   tailnetegress.tailnet.this-is-fine.io/billing-dev   tag:egress-billing-dev   egress-billing-dev   True    2m
 #
 # NAMESPACE   NAME                                    TAG                HOSTNAME       DNS                                             READY   AGE
-# shop-dev    tailnetingress.tailnet.fr0st.dev/shop   tag:ingress-shop   ingress-shop   shop-shop-dev.prod-1.tailnet.example.internal   True    2m
+# shop-dev    tailnetingress.tailnet.this-is-fine.io/shop   tag:ingress-shop   ingress-shop   shop-shop-dev.prod-1.tailnet.example.internal   True    2m
 ```
 
 A pod in `billing-dev` dials `db-1.tailnet-system.svc:1521` or `https://api.corp.example`; a tailnet
@@ -149,11 +149,12 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | Kind | Conditions | Notable reasons |
 | --- | --- | --- |
 | `Tailnet` | `ApiReachable`, `ApiKeyValid`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable`; `Valid` / `Error`; `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
-| `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`; `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`; per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved`, `NoGrant` |
+| `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`, `ProbeFailed` (agent not scraped — NetworkPolicy or pod down; nothing is known about routes/dials); `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`; per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved`, `NoGrant`, `ProbeFailed` |
 | `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist) and `InvalidDNSName` |
 
 `Tailnet.status.policy` = `{renderedHash, appliedHash, appliedAt, generated{tags,grants,routes}}`;
-`TailnetIngress.status.dnsName` is the rendered DNS name. Event `PolicyDriftOverwritten` fires when
+`TailnetIngress.status.dnsName` is the rendered DNS name (published as A record only — the IPv4 node
+address; `status.tag` is the effective tag). Event `PolicyDriftOverwritten` fires when
 the live policy was changed behind the operator's back and rewritten.
 
 Metrics (controller-runtime registry): `tailnet_apikey_expires_seconds`,

@@ -12,19 +12,19 @@ kind: ClusterRole
 metadata:
   name: tailnet-operator
 rules:
-  - apiGroups: ["tailnet.fr0st.dev"]
+  - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnets]
     verbs: [get, list, watch]
-  - apiGroups: ["tailnet.fr0st.dev"]
+  - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnets/status]
     verbs: [get, update, patch]
   # TailnetIngress is namespaced but lives in any tenant namespace, so it (and the children it owns)
   # are managed cluster-wide. This is the deliberate widening the egress path avoids: an operator
   # that provisions tenant namespaces needs cluster-wide write on Secrets/Deployments here.
-  - apiGroups: ["tailnet.fr0st.dev"]
+  - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnetingresses]
     verbs: [get, list, watch]
-  - apiGroups: ["tailnet.fr0st.dev"]
+  - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnetingresses/status]
     verbs: [get, update, patch]
   - apiGroups: [""]
@@ -63,10 +63,10 @@ metadata:
   name: tailnet-operator
   namespace: tailnet-system
 rules:
-  - apiGroups: ["tailnet.fr0st.dev"]
+  - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnetegresses]
     verbs: [get, list, watch]
-  - apiGroups: ["tailnet.fr0st.dev"]
+  - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnetegresses/status]
     verbs: [get, update, patch]
   - apiGroups: [""]
