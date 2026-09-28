@@ -149,7 +149,7 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | Kind | Conditions | Notable reasons |
 | --- | --- | --- |
 | `Tailnet` | `ApiReachable`, `ApiKeyValid`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable`; `Valid` / `Error`; `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
-| `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`, `ProbeFailed` (agent not scraped — NetworkPolicy or pod down; nothing is known about routes/dials); `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`; per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved`, `NoGrant`, `ProbeFailed` |
+| `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`, `ProbeFailed` (agent not scraped — NetworkPolicy or pod down; nothing is known about routes/dials); `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`; per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved` (re-approved by the operator on the next policy reconcile), `NoGrant`, `ProbeFailed` |
 | `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist) and `InvalidDNSName` |
 
 `Tailnet.status.policy` = `{renderedHash, appliedHash, appliedAt, generated{tags,grants,routes}}`;
@@ -180,7 +180,9 @@ restart to add or remove a target:
 - **Policy** — parses the base HuJSON generically, appends tagOwners / `/32` approvals / grants
   derived from the CRs (base wins, nothing removed, unknown blocks pass through), publishes the render
   in a ConfigMap and, in `Apply`, writes it when the live document differs. Headscale validates
-  (including the base's `tests`) before storing, so a rejected render never becomes active.
+  (including the base's `tests`) before storing, so a rejected render never becomes active. After a
+  successful write it replays missed `autoApprovers` approvals (a route advertised before its
+  approver existed) on the routers, so `NotApproved` heals without `headscale nodes approve-routes`.
 - **Data plane** — one agent pod per CR is a userspace tsnet node. `AGENT_MODE` sets the direction:
   egress takes `--accept-routes` and `Dial`s the off-cluster address over the tailnet; ingress listens
   on the tailnet and `Dial`s an in-cluster backend. Same binary, `io.Copy` with half-close, no

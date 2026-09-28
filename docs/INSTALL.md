@@ -288,6 +288,13 @@ Nothing is ever removed from the base; identical grants are not duplicated; unkn
 `tests`, `nodeAttrs`, …) pass through. Targets addressed by **name** get no grant (a policy cannot
 route a name) and are listed in the `PolicyRendered` message.
 
+**Route approval replay.** Headscale's `autoApprovers` act only on a route *change* event, so a route
+advertised before its approver existed stays "available, not approved". After every successful write
+(and every `InSync` check) the operator lists the nodes and approves each advertised route that lies
+inside an `autoApprovers.routes` prefix of the rendered policy naming one of the node's tags —
+exactly what the event would have done, nothing more. Approvals are never removed. Events
+`RoutesApproved` / `RouteApprovalFailed` on the `Tailnet` show what happened.
+
 ### 7.2 Enable in DryRun
 
 Put the base policy into a ConfigMap in the operator namespace (Git-managed; the example works):
@@ -387,7 +394,7 @@ Version notes:
 | Version | Notes |
 | --- | --- |
 | v0.2.0 | **Breaking:** API group `tailnet.fr0st.dev` → `tailnet.this-is-fine.io` (CRDs, RBAC, every CR). No conversion: apply new CRDs + RBAC + image and re-create the CRs under the new group, then delete the old CRDs — children (agents, keys, Services, hosts ConfigMap) are owned by the CR and are rebuilt, agents re-register (1–2 min). With Flux: one commit that swaps CRD files, RBAC, image and CRs; prune removes the old CRDs; tenant CRs follow in a second commit. Also: `ProbeFailed` reason, `status.tag` (TAG column), ingress DNS names publish IPv4 only, MagicDNS name restored to the hostname after a duplicate, transient `ApplyFailed` logged at info, status-only updates no longer re-trigger reconciles. |
-| v0.2.1 | Rejected/failed policy writes are retried with backoff (15 s doubling to 5 min) instead of a fixed 5 min — a base test whose `src` is momentarily unresolvable (node re-registering) heals in seconds. `tailnet_policy_apply_errors_total` therefore counts more increments per outage: raise `TailnetPolicyApplyErrors` to `>= 6` per 30 min (a permanent failure gets there in ~8 min, a hiccup under 4 min stays at ≤ 5). |
+| v0.2.1 | Missed `autoApprovers` approvals are replayed after every successful policy write/InSync check (routes inside a rendered approver prefix, router tag listed there; events `RoutesApproved`) — no manual `approve-routes` needed. Rejected/failed policy writes are retried with backoff (15 s doubling to 5 min) instead of a fixed 5 min — a base test whose `src` is momentarily unresolvable (node re-registering) heals in seconds. `tailnet_policy_apply_errors_total` therefore counts more increments per outage: raise `TailnetPolicyApplyErrors` to `>= 6` per 30 min (a permanent failure gets there in ~8 min, a hiccup under 4 min stays at ≤ 5). |
 | v0.1.1 | Route diagnosis is prefix-aware: a target covered by an aggregate advertised route (`10.0.0.0/24` for `10.0.10.20`) is `Present`, no longer `NotAdvertised`. |
 | v0.1.0 | `Tailnet.spec.policy` (operator-owned policy, DryRun/Apply), `TailnetIngress.spec.allowFrom`, new conditions `PolicyRendered`/`PolicyApplied`/`PolicyGranted`, reasons `PolicyPending`/`PolicyDenied`. Existing clusters are unaffected until `policy.baseConfigMap` is set. |
 | v0.0.6 | `Tailnet.spec.dns`, `TailnetEgress.spec.targets[].aliases`, `TailnetIngress.status.dnsName`, `Backend.namespace`. |
@@ -411,7 +418,7 @@ Version notes:
 | Egress `TagKnown=False/Unknown` | `kubectl describe tailnetegress` | tag missing in `tagOwners` (file mode) |
 | Egress `TagKnown=False/PolicyPending` | `kubectl describe tailnet` → `PolicyApplied` | policy not applied yet / rejected |
 | `status.targets[].reason=NotAdvertised` | router `--advertise-routes` | route not advertised |
-| `… NotApproved` | `headscale nodes list-routes` | route not approved; `autoApprovers` missing or router tag differs |
+| `… NotApproved` | `headscale nodes list-routes`, `kubectl describe tailnet` events | route not approved; with operator-owned policy it is re-approved on the next policy reconcile — persists → `autoApprovers` entry missing or router tag differs |
 | `… NoGrant` | policy `grants` | no grant tag → /32:port (file mode) |
 | `TargetsReachable=False` | agent log `dial …: context deadline exceeded` | site firewall, target down |
 | Alias does not resolve in a pod | `kubectl -n tailnet-system get cm tailnet-dns-hosts`, resolver log | zone not forwarded, ConfigMap not mounted, Service not created yet |

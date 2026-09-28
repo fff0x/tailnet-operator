@@ -205,6 +205,22 @@ func Hash(canonical string) string {
 	return hex.EncodeToString(h[:])
 }
 
+// Approvers returns autoApprovers.routes of a policy document: prefix → aliases allowed to
+// advertise it. Missing block → empty map.
+func Approvers(doc []byte) (map[string][]string, error) {
+	m, err := parse(doc)
+	if err != nil {
+		return nil, err
+	}
+	aa, _ := m["autoApprovers"].(map[string]any)
+	routes, _ := aa["routes"].(map[string]any)
+	out := make(map[string][]string, len(routes))
+	for cidr, v := range routes {
+		out[cidr] = strs(v)
+	}
+	return out, nil
+}
+
 func parse(doc []byte) (map[string]any, error) {
 	std, err := hujson.Standardize(doc)
 	if err != nil {

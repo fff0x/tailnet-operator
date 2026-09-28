@@ -131,3 +131,15 @@ func TestAllowed(t *testing.T) {
 		t.Fatal("glob allowlist wrong")
 	}
 }
+
+func TestApprovers(t *testing.T) {
+	got, err := Approvers([]byte(`{ // hujson
+  "autoApprovers": { "routes": { "10.0.0.0/24": ["tag:fabric"], "10.1.1.1/32": ["tag:a", "group:b"] } },
+}`))
+	if err != nil || len(got) != 2 || len(got["10.1.1.1/32"]) != 2 || got["10.0.0.0/24"][0] != "tag:fabric" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	if got, err := Approvers([]byte(`{"grants": []}`)); err != nil || len(got) != 0 {
+		t.Fatalf("missing block: got %v, %v", got, err)
+	}
+}

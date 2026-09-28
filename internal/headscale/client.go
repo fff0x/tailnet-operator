@@ -122,6 +122,11 @@ func (c *Client) RenameNode(ctx context.Context, id, name string) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/node/"+id+"/rename/"+name, nil, nil)
 }
 
+// SetApprovedRoutes replaces a node's approved routes; pass the full list (existing ∪ new).
+func (c *Client) SetApprovedRoutes(ctx context.Context, id string, routes []string) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/node/"+id+"/approve_routes", map[string]any{"routes": routes}, nil)
+}
+
 // CreatePreAuthKeyRequest mints a pre-auth key. Since Headscale 0.28 a tagged key needs no user.
 type CreatePreAuthKeyRequest struct {
 	Reusable   bool      `json:"reusable"`
