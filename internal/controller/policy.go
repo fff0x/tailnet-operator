@@ -213,6 +213,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	now := metav1.Now()
 	if liveHash == hash {
 		r.clearRetry(tn.Name)
+		r.approveRoutes(ctx, hs, &tn, rendered)
 		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 			renderedCond(t)
 			if t.Status.Policy.AppliedHash != hash {
@@ -254,6 +255,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		})
 	}
 	r.clearRetry(tn.Name)
+	r.approveRoutes(ctx, hs, &tn, rendered)
 	l.Info("policy applied", "tailnet", tn.Name, "hash", hash[:12], "tags", sum.Tags, "grants", sum.Grants, "routes", sum.Routes)
 	return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 		renderedCond(t)
