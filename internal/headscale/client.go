@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -67,6 +68,26 @@ type APIKey struct {
 	LastSeen   time.Time `json:"lastSeen"`
 }
 
+// StatusError is a non-2xx answer. Code lets callers tell "key rejected" (401) from "server broken".
+type StatusError struct {
+	Code int
+	Msg  string
+}
+
+func (e *StatusError) Error() string { return e.Msg }
+
+// IsUnauthorized reports whether err is a 401 from Headscale.
+func IsUnauthorized(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Code == http.StatusUnauthorized
+}
+
+// Health probes GET /health, which needs no key: Headscale pings its database and answers
+// 500 {"status":"fail"} when it cannot — the same condition it masks as 401 on every API call.
+func (c *Client) Health(ctx context.Context) error {
+	return c.do(ctx, http.MethodGet, "/health", nil, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	var rdr io.Reader
 	if body != nil {
@@ -91,7 +112,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	defer resp.Body.Close()
 	rb, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("headscale %s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(rb)))
+		return &StatusError{Code: resp.StatusCode, Msg: fmt.Sprintf("headscale %s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(rb)))}
 	}
 	if out != nil {
 		if err := json.Unmarshal(rb, out); err != nil {

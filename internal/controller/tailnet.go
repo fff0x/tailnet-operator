@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -187,20 +188,10 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
-	// Reachability with the working key.
-	reachable := true
-	reason, msg := "Reachable", "control API reachable"
-	if _, err := headscale.New(apiURL, key).GetPolicy(ctx); err != nil {
-		reachable = false
-		reason, msg = "Unreachable", err.Error()
-	}
-	condStatus := metav1.ConditionTrue
-	if !reachable {
-		condStatus = metav1.ConditionFalse
-	}
-	setCond(&tn.Status.Conditions, tn.Generation, "ApiReachable", condStatus, reason, msg)
-	setCond(&tn.Status.Conditions, tn.Generation, "ApiKeyValid", metav1.ConditionTrue, "Valid",
-		fmt.Sprintf("working key valid until %s", exp.UTC().Format(time.RFC3339)))
+	// Reachability and key validity are two questions: /health answers without a key and fails when
+	// Headscale has lost its database (which it otherwise masks as 401 on every call); only a healthy
+	// server can tell us whether the working key is accepted.
+	ok := healthConditions(ctx, headscale.New(apiURL, key), &tn, exp)
 
 	et := metav1.NewTime(exp)
 	tn.Status.APIKeyExpiresAt = &et
@@ -219,11 +210,39 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if lifetime == 0 {
 		lifetime = 720 * time.Hour
 	}
-	requeue := time.Until(exp.Add(-lifetime / 2))
-	if requeue < time.Minute || !reachable {
+	// Capped at policyRequeue so ApiReachable/ApiKeyValid stay live instead of freezing for weeks.
+	requeue := min(time.Until(exp.Add(-lifetime/2)), policyRequeue)
+	if requeue < time.Minute || !ok {
 		requeue = time.Minute
 	}
 	return ctrl.Result{RequeueAfter: requeue}, nil
+}
+
+// healthConditions sets ApiReachable from GET /health and, only on a healthy server, ApiKeyValid from
+// GET /api/v1/policy with the working key. Returns false when either failed so the caller re-checks
+// in a minute. While the server is down the key verdict is unknown and the last one is kept.
+func healthConditions(ctx context.Context, hs *headscale.Client, tn *tnv1.Tailnet, exp time.Time) bool {
+	if err := hs.Health(ctx); err != nil {
+		reason := "Unreachable"
+		var se *headscale.StatusError
+		if errors.As(err, &se) {
+			reason = "Unhealthy" // answered, but reports a failed database ping
+		}
+		setCond(&tn.Status.Conditions, tn.Generation, "ApiReachable", metav1.ConditionFalse, reason, err.Error())
+		return false
+	}
+	setCond(&tn.Status.Conditions, tn.Generation, "ApiReachable", metav1.ConditionTrue, "Reachable", "control API reachable")
+	if _, err := hs.GetPolicy(ctx); err != nil {
+		reason := "Error"
+		if headscale.IsUnauthorized(err) {
+			reason = "Rejected"
+		}
+		setCond(&tn.Status.Conditions, tn.Generation, "ApiKeyValid", metav1.ConditionFalse, reason, err.Error())
+		return false
+	}
+	setCond(&tn.Status.Conditions, tn.Generation, "ApiKeyValid", metav1.ConditionTrue, "Valid",
+		fmt.Sprintf("working key valid until %s", exp.UTC().Format(time.RFC3339)))
+	return true
 }
 
 // setCond is meta.SetStatusCondition with the observed generation stamped in.
