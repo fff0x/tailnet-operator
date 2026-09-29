@@ -10,7 +10,7 @@ from those CRs — without a per-workload `tailscale`+`socat` sidecar, without `
 `/dev/net/tun`, and without hand-editing the policy for every target.
 
 Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime) ·
-[tsnet](https://tailscale.com/kb/1244/tsnet) · [MIT](LICENSE) · © Max 'ff0x' Reineke
+[tsnet](https://tailscale.com/kb/1244/tsnet) · [Apache-2.0](LICENSE) · © 2026 Max 'ff0x' Reineke
 
 | | |
 | --- | --- |
@@ -148,7 +148,7 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 
 | Kind | Conditions | Notable reasons |
 | --- | --- | --- |
-| `Tailnet` | `ApiReachable`, `ApiKeyValid`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable`; `Valid` / `Error`; `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
+| `Tailnet` | `ApiReachable`, `ApiKeyValid`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable` / `Unhealthy` (database down); `Valid` / `Rejected` / `Error`; `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
 | `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`, `ProbeFailed` (agent not scraped — NetworkPolicy or pod down; nothing is known about routes/dials); `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`; per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved` (re-approved by the operator on the next policy reconcile), `NoGrant`, `ProbeFailed` |
 | `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist) and `InvalidDNSName` |
 

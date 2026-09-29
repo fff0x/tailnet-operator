@@ -31,7 +31,7 @@ spec:
       containers:
         - name: operator
           # Public cosign-signed multi-arch mirror of the radicle-CI build.
-          image: docker.io/ff0x/tailnet-operator:v0.2.2
+          image: docker.io/ff0x/tailnet-operator:v0.2.3
           imagePullPolicy: Always
           # Absolute command: the published image is scratch (no ENTRYPOINT/PATH); the binary is at /.
           command: ["/tailnet-operator"]
@@ -42,7 +42,7 @@ spec:
                   fieldPath: metadata.namespace
             # Agents default to the operator's own image; one push serves both planes.
             - name: OPERATOR_IMAGE
-              value: docker.io/ff0x/tailnet-operator:v0.2.2
+              value: docker.io/ff0x/tailnet-operator:v0.2.3
           ports:
             - name: metrics
               containerPort: 8080

@@ -395,6 +395,7 @@ Version notes:
 | --- | --- |
 | v0.2.0 | **Breaking:** API group `tailnet.fr0st.dev` → `tailnet.this-is-fine.io` (CRDs, RBAC, every CR). No conversion: apply new CRDs + RBAC + image and re-create the CRs under the new group, then delete the old CRDs — children (agents, keys, Services, hosts ConfigMap) are owned by the CR and are rebuilt, agents re-register (1–2 min). With Flux: one commit that swaps CRD files, RBAC, image and CRs; prune removes the old CRDs; tenant CRs follow in a second commit. Also: `ProbeFailed` reason, `status.tag` (TAG column), ingress DNS names publish IPv4 only, MagicDNS name restored to the hostname after a duplicate, transient `ApplyFailed` logged at info, status-only updates no longer re-trigger reconciles. |
 | v0.2.1 | Missed `autoApprovers` approvals are replayed after every successful policy write/InSync check (routes inside a rendered approver prefix, router tag listed there; events `RoutesApproved`) — no manual `approve-routes` needed. Rejected/failed policy writes are retried with backoff (15 s doubling to 5 min) instead of a fixed 5 min — a base test whose `src` is momentarily unresolvable (node re-registering) heals in seconds. `tailnet_policy_apply_errors_total` therefore counts more increments per outage: raise `TailnetPolicyApplyErrors` to `>= 6` per 30 min (a permanent failure gets there in ~8 min, a hiccup under 4 min stays at ≤ 5). |
+| v0.2.3 | `ApiReachable` is taken from Headscale `/health` (new reason `Unhealthy`: server up, database down) and `ApiKeyValid` from a live authenticated call (new reason `Rejected`); both are re-checked at least every 5 min instead of once per key half-life. |
 | v0.2.2 | The policy controller no longer re-reconciles when it writes its own rendered ConfigMap (one policy write per change instead of a second no-op run; rejected writes are counted once). |
 | v0.1.1 | Route diagnosis is prefix-aware: a target covered by an aggregate advertised route (`10.0.0.0/24` for `10.0.10.20`) is `Present`, no longer `NotAdvertised`. |
 | v0.1.0 | `Tailnet.spec.policy` (operator-owned policy, DryRun/Apply), `TailnetIngress.spec.allowFrom`, new conditions `PolicyRendered`/`PolicyApplied`/`PolicyGranted`, reasons `PolicyPending`/`PolicyDenied`. Existing clusters are unaffected until `policy.baseConfigMap` is set. |
@@ -415,7 +416,9 @@ Version notes:
 
 | Symptom | Look at | Typical cause |
 | --- | --- | --- |
-| `Tailnet` `ApiReachable=False` | condition message | `apiUrl` wrong, NetworkPolicy blocks the operator, bootstrap key expired |
+| `Tailnet` `ApiReachable=False/Unreachable` | condition message | `apiUrl` wrong, NetworkPolicy blocks the operator |
+| `Tailnet` `ApiReachable=False/Unhealthy` | Headscale `/health`, its database | Headscale answers but cannot reach its database (it then returns 401 on every API call) |
+| `Tailnet` `ApiKeyValid=False/Rejected` | Headscale `apikeys list` | working key expired or deleted on the server; `Error` = rotation failed (bootstrap key expired) |
 | Egress `TagKnown=False/Unknown` | `kubectl describe tailnetegress` | tag missing in `tagOwners` (file mode) |
 | Egress `TagKnown=False/PolicyPending` | `kubectl describe tailnet` → `PolicyApplied` | policy not applied yet / rejected |
 | `status.targets[].reason=NotAdvertised` | router `--advertise-routes` | route not advertised |
