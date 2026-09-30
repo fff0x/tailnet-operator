@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -20,11 +21,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/yaml"
+
+	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	"this-is-fine.io/tailnet-operator/test/internal/isolation"
 )
 
 // TestAdmission runs a disposable API server, never the user's current kube-context. It validates
 // the generated CRDs, examples and optional live export against actual Kubernetes admission/CEL.
 func TestAdmission(t *testing.T) {
+	if err := isolation.ClearEnvtestOverrides(); err != nil {
+		t.Fatal(err)
+	}
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		t.Fatal("set KUBEBUILDER_ASSETS to envtest binaries for Kubernetes >= 1.31")
 	}
@@ -145,6 +152,86 @@ func TestAdmission(t *testing.T) {
 		}
 	})
 
+	t.Run("image-pull-secrets", func(t *testing.T) {
+		for _, tt := range []struct {
+			name  string
+			names []any
+		}{
+			{name: "omitted"},
+			{name: "empty", names: []any{}},
+			{name: "duplicates", names: []any{"registry", "registry"}},
+			{name: "override", names: []any{"registry.example", "0-registry", strings.Repeat("a", 253)}},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				obj := templates["tailnet"].DeepCopy()
+				obj.SetName("pull-secrets-" + tt.name)
+				if tt.names != nil {
+					if err := unstructured.SetNestedSlice(obj.Object, tt.names, "spec", "proxy", "imagePullSecrets"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				// Persist only in the disposable API server, then remove before the dry-run invariant.
+				if err := c.Create(ctx, obj); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := c.Delete(ctx, obj); err != nil {
+						t.Error(err)
+					}
+				})
+				stored := &unstructured.Unstructured{}
+				stored.SetGroupVersionKind(obj.GroupVersionKind())
+				if err := c.Get(ctx, client.ObjectKeyFromObject(obj), stored); err != nil {
+					t.Fatal(err)
+				}
+				got, found, err := unstructured.NestedSlice(stored.Object, "spec", "proxy", "imagePullSecrets")
+				if err != nil || found != (tt.names != nil) || !reflect.DeepEqual(got, tt.names) {
+					t.Fatalf("stored names=%v present=%v err=%v; want %v", got, found, err, tt.names)
+				}
+				// Exercise the typed client's JSON representation, including explicit [].
+				data, err := json.Marshal(stored)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var typed tnv1.Tailnet
+				if err := json.Unmarshal(data, &typed); err != nil {
+					t.Fatal(err)
+				}
+				data, err = json.Marshal(&typed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(data, stored); err != nil {
+					t.Fatal(err)
+				}
+				if err := c.Update(ctx, stored); err != nil {
+					t.Fatal(err)
+				}
+				if err := c.Get(ctx, client.ObjectKeyFromObject(obj), stored); err != nil {
+					t.Fatal(err)
+				}
+				got, found, err = unstructured.NestedSlice(stored.Object, "spec", "proxy", "imagePullSecrets")
+				if err != nil || found != (tt.names != nil) || !reflect.DeepEqual(got, tt.names) {
+					t.Fatalf("roundtrip names=%v present=%v err=%v; want %v", got, found, err, tt.names)
+				}
+			})
+		}
+		for _, value := range []any{
+			"registry", map[string]any{"name": "registry"}, []any{int64(1)}, []any{nil},
+			[]any{""}, []any{"Registry"}, []any{"registry/name"}, []any{"registry_name"},
+			[]any{"-registry"}, []any{"registry-"}, []any{"registry..example"},
+			[]any{strings.Repeat("a", 254)},
+		} {
+			obj := templates["tailnet"].DeepCopy()
+			if err := unstructured.SetNestedField(obj.Object, value, "spec", "proxy", "imagePullSecrets"); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Create(ctx, obj, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Fatalf("invalid imagePullSecrets %v: %v", value, err)
+			}
+		}
+	})
+
 	t.Run("service-name-boundaries", func(t *testing.T) {
 		for _, name := range []string{"a", "db1", "a-0", strings.Repeat("a", 63)} {
 			t.Run(name, func(t *testing.T) {
@@ -248,7 +335,7 @@ func TestAdmission(t *testing.T) {
 		t.Log(string(out))
 	})
 
-	// All CR operations above must be dry-runs, including the shell script.
+	// All CR operations are dry-runs except the storage roundtrip tests, which clean up their CRs.
 	for _, kind := range []string{"TailnetList", "TailnetEgressList", "TailnetIngressList"} {
 		list := &unstructured.UnstructuredList{}
 		list.SetAPIVersion("tailnet.this-is-fine.io/v1alpha1")
