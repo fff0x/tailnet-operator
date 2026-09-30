@@ -43,6 +43,8 @@ type DNSSpec struct {
 	// Keep the result one label below your gateway's wildcard certificate, e.g.
 	// "{name}-{namespace}.prod-1.tailnet.example.internal". Empty → ingresses get no name.
 	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="self == '' || (self.contains('{name}') && self.replace('{name}', 'n').replace('{namespace}', 'ns').matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?([.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$') && self.matches('[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'))",message="ingressNameTemplate must contain {name} and end in a literal lowercase DNS zone with at least two labels"
 	IngressNameTemplate string `json:"ingressNameTemplate,omitempty"`
 }
 
@@ -78,21 +80,43 @@ type PolicySpec struct {
 	// live in tenant namespaces, so this is the admin's veto over who tenants may grant access to.
 	// Empty → no ingress grants are generated (only the tag is declared).
 	// +optional
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^((group:|tag:|autogroup:)[^[:space:]]+|[^@[:space:]]+@[^@[:space:]]+)$`
 	IngressSourceAllowlist []string `json:"ingressSourceAllowlist,omitempty"`
+}
+
+// HeadscaleSpec describes the external control server. Version is an optional operator-supplied
+// hint, not an observed version; capability probes determine compatibility.
+type HeadscaleSpec struct {
+	// Optional version hint for diagnostics, e.g. "0.29.3". Does not bypass capability checks.
+	// +optional
+	Version string `json:"version,omitempty"`
+	// Reserved for an operator-managed Headscale. Must remain empty until managed mode is supported.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == ''",message="headscale.ref is reserved; managed Headscale is not supported yet"
+	Ref string `json:"ref,omitempty"`
 }
 
 // TailnetSpec describes a control server and how the operator authenticates to it.
 type TailnetSpec struct {
 	// Login/control URL, becomes the agent's ControlURL (e.g. https://ts.example.com).
+	// +kubebuilder:validation:Pattern=`^https://`
+	// +kubebuilder:validation:MinLength=9
 	Server string `json:"server"`
 	// In-cluster URL for the REST API if it differs from Server. Empty → Server.
 	// +optional
 	APIURL string `json:"apiUrl,omitempty"`
+	// External Headscale metadata; compatibility is checked against the API, not the version hint.
+	// +optional
+	Headscale HeadscaleSpec `json:"headscale,omitempty"`
 	// Bootstrap API key, read only. The operator mints its own rotating working key from it and
 	// never writes back here — so this may live in GitOps without a rotation fight.
 	APISecretRef SecretKeyRef `json:"apiSecretRef"`
 	// Lifetime of the self-minted working API key. Rotated at half-life.
 	// +kubebuilder:default="720h"
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:MaxLength=32
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('1h')",message="apiKeyLifetime must be a valid duration of at least 1h"
 	APIKeyLifetime metav1.Duration `json:"apiKeyLifetime,omitempty"`
 	// Lifetime of the reusable ephemeral pre-auth keys handed to agents. Rotated at half-life.
 	// +kubebuilder:default="168h"
@@ -155,7 +179,8 @@ type TailnetStatus struct {
 	// Expiry of the current working API key, drives the ApiKeyValid condition and its metric.
 	// +optional
 	APIKeyExpiresAt *metav1.Time `json:"apiKeyExpiresAt,omitempty"`
-	// Conditions: ApiReachable, ApiKeyValid, PolicyRendered, PolicyApplied.
+	// Conditions: ApiReachable, ApiKeyValid, HeadscaleCompatible, PolicyMode, SplitDNS,
+	// PolicyRendered, PolicyApplied.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -169,7 +194,9 @@ type TailnetStatus struct {
 // +kubebuilder:printcolumn:name="ApiKey",type=string,JSONPath=`.status.conditions[?(@.type=="ApiKeyValid")].status`
 // Expires is a string, not a date: kubectl's date column renders future timestamps as "<invalid>".
 // +kubebuilder:printcolumn:name="Expires",type=string,JSONPath=`.status.apiKeyExpiresAt`
+// +kubebuilder:printcolumn:name="Compat",type=string,JSONPath=`.status.conditions[?(@.type=="HeadscaleCompatible")].reason`
 // +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.status.conditions[?(@.type=="PolicyApplied")].reason`
+// +kubebuilder:printcolumn:name="DNS",type=string,JSONPath=`.status.conditions[?(@.type=="SplitDNS")].reason`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Tailnet is a cluster-scoped binding to one control server.
@@ -177,7 +204,7 @@ type Tailnet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   TailnetSpec   `json:"spec,omitempty"`
+	Spec   TailnetSpec   `json:"spec"`
 	Status TailnetStatus `json:"status,omitempty"`
 }
 

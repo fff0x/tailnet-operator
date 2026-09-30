@@ -1,0 +1,15 @@
+# ExpectedError: spec.targets[0].port
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  consumerNamespaces:
+    - billing
+  targets:
+    - name: db
+      address: 10.0.0.1
+      port: 65536

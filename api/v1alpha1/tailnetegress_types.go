@@ -12,10 +12,14 @@ type TailnetRef struct {
 
 // Target is one off-cluster host reachable over the tailnet, published as a Service.
 type Target struct {
-	// DNS label; used verbatim as the Service name, so consumers dial <name>.<ns>:<port>.
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// DNS-1035 label; used verbatim as the Service name, so consumers dial <name>.<ns>:<port>.
+	// Start with a letter for compatibility with Kubernetes 1.31 Service admission.
+	// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=63
 	Name string `json:"name"`
-	// IPv4/IPv6 address or MagicDNS name of the host at the far site.
+	// IPv4/IPv6 address or lowercase MagicDNS name, not a CIDR, URL or host:port.
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="isIP(self) || (!self.matches('^[0-9.]+$') && self.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?([.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$'))",message="address must be an IP or a lowercase DNS name, not a CIDR or host:port"
 	Address string `json:"address"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
@@ -25,7 +29,7 @@ type Target struct {
 	// dialling the alias sends the real hostname, and the L4 tunnel passes it through untouched.
 	// +optional
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
-	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:MaxLength=63
 	Aliases []string `json:"aliases,omitempty"`
 }
 
@@ -41,8 +45,12 @@ type TailnetEgressSpec struct {
 	Hostname string `json:"hostname,omitempty"`
 	// Namespaces whose pods may reach this proxy's Services (NetworkPolicy ingress).
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MaxLength=63
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	ConsumerNamespaces []string `json:"consumerNamespaces"`
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=50
+	// +kubebuilder:validation:XValidation:rule="self.all(t, self.exists_one(other, other.name == t.name))",message="target names must be unique"
 	Targets []Target `json:"targets"`
 	// Override the Tailnet's default agent image.
 	// +optional
@@ -103,11 +111,12 @@ type TailnetEgressStatus struct {
 
 // TailnetEgress is a per-identity egress into a Tailnet. It lives in the operator's namespace; a
 // NetworkPolicy decides which namespaces may use it.
+// +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="name must be a DNS label of at most 40 characters"
 type TailnetEgress struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   TailnetEgressSpec   `json:"spec,omitempty"`
+	Spec   TailnetEgressSpec   `json:"spec"`
 	Status TailnetEgressStatus `json:"status,omitempty"`
 }
 

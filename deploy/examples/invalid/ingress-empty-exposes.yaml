@@ -1,0 +1,12 @@
+# ExpectedError: spec.exposes
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: TailnetIngress
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  allowFrom:
+    - group:ops
+  exposes: []

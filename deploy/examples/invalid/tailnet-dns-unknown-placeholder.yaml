@@ -1,0 +1,12 @@
+# ExpectedError: ingressNameTemplate must contain {name} and end in a literal lowercase DNS zone with at least two labels
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: Tailnet
+metadata:
+  name: invalid
+spec:
+  server: https://ts.example.com
+  apiSecretRef:
+    name: bootstrap
+  dns:
+    ingressNameTemplate: '{name}-{unknown}.cluster.example'

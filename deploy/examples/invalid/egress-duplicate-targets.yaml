@@ -1,0 +1,18 @@
+# ExpectedError: target names must be unique
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  consumerNamespaces:
+    - billing
+  targets:
+    - name: db
+      address: 10.0.0.1
+      port: 5432
+    - name: db
+      address: 10.0.0.2
+      port: 5432

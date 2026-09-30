@@ -1,0 +1,165 @@
+# ExpectedError: spec.targets
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  consumerNamespaces:
+    - billing
+  targets:
+    - name: target-0
+      address: 10.0.0.1
+      port: 5432
+    - name: target-1
+      address: 10.0.0.1
+      port: 5432
+    - name: target-2
+      address: 10.0.0.1
+      port: 5432
+    - name: target-3
+      address: 10.0.0.1
+      port: 5432
+    - name: target-4
+      address: 10.0.0.1
+      port: 5432
+    - name: target-5
+      address: 10.0.0.1
+      port: 5432
+    - name: target-6
+      address: 10.0.0.1
+      port: 5432
+    - name: target-7
+      address: 10.0.0.1
+      port: 5432
+    - name: target-8
+      address: 10.0.0.1
+      port: 5432
+    - name: target-9
+      address: 10.0.0.1
+      port: 5432
+    - name: target-10
+      address: 10.0.0.1
+      port: 5432
+    - name: target-11
+      address: 10.0.0.1
+      port: 5432
+    - name: target-12
+      address: 10.0.0.1
+      port: 5432
+    - name: target-13
+      address: 10.0.0.1
+      port: 5432
+    - name: target-14
+      address: 10.0.0.1
+      port: 5432
+    - name: target-15
+      address: 10.0.0.1
+      port: 5432
+    - name: target-16
+      address: 10.0.0.1
+      port: 5432
+    - name: target-17
+      address: 10.0.0.1
+      port: 5432
+    - name: target-18
+      address: 10.0.0.1
+      port: 5432
+    - name: target-19
+      address: 10.0.0.1
+      port: 5432
+    - name: target-20
+      address: 10.0.0.1
+      port: 5432
+    - name: target-21
+      address: 10.0.0.1
+      port: 5432
+    - name: target-22
+      address: 10.0.0.1
+      port: 5432
+    - name: target-23
+      address: 10.0.0.1
+      port: 5432
+    - name: target-24
+      address: 10.0.0.1
+      port: 5432
+    - name: target-25
+      address: 10.0.0.1
+      port: 5432
+    - name: target-26
+      address: 10.0.0.1
+      port: 5432
+    - name: target-27
+      address: 10.0.0.1
+      port: 5432
+    - name: target-28
+      address: 10.0.0.1
+      port: 5432
+    - name: target-29
+      address: 10.0.0.1
+      port: 5432
+    - name: target-30
+      address: 10.0.0.1
+      port: 5432
+    - name: target-31
+      address: 10.0.0.1
+      port: 5432
+    - name: target-32
+      address: 10.0.0.1
+      port: 5432
+    - name: target-33
+      address: 10.0.0.1
+      port: 5432
+    - name: target-34
+      address: 10.0.0.1
+      port: 5432
+    - name: target-35
+      address: 10.0.0.1
+      port: 5432
+    - name: target-36
+      address: 10.0.0.1
+      port: 5432
+    - name: target-37
+      address: 10.0.0.1
+      port: 5432
+    - name: target-38
+      address: 10.0.0.1
+      port: 5432
+    - name: target-39
+      address: 10.0.0.1
+      port: 5432
+    - name: target-40
+      address: 10.0.0.1
+      port: 5432
+    - name: target-41
+      address: 10.0.0.1
+      port: 5432
+    - name: target-42
+      address: 10.0.0.1
+      port: 5432
+    - name: target-43
+      address: 10.0.0.1
+      port: 5432
+    - name: target-44
+      address: 10.0.0.1
+      port: 5432
+    - name: target-45
+      address: 10.0.0.1
+      port: 5432
+    - name: target-46
+      address: 10.0.0.1
+      port: 5432
+    - name: target-47
+      address: 10.0.0.1
+      port: 5432
+    - name: target-48
+      address: 10.0.0.1
+      port: 5432
+    - name: target-49
+      address: 10.0.0.1
+      port: 5432
+    - name: target-50
+      address: 10.0.0.1
+      port: 5432

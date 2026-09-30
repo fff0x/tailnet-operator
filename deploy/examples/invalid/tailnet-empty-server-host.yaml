@@ -1,0 +1,10 @@
+# ExpectedError: spec.server
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: Tailnet
+metadata:
+  name: invalid
+spec:
+  server: https://
+  apiSecretRef:
+    name: bootstrap
