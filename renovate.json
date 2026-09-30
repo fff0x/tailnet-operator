@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "dependencyDashboard": false,
+  "automerge": false,
+  "enabledManagers": ["gomod", "dockerfile", "custom.regex"],
+  "packageRules": [
+    {
+      "description": "Keep builder images immutable; review architecture and toolchain compatibility before updating.",
+      "matchDatasources": ["docker"],
+      "pinDigests": true
+    },
+    {
+      "description": "tsnet updates need explicit Headscale, userspace networking, L4/HTTP and state-lifecycle acceptance. Never auto-merge.",
+      "matchPackageNames": ["tailscale.com"],
+      "groupName": "tsnet compatibility",
+      "automerge": false
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)Dockerfile$/", "/(^|/)Taskfile\\.yaml$/"],
+      "matchStrings": ["golang\\.org/x/vuln/cmd/govulncheck@(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"],
+      "depNameTemplate": "golang.org/x/vuln",
+      "datasourceTemplate": "go"
+    }
+  ]
+}

@@ -33,6 +33,13 @@ Distinguish unit assertions, envtest API behavior, live pods, data-plane traffic
 A skipped unsupported row is not a compatibility result. Never substitute mocked success for a real integration gate.
 Keep test processes, credentials, downloaded assets and scratch output outside the checkout.
 
+## Dependency updates
+
+`renovate.json` defines updates for Go modules, Dockerfile images and the pinned `govulncheck` tool.
+It requests image digest pins and groups tsnet changes for explicit compatibility review. Automerge is disabled.
+The configuration does not deploy, schedule or prove a running Renovate service.
+Validate changes with `renovate-config-validator --strict renovate.json`.
+
 ## Change shape
 
 - Keep commits focused. Separate unrelated dependency, runtime, chart and deployment changes.
