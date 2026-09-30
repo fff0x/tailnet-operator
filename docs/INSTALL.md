@@ -23,7 +23,7 @@ All names below are placeholders: Tailnet `corp`, cluster `prod-1`, domain
 
 | Component | Requirement | Why |
 | --- | --- | --- |
-| Kubernetes | ≥ 1.29 | CEL validation on the CRDs |
+| Kubernetes | ≥ 1.31 | CRD admission uses the CEL IP library (`isIP`) |
 | CNI | NetworkPolicy support | `consumerNamespaces` isolation is a NetworkPolicy |
 | Headscale | 0.29.x, reachable from the cluster over HTTP(S) | REST API for nodes, keys and (optionally) the policy |
 | Subnet router | a node tagged e.g. `tag:fabric` advertising the site routes | egress targets are reached through it |
@@ -76,6 +76,55 @@ router's address to the target port.
 | `database` | the Headscale database | `headscale policy set -f …` or `PUT /api/v1/policy` — the operator in [§7](#7-operator-owned-policy) |
 
 Switching to `database` is described in [§7.3](#73-migrating-from-file-mode).
+
+### 2.4 PostgreSQL TLS
+
+For PostgreSQL deployments, use `HEADSCALE_DATABASE_POSTGRES_SSL=verify-full` and mount the database server's CA certificate.
+Set `PGSSLROOTCERT` to the mounted certificate path, for example `/etc/headscale/postgres-ca/ca.crt`.
+The database hostname must match a certificate SAN. With CloudNativePG, use its generated server CA and the `-rw` Service FQDN.
+Restart Headscale when the mounted CA changes.
+
+Check active connections on the database primary:
+
+```sh
+kubectl -n <headscale-namespace> exec <database-primary-pod> -c postgres -- \
+  psql -qtAc "select a.usename, s.ssl, s.version, s.cipher from pg_stat_ssl s join pg_stat_activity a using (pid) where a.usename='headscale'"
+```
+
+Every returned connection must have `ssl=t`; no rows means there is no active connection to verify.
+This query proves transport encryption, not certificate verification.
+Also check the running Headscale container's `verify-full` setting, CA mount and connection errors.
+A Git manifest alone does not prove that TLS is active.
+
+### 2.5 Preflight
+
+The Tailnet controller probes capabilities on each reconcile, normally at least every five minutes.
+`kubectl get tailnet` shows `COMPAT`, `POLICY` and `DNS` reasons; `kubectl describe tailnet` shows the details.
+A probe error retries after one minute. The operator does not claim to detect the server's version.
+Optional `spec.headscale.version` supplies a diagnostic hint only; `spec.headscale.ref` is reserved and must remain empty.
+
+| Condition | Meaning |
+| --- | --- |
+| `HeadscaleCompatible=True/Compatible` | Database policy mode and the non-mutating `POST /api/v1/policy/check` probe are available |
+| `HeadscaleCompatible=False/Incompatible` | File policy mode, or the policy/check endpoint is absent (requires Headscale ≥ 0.29) |
+| `PolicyMode=True/Database` | GET policy includes an `updatedAt` timestamp |
+| `PolicyMode=False/File` | GET policy includes an explicit `updatedAt: null`; Apply skips policy writes and route approvals (`PolicyApplied=False/PolicyModeFile`) |
+| `PolicyMode=Unknown/CannotVerify` | The response omits `updatedAt`; mode cannot be established |
+| `…=Unknown/ProbeFailed` | A request failed or its response was invalid; check reachability, credentials and Headscale logs |
+| `SplitDNS=Unknown/CannotVerify` | No DNS API exists; configure the displayed split zone to point at your gateway DNS Service IP |
+
+Mode detection follows the response shape in Headscale
+[0.28.0](https://github.com/juanfont/headscale/blob/v0.28.0/hscontrol/grpcv1.go#L658-L692) and
+[0.29.3](https://github.com/juanfont/headscale/blob/v0.29.3/hscontrol/grpcv1.go#L687-L721).
+HTTP 200 alone does not prove database mode. A 401, a server error, or an empty policy database is not evidence of file mode.
+Key validation uses the API-key listing endpoint, so an initially empty policy database does not prevent bootstrap.
+The authenticated health endpoint reports `databaseConnectivity`; a missing endpoint gives no database-health verdict.
+
+Split-DNS hints use the literal suffix after the last placeholder-containing label in `dns.ingressNameTemplate`.
+For example, `{name}-{namespace}.hydra.tif.internal` requires the split zone `hydra.tif.internal`.
+An empty template produces no hint. New manifests require `{name}` and a literal zone with at least two labels.
+The operator cannot verify DNS delegation or infer the gateway IP yet.
+Preflight does not change Headscale configuration. DryRun still publishes the rendered policy in file mode.
 
 ## 3. Operator
 
@@ -352,8 +401,8 @@ spec:
 
 ```sh
 kubectl get tailnet corp
-# NAME   SERVER                   APIKEY   EXPIRES                POLICY    AGE
-# corp   https://ts.example.com   True     2026-10-28T12:00:00Z   Applied   3d
+# NAME   SERVER                   APIKEY   EXPIRES                COMPAT       POLICY    DNS            AGE
+# corp   https://ts.example.com   True     2026-10-28T12:00:00Z   Compatible   Applied   CannotVerify   3d
 ```
 
 From now on: **never run `headscale policy set` by hand.** The operator compares the live document
@@ -385,14 +434,41 @@ kubectl -n tailnet-system exec -i deploy/headscale -c headscale -- headscale pol
 
 ## 8. Upgrade
 
-1. Apply the new CRDs first (`deploy/crds/`), then the Deployment with the new image (operator and
-   `OPERATOR_IMAGE`; agent pods are re-rolled by the operator).
-2. `kubectl get tailnetegress,tailnetingress -A` — everything back to `READY=True`.
+**Validate existing CRs before upgrading the CRDs.** The stricter schema requires Kubernetes ≥ 1.31,
+non-empty ingress `allowFrom`, DNS-label CR names of at most 40 characters, unique target/expose names
+and expose ports, at most 50 targets/exposes, and aliases of at most 63 characters.
+Target names must start with a letter because they become Services (Kubernetes 1.31 compatibility).
+Rendered ingress DNS names must also keep each label within 63 characters; combining long names and namespaces can exceed this limit.
+Non-empty ingress DNS templates must contain `{name}` and end in a literal lowercase zone with at least two labels.
+See [validation rules and the isolated live-export check](USAGE.md#13-validation).
+Do not install stricter CRDs until existing objects pass that check; it does not modify the cluster.
+
+1. Verify that the release image exists in your registry before changing the Deployment.
+   `deploy/operator.yaml` uses the Docker Hub mirror; a successful private-registry build does not prove mirror availability.
+2. Apply the new CRDs first (`deploy/crds/`), then the Deployment with the new image (operator and
+   `OPERATOR_IMAGE`; agent pods are re-rolled by the operator). With GitOps, make these changes in the source repository.
+3. `kubectl get tailnet` — expect `COMPAT=Compatible`, `POLICY=InSync` (or `Applied`) and `DNS=CannotVerify`
+   for a database-mode server with policy generation and an ingress DNS template enabled.
+   `DNS=CannotVerify` is a manual configuration hint, not proof that DNS is broken or working.
+4. `kubectl get tailnetegress,tailnetingress -A` — everything back to `READY=True`.
+   Verify an actual egress connection and ingress connection after the rollout.
+
+### Operator restart versus agent upgrade
+
+Restarting the operator with the same image and unchanged desired state does not itself require an agent rollout.
+Changing `OPERATOR_IMAGE` also changes the agent image unless `spec.image` on the CR or `Tailnet.spec.proxy.image` overrides it.
+Agent Deployments use `Recreate` to avoid two pods competing for one tailnet identity.
+An agent image change therefore interrupts that CR's data path while the replacement registers and starts serving.
+A temporary `Ready=False` during this replacement can indicate a real interruption, not a status-only flap.
+
+When diagnosing a restart-related status change, watch the CR conditions and agent pod UIDs together.
+Distinguish a pure operator restart from an agent replacement before suppressing readiness failures.
 
 Version notes:
 
 | Version | Notes |
 | --- | --- |
+| v0.3.0 | Headscale capability preflight (`HeadscaleCompatible`, `PolicyMode`, `SplitDNS`), `COMPAT`/`DNS` columns and optional `headscale.version` hint. Proven file mode blocks policy writes and route-approval replay; empty-database bootstrap remains possible. **Breaking admission changes:** Kubernetes ≥1.31, required `spec`/non-empty ingress `allowFrom`, stricter names/addresses/templates, unique target/expose names and expose ports, bounded lists and lifetimes. Validate existing CRs against the new schema before upgrading; see [all validation rules](USAGE.md#13-validation). |
 | v0.2.0 | **Breaking:** API group `tailnet.fr0st.dev` → `tailnet.this-is-fine.io` (CRDs, RBAC, every CR). No conversion: apply new CRDs + RBAC + image and re-create the CRs under the new group, then delete the old CRDs — children (agents, keys, Services, hosts ConfigMap) are owned by the CR and are rebuilt, agents re-register (1–2 min). With Flux: one commit that swaps CRD files, RBAC, image and CRs; prune removes the old CRDs; tenant CRs follow in a second commit. Also: `ProbeFailed` reason, `status.tag` (TAG column), ingress DNS names publish IPv4 only, MagicDNS name restored to the hostname after a duplicate, transient `ApplyFailed` logged at info, status-only updates no longer re-trigger reconciles. |
 | v0.2.1 | Missed `autoApprovers` approvals are replayed after every successful policy write/InSync check (routes inside a rendered approver prefix, router tag listed there; events `RoutesApproved`) — no manual `approve-routes` needed. Rejected/failed policy writes are retried with backoff (15 s doubling to 5 min) instead of a fixed 5 min — a base test whose `src` is momentarily unresolvable (node re-registering) heals in seconds. `tailnet_policy_apply_errors_total` therefore counts more increments per outage: raise `TailnetPolicyApplyErrors` to `>= 6` per 30 min (a permanent failure gets there in ~8 min, a hiccup under 4 min stays at ≤ 5). |
 | v0.2.3 | `ApiReachable` is taken from Headscale `/health` (new reason `Unhealthy`: server up, database down) and `ApiKeyValid` from a live authenticated call (new reason `Rejected`); both are re-checked at least every 5 min instead of once per key half-life. |
@@ -410,7 +486,14 @@ Version notes:
 | The operator must stop writing | `policy.mode: DryRun` — the operator only renders from now on |
 | Restore the Git policy on the server | `kubectl -n tailnet-system exec deploy/headscale -- headscale policy set -f /acl/policy` (mode DryRun first, or it is overwritten within 5 min) |
 | Leave database mode | `HEADSCALE_POLICY_MODE=file`, restart; the mounted file is authoritative again |
-| Downgrade the operator | apply the previous image; CRDs are backwards compatible (new fields are optional) |
+| Downgrade the operator | restore both the previous container image and `OPERATOR_IMAGE` (agents also roll back); the newer CRDs and their admission rules remain installed |
+| Relax the v0.3.0 admission rules | restore the previous `deploy/crds/` manifests through the same deployment mechanism; never delete the CRDs, which also deletes their CRs |
+
+For a v0.3.0 → v0.2.3 rollback, restore the v0.2.3 CRD manifests and both image pins in Git when using GitOps.
+An image-only rollback does not undo schema validation or remove stored preflight conditions.
+Older schemas can prune newer optional fields on subsequent writes; keep the desired CR manifests in Git.
+Neither rollback restores a previously applied Headscale policy. Use `DryRun` first if policy writes must stop.
+Agent replacement can interrupt connections during a downgrade just as during an upgrade.
 
 ## 10. Troubleshooting
 
@@ -419,6 +502,10 @@ Version notes:
 | `Tailnet` `ApiReachable=False/Unreachable` | condition message | `apiUrl` wrong, NetworkPolicy blocks the operator |
 | `Tailnet` `ApiReachable=False/Unhealthy` | Headscale `/health`, its database | Headscale answers but cannot reach its database (it then returns 401 on every API call) |
 | `Tailnet` `ApiKeyValid=False/Rejected` | Headscale `apikeys list` | working key expired or deleted on the server; `Error` = rotation failed (bootstrap key expired) |
+| `HeadscaleCompatible=False/Incompatible` | condition message | missing policy/check endpoint (requires ≥ 0.29), or file policy mode |
+| `PolicyMode=False/File`, `PolicyApplied=False/PolicyModeFile` | Headscale `policy.mode` | switch to database mode using §7.3; writes are skipped until mode detection changes |
+| Preflight `Unknown/ProbeFailed` | API/key conditions and Headscale logs | failed requests or invalid response shape; not proof of file mode |
+| `SplitDNS=Unknown/CannotVerify` | condition message and Headscale DNS config | manually configure the named split zone; external Headscale has no DNS API |
 | Egress `TagKnown=False/Unknown` | `kubectl describe tailnetegress` | tag missing in `tagOwners` (file mode) |
 | Egress `TagKnown=False/PolicyPending` | `kubectl describe tailnet` → `PolicyApplied` | policy not applied yet / rejected |
 | `status.targets[].reason=NotAdvertised` | router `--advertise-routes` | route not advertised |

@@ -85,8 +85,8 @@ spec:
 
 ```sh
 kubectl get tailnet,tailnetegress,tailnetingress -A
-# NAME                             SERVER                   APIKEY   EXPIRES                POLICY    AGE
-# tailnet.tailnet.this-is-fine.io/corp   https://ts.example.com   True     2026-10-28T12:00:00Z   Applied   3d
+# NAME                             SERVER                   APIKEY   EXPIRES                COMPAT       POLICY    DNS            AGE
+# tailnet.tailnet.this-is-fine.io/corp   https://ts.example.com   True     2026-10-28T12:00:00Z   Compatible   Applied   CannotVerify   3d
 #
 # NAMESPACE        NAME                                          TAG                      HOSTNAME             READY   AGE
 # tailnet-system   tailnetegress.tailnet.this-is-fine.io/billing-dev   tag:egress-billing-dev   egress-billing-dev   True    2m
@@ -107,8 +107,10 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | --- | --- | --- |
 | `server` | — | login/control URL, the agents' ControlURL |
 | `apiUrl` | `server` | in-cluster REST endpoint |
+| `headscale.version` | none | optional version hint for diagnostics; does not bypass capability probes |
+| `headscale.ref` | empty | reserved for managed Headscale; non-empty values are rejected |
 | `apiSecretRef.{name,key}` | key `apiKey` | Secret (operator namespace) with the read-only bootstrap API key |
-| `apiKeyLifetime` / `authKeyLifetime` | `720h` / `168h` | working API key / per-CR pre-auth key; both rotated at half-life |
+| `apiKeyLifetime` / `authKeyLifetime` | `720h` / `168h` | working API key (minimum 1h) / per-CR pre-auth key; both rotated at half-life |
 | `proxy.{image,resources,mtu,probeInterval}` | operator image, –, `1200`, `5m` | agent pod defaults |
 | `tagTemplate` / `hostnameTemplate` | `tag:egress-{name}` / `egress-{name}` | egress tag and MagicDNS name when the CR sets none |
 | `ingressTagTemplate` / `ingressHostnameTemplate` | `tag:ingress-{name}` / `ingress-{name}` | same for ingress |
@@ -128,9 +130,9 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | `tailnetRef.name` | — | the Tailnet |
 | `tag` / `hostname` | from templates | node tag / MagicDNS name |
 | `consumerNamespaces[]` | — | namespaces whose pods may reach the target Services (NetworkPolicy) |
-| `targets[].name` | — | Service name (unique in the operator namespace) |
+| `targets[].name` | — | Service name starting with a letter, ≤63 characters; unique within the CR and operator namespace; 1–50 targets |
 | `targets[].address`, `.port` | — | off-cluster host (IP or MagicDNS name) and TCP port |
-| `targets[].aliases[]` | none | DNS names resolving to the target Service (needs `dns.hostsConfigMap`) |
+| `targets[].aliases[]` | none | lowercase DNS names, each ≤63 characters, resolving to the target Service (needs `dns.hostsConfigMap`) |
 | `image`, `resources` | Tailnet defaults | agent overrides |
 
 ### TailnetIngress (tenant namespace)
@@ -139,22 +141,29 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | --- | --- | --- |
 | `tailnetRef.name` | — | the Tailnet |
 | `tag` / `hostname` | from templates | node tag / MagicDNS name |
-| `allowFrom[]` | none | peers granted access (policy `src`); each must match `ingressSourceAllowlist` |
-| `exposes[].name`, `.port` | — | listener on the tailnet node |
+| `allowFrom[]` | required | at least one non-empty peer source (policy `src`); each must match `ingressSourceAllowlist` when policy generation is enabled |
+| `exposes[].name`, `.port` | — | listener on the tailnet node; 1–50 exposes, unique names and ports |
 | `exposes[].backend.{service,namespace,port}` | namespace = CR's | in-cluster backend; another namespace only to funnel through a shared gateway |
 | `image`, `resources` | Tailnet defaults | agent overrides |
+
+Kubernetes ≥1.31 is required. CR names, addresses, ports, list sizes and policy inputs are checked
+at admission. See [validation rules and tests](docs/USAGE.md#13-validation) before upgrading CRDs.
 
 ### Status and conditions
 
 | Kind | Conditions | Notable reasons |
 | --- | --- | --- |
-| `Tailnet` | `ApiReachable`, `ApiKeyValid`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable` / `Unhealthy` (database down); `Valid` / `Rejected` / `Error`; `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
+| `Tailnet` | `ApiReachable`, `ApiKeyValid`, `HeadscaleCompatible`, `PolicyMode`, `SplitDNS`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable` / `Unhealthy` (database down); `Valid` / `Rejected` / `Error`; `Compatible` / `Incompatible` / `CannotVerify` / `ProbeFailed`; `Database` / `File`; `SplitDNS=Unknown/CannotVerify` (manual configuration required); `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyModeFile` (write skipped), `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
 | `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`, `ProbeFailed` (agent not scraped — NetworkPolicy or pod down; nothing is known about routes/dials); `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`; per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved` (re-approved by the operator on the next policy reconcile), `NoGrant`, `ProbeFailed` |
 | `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist) and `InvalidDNSName` |
 
 `Tailnet.status.policy` = `{renderedHash, appliedHash, appliedAt, generated{tags,grants,routes}}`;
 `TailnetIngress.status.dnsName` is the rendered DNS name (published as A record only — the IPv4 node
-address; `status.tag` is the effective tag). Event `PolicyDriftOverwritten` fires when
+address; `status.tag` is the effective tag). `kubectl get tailnet` includes `COMPAT` and `DNS` reason columns.
+Preflight uses the API response shape, not a reported server version: database policy mode and a
+successful non-mutating `policy/check` probe are required for `Compatible`. Missing or failed
+observations stay `Unknown`. See [preflight details](docs/INSTALL.md#25-preflight).
+Event `PolicyDriftOverwritten` fires when
 the live policy was changed behind the operator's back and rewritten.
 
 Metrics (controller-runtime registry): `tailnet_apikey_expires_seconds`,
@@ -197,6 +206,8 @@ A single image carries both binaries; the operator runs `/tailnet-operator`, eac
 nix-shell          # go toolchain + go-task + kubectl + kustomize
 task lint test     # gofmt + go vet + unit tests
 task crds          # regenerate deploy/crds/ from the Go types
+# With KUBEBUILDER_ASSETS pointing to local envtest binaries (Kubernetes >=1.31):
+task test-validation # real API-server admission tests; optional LIVE_CR_FILE export
 task image         # build the combined bundle image locally
 ```
 
