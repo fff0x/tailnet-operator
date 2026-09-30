@@ -16,6 +16,9 @@ spec:
   # apiKeyLifetime: 720h   # working key, rotated at half-life
   # authKeyLifetime: 168h  # per-CR pre-auth key, rotated at half-life
   proxy:
+    # Optional registry Secret names; must exist in EVERY agent namespace. Omit to inherit
+    # AGENT_IMAGE_PULL_SECRETS from the operator; [] clears that default (SA admission may add its own).
+    # imagePullSecrets: [dockerconfig]
     mtu: 1200
     probeInterval: 5m
   # DNS names (optional). The operator renders a CoreDNS `hosts` file into this ConfigMap (operator

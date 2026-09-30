@@ -50,8 +50,8 @@ only from the operator namespace. A scraper in another namespace needs a site-ow
 the agent pods and allowing only that scraper on TCP 9080. This chart does not silently broaden agent policies.
 The operator's separate `networkPolicy.metricsPeers` controls TCP 8080 when operator isolation is enabled.
 
-Bundled alerts cover operator availability, reconciliation errors, Headscale 5xx, current Ready reasons,
-policy convergence/rejection/write failures, generated-entry drops, route approval replays, offline nodes and key expiry.
+Bundled alerts cover operator availability, reconciliation errors, Headscale 5xx, current Ready reasons and policy convergence/rejection/write failures.
+They also cover generated-entry drops, route approval replays, offline nodes and key expiry.
 `TailnetReconcileErrors` requires more than 0.1 errors/second for 10 minutes.
 `TailnetHeadscaleAPIErrors` requires more than 5% HTTP 5xx over 10 minutes, sustained for 10 minutes.
 `TailnetApprovalReplays` detects more than three successfully replayed route approvals in one hour.
@@ -105,8 +105,9 @@ process pauses, partitions and in-flight Headscale requests still require failov
 These source and rendering contracts do not establish live failover or week-long soak acceptance.
 
 With `leaderElection.enabled: false`, only one replica is allowed and updates use `Recreate`.
-**Migration requires a non-overlapping handover:** before enabling election from a disabled or older non-electing binary,
-stop the old operator and wait for its pod to terminate. Before disabling election, stop all electing replicas.
+**Migration requires a non-overlapping handover.**
+Before enabling election from a disabled or older non-electing binary, stop the old operator.
+Wait for its pod to terminate. Before disabling election, stop all electing replicas.
 Do not roll between electing and non-electing processes: a Lease cannot protect against a process that ignores it.
 Keep the existing app-name-only Deployment selector for manifest adoption; it is immutable.
 
@@ -145,9 +146,9 @@ For a manually managed installation, use `task crd-upgrade KUBE_CONTEXT=<reviewe
 For Flux, use `HelmRelease.spec.install.crds: CreateReplace` and `upgrade.crds: CreateReplace`.
 Do not combine independent CRD writers without an explicit ownership handover.
 
-Switching from copied manifests is **not** a blind delete-and-install operation: protect CRDs from Flux
-pruning first, retain CRs and bootstrap Secrets, plan Helm ownership adoption, and prevent overlapping
-operator instances. Keep existing resource names, namespace and Deployment selectors. Test the handover
+Switching from copied manifests is **not** a blind delete-and-install operation.
+First, protect CRDs from Flux pruning. Retain CRs and bootstrap Secrets.
+Plan Helm ownership adoption. Prevent overlapping operator instances. Keep existing resource names, namespace and Deployment selectors. Test the handover
 in lab before production. A Git revert alone does not undo Helm ownership or schema changes.
 Never delete CRDs as a migration or rollback shortcut.
 
@@ -155,11 +156,13 @@ Never delete CRDs as a migration or rollback shortcut.
 
 - `task chart`: helm-docs, lint, kubeconform, CRD/render drift checks and local Helm contract tests.
 - `task deploy-gen`: replace the generated standalone `deploy/operator.yaml` with default chart resources.
-- Planned native CI runs the portable lint/render/drift gate and a fresh native TEST container before publication.
+- The prepared native CI specification runs portable chart checks and a fresh native TEST container before publication.
   The broker itself does not provide Go, Task or helm-docs; local checks do not establish broker execution.
-- The prepared `ci-build` extension (`mixed-helm-v1`) publishes charts alongside the image.
-  Release and deploy it before publishing this repo. A planned consumer gate rejects older brokers before any build.
-  The chart alone does not install that CI gate or prove that the running broker supports it.
+- Before publishing, release a broker whose `ci-build` supports `mixed-helm-v1` and `image-result-v1`, with the pinned audit tools.
+  Deploy that broker. Configure its immutable `CI_BUILDER_IMAGE` identity. Consumer preflight rejects missing capabilities or tools.
+  Post-publication image audit checks both platform children and verifies SBOM/provenance attestations;
+  failure rejects acceptance but cannot roll back artifacts. The chart alone does not install that CI gate,
+  and existing releases are not claimed to carry its evidence. See `docs/SECURITY.md` in the source tree.
 - Chart destination: `Taskfile.yaml` variable `OCI_CHART_PATH` plus Chart.name.
   Mixed branch builds publish `0.3.1-dev.g<sha>` with appVersion set to the commit SHA, plus SHA/latest aliases.
   The annotated release publishes plain Chart.version (`0.3.1`), **not** `v0.3.1`; it must match the Git tag without `v`.
