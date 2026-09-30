@@ -21,31 +21,43 @@ import (
 // Client talks to one Headscale server with one bearer token. The operator builds a fresh Client per
 // reconcile with the current working key, so a rotated key is picked up without any shared state.
 type Client struct {
-	baseURL string
-	token   string
-	http    *http.Client
+	baseURL  string
+	token    string
+	http     *http.Client
+	observer Observer
 }
 
-// New returns a client for baseURL (e.g. https://ts.example.com) authenticating with token.
-func New(baseURL, token string) *Client {
+// Observer receives one sanitized observation per operation. Code is zero when no response
+// arrived; method and pathTemplate are bounded constants, never request or response data.
+type Observer func(method, pathTemplate string, code int, elapsed time.Duration)
+
+// New returns a client for baseURL authenticating with token, optionally observing operations.
+// Only the first observer is used; existing two-argument callers need no instrumentation.
+func New(baseURL, token string, observers ...Observer) *Client {
+	var observer Observer
+	if len(observers) > 0 {
+		observer = observers[0]
+	}
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		token:   token,
-		http:    &http.Client{Timeout: 15 * time.Second},
+		observer: observer,
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		token:    token,
+		http:     &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
 // Node is the subset of a Headscale node the operator reads.
 type Node struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	GivenName       string   `json:"givenName"`
-	Online          bool     `json:"online"`
-	IPAddresses     []string `json:"ipAddresses"`
-	AvailableRoutes []string `json:"availableRoutes"`
-	ApprovedRoutes  []string `json:"approvedRoutes"`
-	SubnetRoutes    []string `json:"subnetRoutes"`
-	Tags            []string `json:"tags"`
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	GivenName       string     `json:"givenName"`
+	Online          bool       `json:"online"`
+	LastSeen        *time.Time `json:"lastSeen"`
+	IPAddresses     []string   `json:"ipAddresses"`
+	AvailableRoutes []string   `json:"availableRoutes"`
+	ApprovedRoutes  []string   `json:"approvedRoutes"`
+	SubnetRoutes    []string   `json:"subnetRoutes"`
+	Tags            []string   `json:"tags"`
 }
 
 // PreAuthKey is a minted pre-auth key. Key carries the secret used to register a node.
@@ -101,6 +113,11 @@ func (e *requestError) Unwrap() error { return e.cause }
 
 // safeOperation uses only bounded constants, never URL, header, body or dynamic path data.
 func safeOperation(method, path string) string {
+	method, path = safeLabels(method, path)
+	return "headscale " + method + " " + path
+}
+
+func safeLabels(method, path string) (string, string) {
 	switch method {
 	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete:
 	default:
@@ -108,7 +125,7 @@ func safeOperation(method, path string) string {
 	}
 	route := "unknown endpoint"
 	switch path {
-	case "/health", "/api/v1/node", "/api/v1/preauthkey", "/api/v1/preauthkey/expire",
+	case "/health", "/api/v1/health", "/api/v1/policy/check", "/api/v1/node", "/api/v1/preauthkey", "/api/v1/preauthkey/expire",
 		"/api/v1/apikey", "/api/v1/apikey/expire", "/api/v1/policy":
 		route = path
 	default:
@@ -124,11 +141,19 @@ func safeOperation(method, path string) string {
 			}
 		}
 	}
-	return "headscale " + method + " " + route
+	return method, route
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	op := safeOperation(method, path)
+	started := time.Now()
+	code := 0
+	if c.observer != nil {
+		defer func() {
+			m, p := safeLabels(method, path)
+			c.observer(m, p, code, time.Since(started))
+		}()
+	}
 	fail := func(stage string, cause error) error {
 		return &requestError{message: op + ": " + stage, cause: cause}
 	}
@@ -152,6 +177,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	if err != nil {
 		return fail("transport failed", err)
 	}
+	code = resp.StatusCode
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		// Neither the status text nor error body is trustworthy. Do not read the error body.
