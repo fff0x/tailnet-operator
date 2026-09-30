@@ -15,6 +15,12 @@ pkgs.mkShell {
     kubectl
     kustomize
     go-task
+    kubernetes-helm
+    helm-docs
+    kubeconform
+    jq # Portable dashboard JSON validation (also available in the CI broker)
+    curl
+    sqlite # Offline route fixtures for the real Headscale integration tests
   ];
 
   # tsnet phones home to log.tailscale.com by default; keep the dev shell quiet too.
