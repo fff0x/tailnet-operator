@@ -214,6 +214,17 @@ spec:
                       Container image carrying the tailnet-agent binary. Empty → the operator's own image, so a
                       single pushed image serves both control and data plane.
                     type: string
+                  imagePullSecrets:
+                    description: |-
+                      Names of existing image-pull Secrets in each agent pod's namespace. Omitted inherits
+                      the operator defaults; an explicit empty list disables those defaults. Duplicate names
+                      are collapsed when building pods because Kubernetes merges these references by name.
+                    items:
+                      maxLength: 253
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                      type: string
+                    type: array
                   mtu:
                     default: 1200
                     description: tsnet outer path MTU. 1200 leaves headroom for a

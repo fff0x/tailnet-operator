@@ -19,6 +19,14 @@ type ProxySpec struct {
 	// single pushed image serves both control and data plane.
 	// +optional
 	Image string `json:"image,omitempty"`
+	// Names of existing image-pull Secrets in each agent pod's namespace. Omitted inherits
+	// the operator defaults; an explicit empty list disables those defaults. Duplicate names
+	// are collapsed when building pods because Kubernetes merges these references by name.
+	// +optional
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
+	ImagePullSecrets *[]string `json:"imagePullSecrets,omitempty"`
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 	// tsnet outer path MTU. 1200 leaves headroom for a ~1320-byte outer path (typical cloud CNI overlay).
