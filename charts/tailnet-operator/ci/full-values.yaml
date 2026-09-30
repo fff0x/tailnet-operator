@@ -1,0 +1,62 @@
+# Render-only fixture; these addresses and credentials are not deployment defaults.
+namespace: chart-test
+fullnameOverride: example-operator
+replicas: 2
+leaderElection:
+  enabled: true
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: tailnet-operator
+image:
+  repository: registry.example.com/operator
+  tag: test
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+agentImage:
+  repository: registry.example.com/agent
+  tag: test
+imagePullSecrets:
+  - name: operator-registry
+agent:
+  imagePullSecrets: [tenant-registry]
+env:
+  extra:
+    - name: TS_NO_LOGS_NO_SUPPORT
+      value: "1"
+monitoring:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+  podMonitor:
+    enabled: true
+    interval: 45s
+    namespaceSelector:
+      any: false
+      matchNames: [chart-test, tenant]
+    labels:
+      release: prometheus
+  rules:
+    enabled: true
+    groups:
+      - name: fixture
+        rules:
+          - alert: ChartFixture
+            expr: vector(0) == 1
+            labels:
+              severity: info
+  dashboard:
+    enabled: true
+    kind: ConfigMap
+    json: '{"title":"Chart fixture","panels":[]}'
+networkPolicy:
+  enabled: true
+  kubeAPICIDRs: [10.96.0.1/32]
+  headscaleCIDRs: [10.0.0.8/32]
+  metricsPeers:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring

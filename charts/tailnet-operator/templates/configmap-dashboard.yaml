@@ -1,0 +1,32 @@
+{{- if .Values.monitoring.dashboard.enabled }}
+{{- $dashboard := default (.Files.Get "files/dashboard.json") .Values.monitoring.dashboard.json }}
+{{- $parsed := mustFromJson $dashboard }}
+{{- if eq .Values.monitoring.dashboard.kind "ConfigMap" }}
+apiVersion: v1
+kind: ConfigMap
+{{- else if eq .Values.monitoring.dashboard.kind "GrafanaDashboard" }}
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+{{- else }}
+{{- fail "monitoring.dashboard.kind must be GrafanaDashboard or ConfigMap" }}
+{{- end }}
+metadata:
+  name: {{ printf "%s-dashboard" (include "tailnet-operator.name" .) | quote }}
+  namespace: {{ include "tailnet-operator.namespace" . | quote }}
+  labels:
+    {{- toYaml .Values.monitoring.dashboard.labels | nindent 4 }}
+{{- if eq .Values.monitoring.dashboard.kind "ConfigMap" }}
+data:
+  tailnet-operator.json: {{ $dashboard | quote }}
+{{- else }}
+spec:
+  instanceSelector:
+    {{- toYaml .Values.monitoring.dashboard.instanceSelector | nindent 4 }}
+  folder: {{ .Values.monitoring.dashboard.folder | quote }}
+  allowCrossNamespaceImport: {{ .Values.monitoring.dashboard.allowCrossNamespaceImport }}
+  datasources:
+    - inputName: DS_PROMETHEUS
+      datasourceName: {{ .Values.monitoring.dashboard.datasourceName | quote }}
+  json: {{ $dashboard | quote }}
+{{- end }}
+{{- end }}

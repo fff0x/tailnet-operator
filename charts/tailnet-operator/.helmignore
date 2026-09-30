@@ -1,0 +1,3 @@
+# Development inputs are not part of the installable chart archive.
+ci/
+README.md.gotmpl

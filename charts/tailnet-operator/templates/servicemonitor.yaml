@@ -1,0 +1,18 @@
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "tailnet-operator.name" . | quote }}
+  namespace: {{ include "tailnet-operator.namespace" . | quote }}
+  labels:
+    {{- mergeOverwrite (include "tailnet-operator.labels" . | fromYaml) .Values.monitoring.serviceMonitor.labels | toYaml | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "tailnet-operator.selector" . | nindent 6 }}
+  endpoints:
+    - port: metrics
+      # Resource namespace/name labels belong to the observed CR, not the operator pod.
+      honorLabels: true
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+{{- end }}

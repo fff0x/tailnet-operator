@@ -1,16 +1,10 @@
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: tailnet-operator
-  namespace: tailnet-system
----
-# Cluster-scoped only for the cluster-scoped kind. Everything else is namespaced (Role below), so
-# taking over the operator does not hand out cluster-wide write on Secrets or Deployments.
+# Read CR specs and write only their status; never mutate CR specs.
+# TailnetIngress lives in any tenant namespace. TailnetEgress stays in the Role.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: tailnet-operator
+  name: {{ printf "%s-crds" (include "tailnet-operator.name" .) | quote }}
 rules:
   - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnets]
@@ -18,15 +12,33 @@ rules:
   - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnets/status]
     verbs: [get, update, patch]
-  # TailnetIngress is namespaced but lives in any tenant namespace, so it (and the children it owns)
-  # are managed cluster-wide. This is the deliberate widening the egress path avoids: an operator
-  # that provisions tenant namespaces needs cluster-wide write on Secrets/Deployments here.
   - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnetingresses]
     verbs: [get, list, watch]
   - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnetingresses/status]
     verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-crds" (include "tailnet-operator.name" .) | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-crds" (include "tailnet-operator.name" .) | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "tailnet-operator.name" . | quote }}
+    namespace: {{ include "tailnet-operator.namespace" . | quote }}
+---
+# Tenant ingress children require cluster-wide workload access, including Secrets.
+# Splitting roles makes this visible; it does not provide tenant isolation.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-workloads" (include "tailnet-operator.name" .) | quote }}
+rules:
   - apiGroups: [""]
     resources: [secrets, configmaps]
     verbs: [get, list, watch, create, update, patch, delete]
@@ -47,28 +59,36 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: tailnet-operator
+  name: {{ printf "%s-workloads" (include "tailnet-operator.name" .) | quote }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: tailnet-operator
+  name: {{ printf "%s-workloads" (include "tailnet-operator.name" .) | quote }}
 subjects:
   - kind: ServiceAccount
-    name: tailnet-operator
-    namespace: tailnet-system
+    name: {{ include "tailnet-operator.name" . | quote }}
+    namespace: {{ include "tailnet-operator.namespace" . | quote }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: tailnet-operator
-  namespace: tailnet-system
+  name: {{ include "tailnet-operator.name" . | quote }}
+  namespace: {{ include "tailnet-operator.namespace" . | quote }}
 rules:
+  {{- if .Values.leaderElection.enabled }}
+  # Election is namespaced; replicas share the fixed manager Lease ID.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch]
+  {{- end }}
   - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnetegresses]
     verbs: [get, list, watch]
   - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnetegresses/status]
     verbs: [get, update, patch]
+  # Services are namespace-only. The other workload rules are explicit here for
+  # egress, but already granted globally by -workloads (including these Secrets).
   - apiGroups: [""]
     resources: [secrets, configmaps, services]
     verbs: [get, list, watch, create, update, patch, delete]
@@ -89,13 +109,13 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: tailnet-operator
-  namespace: tailnet-system
+  name: {{ include "tailnet-operator.name" . | quote }}
+  namespace: {{ include "tailnet-operator.namespace" . | quote }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: tailnet-operator
+  name: {{ include "tailnet-operator.name" . | quote }}
 subjects:
   - kind: ServiceAccount
-    name: tailnet-operator
-    namespace: tailnet-system
+    name: {{ include "tailnet-operator.name" . | quote }}
+    namespace: {{ include "tailnet-operator.namespace" . | quote }}
