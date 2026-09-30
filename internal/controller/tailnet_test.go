@@ -13,13 +13,40 @@ import (
 	"this-is-fine.io/tailnet-operator/internal/headscale"
 )
 
+func TestMintAndVerifyWithoutPolicy(t *testing.T) {
+	var creates, verifies int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/apikey":
+			creates++
+			_, _ = w.Write([]byte(`{"apiKey":"new.key"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/apikey":
+			verifies++
+			if r.Header.Get("Authorization") != "Bearer new.key" {
+				t.Error("verification must use the newly minted key")
+			}
+			_, _ = w.Write([]byte(`{"apiKeys":[]}`))
+		default:
+			t.Errorf("unexpected call %s %s; key verification must not require a policy", r.Method, r.URL.Path)
+			http.Error(w, "policy unavailable", http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+	now := time.Now()
+	r := &TailnetReconciler{}
+	key, exp, err := r.mintAndVerify(context.Background(), srv.URL, "bootstrap", time.Hour, now)
+	if err != nil || key != "new.key" || !exp.Equal(now.Add(time.Hour)) || creates != 1 || verifies != 1 {
+		t.Fatalf("key=%q expiry=%s creates=%d verifies=%d err=%v", key, exp, creates, verifies, err)
+	}
+}
+
 // TestHealthConditions: a dead database must surface as ApiReachable=Unhealthy, a bad key as
 // ApiKeyValid=Rejected — not as the blanket 401 Headscale reports for both.
 func TestHealthConditions(t *testing.T) {
 	cases := []struct {
-		name, health, policy string
-		ok                   bool
-		reachable, keyValid  string // expected reasons; "" = untouched
+		name, health, keys  string
+		ok                  bool
+		reachable, keyValid string // expected reasons; "" = untouched
 	}{
 		{"healthy", "pass", "ok", true, "Reachable", "Valid"},
 		{"db down", "fail", "401", false, "Unhealthy", ""},
@@ -35,14 +62,14 @@ func TestHealthConditions(t *testing.T) {
 						w.WriteHeader(500)
 					}
 					_, _ = w.Write([]byte(`{"status":"` + c.health + `"}`))
-				case "/api/v1/policy":
-					switch c.policy {
+				case "/api/v1/apikey":
+					switch c.keys {
 					case "401":
 						http.Error(w, "Unauthorized", 401)
 					case "500":
 						http.Error(w, "boom", 500)
 					default:
-						_, _ = w.Write([]byte(`{"policy":"{}"}`))
+						_, _ = w.Write([]byte(`{"apiKeys":[]}`))
 					}
 				default:
 					http.NotFound(w, r)
