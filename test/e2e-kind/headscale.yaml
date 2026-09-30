@@ -1,0 +1,129 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: headscale-config
+  namespace: tailnet-system
+data:
+  config.yaml: |
+    server_url: https://unused.invalid
+    listen_addr: 0.0.0.0:8080
+    metrics_listen_addr: 127.0.0.1:9090
+    grpc_listen_addr: 127.0.0.1:50443
+    grpc_allow_insecure: false
+    noise:
+      private_key_path: /var/lib/headscale/noise.key
+    prefixes:
+      v4: 100.64.0.0/10
+    database:
+      type: sqlite
+      sqlite:
+        path: /var/lib/headscale/db.sqlite
+    unix_socket: /var/lib/headscale/headscale.sock
+    unix_socket_permission: "0600"
+    policy:
+      mode: database
+    derp:
+      server:
+        enabled: false
+      urls: []
+      paths: [/etc/headscale/derp.yaml]
+      auto_update_enabled: false
+    dns:
+      magic_dns: false
+      override_local_dns: false
+      nameservers:
+        global: []
+        split: {}
+    node:
+      routes:
+        ha:
+          probe_interval: 0s
+    disable_check_updates: true
+    logtail:
+      enabled: false
+    log:
+      level: warn
+      format: json
+  # A region is required, but contains no peer and performs no external DERP lookup.
+  derp.yaml: |
+    regions:
+      999:
+        regionid: 999
+        regioncode: isolated
+        regionname: Isolated fixture
+        nodes: []
+  seed-policy.json: '{"tagOwners":{},"acls":[{"action":"accept","src":["*"],"dst":["192.0.2.1:443"]}]}'
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: headscale
+  namespace: tailnet-system
+  labels:
+    app: headscale-fixture
+spec:
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: headscale
+      image: HEADSCALE_IMAGE
+      imagePullPolicy: Never
+      command: [/ko-app/headscale]
+      args: [--config, /etc/headscale/config.yaml, serve]
+      env:
+        - name: TS_NO_LOGS_NO_SUPPORT
+          value: "1"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      ports:
+        - name: http
+          containerPort: 8080
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: http
+        periodSeconds: 1
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 256Mi
+      volumeMounts:
+        - name: config
+          mountPath: /etc/headscale
+          readOnly: true
+        - name: state
+          mountPath: /var/lib/headscale
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: config
+      configMap:
+        name: headscale-config
+    - name: state
+      emptyDir: {}
+    - name: tmp
+      emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: headscale
+  namespace: tailnet-system
+spec:
+  selector:
+    app: headscale-fixture
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

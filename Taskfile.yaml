@@ -24,6 +24,16 @@ tasks:
     cmds:
       - go test ./...
 
+  e2e:
+    desc: Run isolated Tier-1 tests with real Headscale (downloads pinned assets; no cluster)
+    cmds:
+      - bash hack/e2e.sh {{.CLI_ARGS}}
+
+  e2e-kind:
+    desc: Run disposable installation and leader failover (local rootless Podman and delegated cgroups required)
+    cmds:
+      - bash hack/e2e-kind.sh
+
   test-validation:
     desc: Validate CRDs, examples and optional LIVE_CR_FILE in an isolated envtest API server
     requires:
