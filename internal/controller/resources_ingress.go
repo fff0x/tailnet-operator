@@ -102,7 +102,7 @@ func ingressNetworkPolicy(in *tnv1.TailnetIngress, ns, operatorNS string) *netwo
 // ingressAgentDeployment runs one ingress agent pod (AGENT_MODE=ingress). Same security posture,
 // state emptyDir and health probe as the egress agent; the only behavioural difference is the mode
 // env, which flips the agent from listen-local/dial-tailnet to listen-tailnet/dial-cluster.
-func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string) *appsv1.Deployment {
+func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string, defaultImagePullSecrets []string) *appsv1.Deployment {
 	replicas := int32(1)
 	podSec, cSec := nonRoot()
 
@@ -127,7 +127,8 @@ func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: ingressObjLabels(in.Name)},
 				Spec: corev1.PodSpec{
-					SecurityContext: podSec,
+					SecurityContext:  podSec,
+					ImagePullSecrets: agentImagePullSecrets(tn.Spec.Proxy.ImagePullSecrets, defaultImagePullSecrets),
 					Containers: []corev1.Container{{
 						Name:            "agent",
 						Image:           image,

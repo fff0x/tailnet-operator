@@ -163,10 +163,30 @@ func nonRoot() (*corev1.PodSecurityContext, *corev1.SecurityContext) {
 	return pod, container
 }
 
+// agentImagePullSecrets resolves Tailnet overrides without sharing mutable backing storage with
+// defaults, the Tailnet, or another generated pod. Secrets must already exist in the pod namespace.
+func agentImagePullSecrets(override *[]string, defaults []string) []corev1.LocalObjectReference {
+	names := defaults
+	if override != nil {
+		names = *override
+	}
+	// Pod imagePullSecrets is keyed by name for server-side apply. Duplicate entries
+	// are rejected by its type converter, even if a CR or environment list contains them.
+	refs := make([]corev1.LocalObjectReference, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if !seen[name] {
+			refs = append(refs, corev1.LocalObjectReference{Name: name})
+			seen[name] = true
+		}
+	}
+	return refs
+}
+
 // agentDeployment runs one agent pod. Recreate, not RollingUpdate: two pods would briefly share one
 // tailnet hostname and fight over the identity. The tailnet identity is in-memory and ephemeral by
 // design; the only volumes are the targets ConfigMap and a throwaway emptyDir for tsnet's work Dir.
-func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string) *appsv1.Deployment {
+func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string, defaultImagePullSecrets []string) *appsv1.Deployment {
 	replicas := int32(1)
 	podSec, cSec := nonRoot()
 
@@ -191,7 +211,8 @@ func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string)
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: objLabels(eg.Name)},
 				Spec: corev1.PodSpec{
-					SecurityContext: podSec,
+					SecurityContext:  podSec,
+					ImagePullSecrets: agentImagePullSecrets(tn.Spec.Proxy.ImagePullSecrets, defaultImagePullSecrets),
 					Containers: []corev1.Container{{
 						Name:  "agent",
 						Image: image,
