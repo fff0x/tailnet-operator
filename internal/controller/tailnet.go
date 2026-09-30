@@ -22,6 +22,7 @@ import (
 	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
 	"this-is-fine.io/tailnet-operator/internal/headscale"
 	"this-is-fine.io/tailnet-operator/internal/keys"
+	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
 )
 
 const (
@@ -33,6 +34,7 @@ const (
 // TailnetReconciler owns the working API key for one control server: it mints one from the bootstrap
 // key, then rotates it at half-life, always verifying the new key before expiring the old.
 type TailnetReconciler struct {
+	Metrics *operatormetrics.Metrics
 	client.Client
 	Scheme            *runtime.Scheme
 	OperatorNamespace string
@@ -95,7 +97,7 @@ func (r *TailnetReconciler) apiKeyFor(ctx context.Context, tn *tnv1.Tailnet) (st
 
 	case keys.Due:
 		// Rotate with the still-valid current key, verify, then expire the old prefix.
-		newKey, newExp, err := r.mintAndVerify(ctx, apiURL, curKey, lifetime, now)
+		newKey, newExp, err := r.mintAndVerify(ctx, apiURL, curKey, lifetime, now, r.Metrics.Headscale(tn.Name))
 		if err != nil {
 			// Current key is still valid until curExpiry; keep using it and retry next reconcile.
 			return curKey, curExpiry, err
@@ -105,7 +107,7 @@ func (r *TailnetReconciler) apiKeyFor(ctx context.Context, tn *tnv1.Tailnet) (st
 		}
 		if curPrefix != "" {
 			// Best-effort: a lingering old key expires on its own at worst.
-			_ = headscale.New(apiURL, newKey).ExpireAPIKey(ctx, curPrefix)
+			_ = headscale.New(apiURL, newKey, r.Metrics.Headscale(tn.Name)).ExpireAPIKey(ctx, curPrefix)
 		}
 		return newKey, newExp, nil
 
@@ -114,7 +116,7 @@ func (r *TailnetReconciler) apiKeyFor(ctx context.Context, tn *tnv1.Tailnet) (st
 		if err != nil {
 			return "", time.Time{}, err
 		}
-		newKey, newExp, err := r.mintAndVerify(ctx, apiURL, bootstrap, lifetime, now)
+		newKey, newExp, err := r.mintAndVerify(ctx, apiURL, bootstrap, lifetime, now, r.Metrics.Headscale(tn.Name))
 		if err != nil {
 			return "", time.Time{}, err
 		}
@@ -128,15 +130,15 @@ func (r *TailnetReconciler) apiKeyFor(ctx context.Context, tn *tnv1.Tailnet) (st
 // mintAndVerify creates a working key with authKey and confirms the NEW key works before returning
 // it. This is the guard against a rotation that locks the operator out: nothing is stored or expired
 // until the replacement has served a real request.
-func (r *TailnetReconciler) mintAndVerify(ctx context.Context, apiURL, authKey string, lifetime time.Duration, now time.Time) (string, time.Time, error) {
+func (r *TailnetReconciler) mintAndVerify(ctx context.Context, apiURL, authKey string, lifetime time.Duration, now time.Time, observers ...headscale.Observer) (string, time.Time, error) {
 	exp := now.Add(lifetime)
-	newKey, err := headscale.New(apiURL, authKey).CreateAPIKey(ctx, exp)
+	newKey, err := headscale.New(apiURL, authKey, observers...).CreateAPIKey(ctx, exp)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("mint api key: %w", err)
 	}
-	if _, err := headscale.New(apiURL, newKey).ListAPIKeys(ctx); err != nil {
+	if _, err := headscale.New(apiURL, newKey, observers...).ListAPIKeys(ctx); err != nil {
 		// The new key does not work; expire it so it does not linger, and fail.
-		_ = headscale.New(apiURL, authKey).ExpireAPIKey(ctx, headscale.PrefixOf(newKey))
+		_ = headscale.New(apiURL, authKey, observers...).ExpireAPIKey(ctx, headscale.PrefixOf(newKey))
 		return "", time.Time{}, fmt.Errorf("verify new api key: %w", err)
 	}
 	return newKey, exp, nil
@@ -184,6 +186,9 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	l := log.FromContext(ctx)
 	var tn tnv1.Tailnet
 	if err := r.Get(ctx, req.NamespacedName, &tn); err != nil {
+		if apierrors.IsNotFound(err) {
+			r.Metrics.Delete("Tailnet", req.Namespace, req.Name)
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -197,14 +202,14 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		l.Error(err, "api key lifecycle")
 		setCond(&tn.Status.Conditions, tn.Generation, "ApiKeyValid", metav1.ConditionFalse, "Error", err.Error())
 		setPreflightConditions(&tn, headscale.Capabilities{}, err)
-		_ = r.Status().Update(ctx, &tn)
+		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &tn)
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	// Reachability and key validity are two questions: /health answers without a key and fails when
 	// Headscale has lost its database (which it otherwise masks as 401 on every call); only a healthy
 	// server can tell us whether the working key is accepted.
-	hs := headscale.New(apiURL, key)
+	hs := headscale.New(apiURL, key, r.Metrics.Headscale(tn.Name))
 	ok := healthConditions(ctx, hs, &tn, exp)
 	if !preflightConditions(ctx, hs, &tn) {
 		ok = false
@@ -213,9 +218,8 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	et := metav1.NewTime(exp)
 	tn.Status.APIKeyExpiresAt = &et
 	tn.Status.ObservedGeneration = tn.Generation
-	apiKeyExpiresSeconds.WithLabelValues(tn.Name).Set(time.Until(exp).Seconds())
 
-	if err := r.Status().Update(ctx, &tn); err != nil {
+	if err := updateObservedStatus(ctx, r.Client, r.Metrics, &tn); err != nil {
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil // another controller wrote the status; re-read and retry
 		}

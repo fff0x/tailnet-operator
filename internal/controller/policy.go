@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +30,7 @@ import (
 
 	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
 	"this-is-fine.io/tailnet-operator/internal/headscale"
+	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
 	"this-is-fine.io/tailnet-operator/internal/naming"
 	"this-is-fine.io/tailnet-operator/internal/policy"
 )
@@ -55,6 +57,7 @@ const (
 // differs. Rendering never removes base content; Headscale validates before storing, so a rejected
 // write leaves the previous policy active and shows up as PolicyApplied=False/PolicyRejected.
 type TailnetPolicyReconciler struct {
+	Metrics *operatormetrics.Metrics
 	client.Client
 	Scheme            *runtime.Scheme
 	Recorder          record.EventRecorder
@@ -87,13 +90,19 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	var tn tnv1.Tailnet
 	if err := r.Get(ctx, req.NamespacedName, &tn); err != nil {
 		r.clearRetry(req.Name)
+		if apierrors.IsNotFound(err) {
+			r.Metrics.Delete("Tailnet", req.Namespace, req.Name)
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	spec := tn.Spec.Policy
 	if spec.BaseConfigMap == "" {
 		return ctrl.Result{}, r.off(ctx, &tn)
 	}
-	policyApplyErrors.WithLabelValues(tn.Name).Add(0) // series exists before the first error → increase() works
+	// Idle reconciliations expose a zero baseline before later events, so increase() can
+	// observe the first error or replay batch rather than starting with its nonzero total.
+	r.Metrics.PolicyError(tn.Name, false)
+	r.Metrics.Approved(tn.Name, 0)
 
 	// Base document.
 	var baseCM corev1.ConfigMap
@@ -215,7 +224,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				"waiting for the Tailnet working API key")
 		})
 	}
-	hs := headscale.New(apiURL, apiKey)
+	hs := headscale.New(apiURL, apiKey, r.Metrics.Headscale(tn.Name))
 	liveHash := ""
 	live, databaseMode, liveErr := hs.GetPolicyWithMode(ctx)
 	// The policy controller can run before preflight on startup. Check the live mode as well,
@@ -243,9 +252,6 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				t.Status.Policy.AppliedAt = &now
 			}
 			setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionTrue, "InSync", "live policy equals the rendered one")
-			if t.Status.Policy.AppliedAt != nil {
-				policyAppliedTimestamp.WithLabelValues(t.Name).Set(float64(t.Status.Policy.AppliedAt.Unix()))
-			}
 		})
 	}
 	if prevApplied != "" && liveHash != "" && liveHash != prevApplied && r.Recorder != nil {
@@ -254,7 +260,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			"live policy differed from the last applied one (manual change?); rewriting the rendered policy")
 	}
 	if err := hs.SetPolicy(ctx, string(rendered)); err != nil {
-		policyApplyErrors.WithLabelValues(tn.Name).Inc()
+		r.Metrics.PolicyError(tn.Name, true)
 		reason := "PolicyRejected"
 		emsg := err.Error()
 		if liveErr != nil {
@@ -284,7 +290,6 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		t.Status.Policy.AppliedHash = hash
 		t.Status.Policy.AppliedAt = &now
 		setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionTrue, "Applied", "rendered policy written to the control server")
-		policyAppliedTimestamp.WithLabelValues(t.Name).Set(float64(now.Unix()))
 	})
 }
 
@@ -390,10 +395,13 @@ func (r *TailnetPolicyReconciler) status(ctx context.Context, name string, mutat
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var t tnv1.Tailnet
 		if err := r.Get(ctx, types.NamespacedName{Name: name}, &t); err != nil {
+			if apierrors.IsNotFound(err) {
+				r.Metrics.Delete("Tailnet", "", name)
+			}
 			return client.IgnoreNotFound(err)
 		}
 		mutate(&t)
-		return r.Status().Update(ctx, &t)
+		return updateObservedStatus(ctx, r.Client, r.Metrics, &t)
 	})
 }
 
