@@ -71,9 +71,21 @@ func (r *TailnetReconciler) apiKeyFor(ctx context.Context, tn *tnv1.Tailnet) (st
 	)
 	if haveCur {
 		curKey = string(cur.Data[apiKeyData])
-		curPrefix = cur.Annotations[annPrefix]
+		curPrefix = headscale.PrefixOf(curKey)
 		if s := cur.Annotations[annExpiresAt]; s != "" {
 			curExpiry, _ = time.Parse(time.RFC3339, s)
+		}
+		// Older operators copied modern hskey-api tokens into this metadata field. Repair
+		// metadata even when rotation is not due, without changing the key or its lifetime.
+		if cur.Annotations[annPrefix] != curPrefix {
+			before := cur.DeepCopy()
+			if cur.Annotations == nil {
+				cur.Annotations = map[string]string{}
+			}
+			cur.Annotations[annPrefix] = curPrefix
+			if err := r.Patch(ctx, &cur, client.MergeFrom(before)); err != nil {
+				return "", time.Time{}, fmt.Errorf("repair working key prefix: %w", err)
+			}
 		}
 	}
 

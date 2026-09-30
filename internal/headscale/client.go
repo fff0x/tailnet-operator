@@ -221,11 +221,43 @@ func (c *Client) SetPolicy(ctx context.Context, policy string) error {
 	return c.do(ctx, http.MethodPut, "/api/v1/policy", body, nil)
 }
 
-// PrefixOf returns the prefix segment of a full API key secret (everything before the first "."),
-// which is what ExpireAPIKey and the list endpoint use to identify a key.
-func PrefixOf(fullKey string) string {
-	if i := strings.IndexByte(fullKey, '.'); i >= 0 {
-		return fullKey[:i]
+// PrefixOf returns the database identifier, never the secret part of a recognized API key.
+// Headscale uses legacy prefix.secret and hskey-api-{12-char-prefix}-{secret} formats. The
+// URL-safe prefix can itself contain '-', so the modern format requires fixed-width parsing.
+// ListAPIKeys returns masked display prefixes; these normalize to the same identifier.
+func PrefixOf(key string) string {
+	if remainder, ok := strings.CutPrefix(key, "hskey-api-"); ok {
+		const size = 12
+		if len(remainder) < size || (len(remainder) > size && remainder[size] != '-') {
+			return ""
+		}
+		prefix := remainder[:size]
+		for _, ch := range prefix {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+				(ch >= '0' && ch <= '9') || ch == '_' || ch == '-') {
+				return ""
+			}
+		}
+		return prefix
 	}
-	return fullKey
+	prefix := strings.TrimSuffix(key, "***")
+	if i := strings.IndexByte(key, '.'); i >= 0 {
+		prefix = key[:i]
+		// Legacy Headscale secrets have a seven-character public identifier.
+		// A period alone does not make an arbitrary credential a recognized key.
+		if len(prefix) != 7 {
+			return ""
+		}
+	}
+	// Bare identifiers are used by the API, but unknown whole-key formats must fail closed.
+	if len(prefix) != 7 && len(prefix) != 12 {
+		return ""
+	}
+	for _, ch := range prefix {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+			(ch >= '0' && ch <= '9') || ch == '_' || ch == '-') {
+			return ""
+		}
+	}
+	return prefix
 }
