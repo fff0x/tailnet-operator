@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -186,6 +187,21 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		})
 	}
 
+	fileMode := func() (ctrl.Result, error) {
+		r.clearRetry(tn.Name)
+		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
+			renderedCond(t)
+			setCond(&t.Status.Conditions, t.Generation, "PolicyMode", metav1.ConditionFalse, "File",
+				"operator cannot write policy; set policy.mode: database")
+			setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionFalse, "PolicyModeFile",
+				"policy write skipped; set Headscale policy.mode: database")
+		})
+	}
+	if c := meta.FindStatusCondition(tn.Status.Conditions, "PolicyMode"); c != nil &&
+		c.Status == metav1.ConditionFalse && c.Reason == "File" && c.ObservedGeneration == tn.Generation {
+		return fileMode()
+	}
+
 	// Apply: compare with the live document, write only on difference.
 	apiURL := tn.Spec.APIURL
 	if apiURL == "" {
@@ -201,7 +217,12 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	hs := headscale.New(apiURL, apiKey)
 	liveHash := ""
-	live, liveErr := hs.GetPolicy(ctx)
+	live, databaseMode, liveErr := hs.GetPolicyWithMode(ctx)
+	// The policy controller can run before preflight on startup. Check the live mode as well,
+	// so an established file-mode response never results in a PUT or route approvals.
+	if databaseMode != nil && !*databaseMode {
+		return fileMode()
+	}
 	if liveErr == nil {
 		if n, err := policy.Normalize([]byte(live)); err == nil {
 			liveHash = policy.Hash(n)
@@ -398,6 +419,22 @@ func readWorkingKey(ctx context.Context, c client.Client, ns, tnName string) (st
 	return v, nil
 }
 
+// policyModeChanged wakes the policy controller when preflight discovers a mode change, without
+// reacting to its own render/apply status writes.
+func policyModeChanged(e event.UpdateEvent) bool {
+	old, oldOK := e.ObjectOld.(*tnv1.Tailnet)
+	current, currentOK := e.ObjectNew.(*tnv1.Tailnet)
+	if !oldOK || !currentOK {
+		return false
+	}
+	a := meta.FindStatusCondition(old.Status.Conditions, "PolicyMode")
+	b := meta.FindStatusCondition(current.Status.Conditions, "PolicyMode")
+	if a == nil || b == nil {
+		return (a == nil) != (b == nil)
+	}
+	return a.Status != b.Status || a.Reason != b.Reason
+}
+
 // SetupWithManager: driven by the Tailnet, re-rendered when a bound egress/ingress or the base
 // ConfigMap changes.
 func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -432,9 +469,13 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("tailnetpolicy").
-		// The render depends on specs only; status writes (ours every reconcile, the CRs' every 30 s)
-		// must not re-trigger it.
-		For(&tnv1.Tailnet{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		// A preflight mode change matters; unrelated status writes must not re-trigger the render.
+		For(&tnv1.Tailnet{}, builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.Funcs{
+			CreateFunc:  func(event.CreateEvent) bool { return false },
+			DeleteFunc:  func(event.DeleteEvent) bool { return false },
+			GenericFunc: func(event.GenericEvent) bool { return false },
+			UpdateFunc:  policyModeChanged,
+		}))).
 		// The rendered ConfigMap is ours: every reconcile writes it, so reacting to its updates would
 		// re-run the reconcile once more each time. Only a deletion matters (re-create it).
 		Owns(&corev1.ConfigMap{}, builder.WithPredicates(predicate.Funcs{

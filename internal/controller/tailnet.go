@@ -122,7 +122,7 @@ func (r *TailnetReconciler) mintAndVerify(ctx context.Context, apiURL, authKey s
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("mint api key: %w", err)
 	}
-	if _, err := headscale.New(apiURL, newKey).GetPolicy(ctx); err != nil {
+	if _, err := headscale.New(apiURL, newKey).ListAPIKeys(ctx); err != nil {
 		// The new key does not work; expire it so it does not linger, and fail.
 		_ = headscale.New(apiURL, authKey).ExpireAPIKey(ctx, headscale.PrefixOf(newKey))
 		return "", time.Time{}, fmt.Errorf("verify new api key: %w", err)
@@ -184,6 +184,7 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		l.Error(err, "api key lifecycle")
 		setCond(&tn.Status.Conditions, tn.Generation, "ApiKeyValid", metav1.ConditionFalse, "Error", err.Error())
+		setPreflightConditions(&tn, headscale.Capabilities{}, err)
 		_ = r.Status().Update(ctx, &tn)
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
@@ -191,7 +192,11 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Reachability and key validity are two questions: /health answers without a key and fails when
 	// Headscale has lost its database (which it otherwise masks as 401 on every call); only a healthy
 	// server can tell us whether the working key is accepted.
-	ok := healthConditions(ctx, headscale.New(apiURL, key), &tn, exp)
+	hs := headscale.New(apiURL, key)
+	ok := healthConditions(ctx, hs, &tn, exp)
+	if !preflightConditions(ctx, hs, &tn) {
+		ok = false
+	}
 
 	et := metav1.NewTime(exp)
 	tn.Status.APIKeyExpiresAt = &et
@@ -219,7 +224,8 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 // healthConditions sets ApiReachable from GET /health and, only on a healthy server, ApiKeyValid from
-// GET /api/v1/policy with the working key. Returns false when either failed so the caller re-checks
+// GET /api/v1/apikey with the working key. Policy availability is not a key-validity signal.
+// Returns false when either failed so the caller re-checks
 // in a minute. While the server is down the key verdict is unknown and the last one is kept.
 func healthConditions(ctx context.Context, hs *headscale.Client, tn *tnv1.Tailnet, exp time.Time) bool {
 	if err := hs.Health(ctx); err != nil {
@@ -232,7 +238,7 @@ func healthConditions(ctx context.Context, hs *headscale.Client, tn *tnv1.Tailne
 		return false
 	}
 	setCond(&tn.Status.Conditions, tn.Generation, "ApiReachable", metav1.ConditionTrue, "Reachable", "control API reachable")
-	if _, err := hs.GetPolicy(ctx); err != nil {
+	if _, err := hs.ListAPIKeys(ctx); err != nil {
 		reason := "Error"
 		if headscale.IsUnauthorized(err) {
 			reason = "Rejected"
