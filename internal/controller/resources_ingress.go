@@ -104,6 +104,7 @@ func ingressNetworkPolicy(in *tnv1.TailnetIngress, ns, operatorNS string) *netwo
 // env, which flips the agent from listen-local/dial-tailnet to listen-tailnet/dial-cluster.
 func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string, defaultImagePullSecrets []string) *appsv1.Deployment {
 	replicas := int32(1)
+	automount := false
 	podSec, cSec := nonRoot()
 
 	res := in.Spec.Resources
@@ -127,8 +128,9 @@ func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: ingressObjLabels(in.Name)},
 				Spec: corev1.PodSpec{
-					SecurityContext:  podSec,
-					ImagePullSecrets: agentImagePullSecrets(tn.Spec.Proxy.ImagePullSecrets, defaultImagePullSecrets),
+					SecurityContext:              podSec,
+					AutomountServiceAccountToken: &automount,
+					ImagePullSecrets:             agentImagePullSecrets(tn.Spec.Proxy.ImagePullSecrets, defaultImagePullSecrets),
 					Containers: []corev1.Container{{
 						Name:            "agent",
 						Image:           image,

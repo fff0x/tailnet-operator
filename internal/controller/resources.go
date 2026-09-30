@@ -158,6 +158,7 @@ func nonRoot() (*corev1.PodSecurityContext, *corev1.SecurityContext) {
 		RunAsUser:                &uid,
 		RunAsGroup:               &uid,
 		AllowPrivilegeEscalation: &no,
+		ReadOnlyRootFilesystem:   &yes,
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
 	return pod, container
@@ -188,6 +189,7 @@ func agentImagePullSecrets(override *[]string, defaults []string) []corev1.Local
 // design; the only volumes are the targets ConfigMap and a throwaway emptyDir for tsnet's work Dir.
 func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string, defaultImagePullSecrets []string) *appsv1.Deployment {
 	replicas := int32(1)
+	automount := false
 	podSec, cSec := nonRoot()
 
 	res := eg.Spec.Resources
@@ -211,8 +213,9 @@ func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: objLabels(eg.Name)},
 				Spec: corev1.PodSpec{
-					SecurityContext:  podSec,
-					ImagePullSecrets: agentImagePullSecrets(tn.Spec.Proxy.ImagePullSecrets, defaultImagePullSecrets),
+					SecurityContext:              podSec,
+					AutomountServiceAccountToken: &automount,
+					ImagePullSecrets:             agentImagePullSecrets(tn.Spec.Proxy.ImagePullSecrets, defaultImagePullSecrets),
 					Containers: []corev1.Container{{
 						Name:  "agent",
 						Image: image,
