@@ -10,12 +10,14 @@ import (
 type Backend struct {
 	// Service name; in the CR's own namespace unless Namespace is set.
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=63
 	Service string `json:"service"`
 	// Namespace of the Service. Empty → the CR's namespace. Set it to funnel HTTPS through a
 	// shared gateway (e.g. Envoy in envoy-gateway-system) so TLS terminates there while the tailnet
 	// identity stays per app.
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=63
 	Namespace string `json:"namespace,omitempty"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
@@ -26,6 +28,7 @@ type Backend struct {
 type Expose struct {
 	// DNS label; identifies the expose in status and in the agent config.
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=63
 	Name string `json:"name"`
 	// Port the tailnet node listens on — what a tailnet peer dials on this node's MagicDNS name/IP.
 	// +kubebuilder:validation:Minimum=1
@@ -47,12 +50,16 @@ type TailnetIngressSpec struct {
 	// +optional
 	Hostname string `json:"hostname,omitempty"`
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=50
+	// +kubebuilder:validation:XValidation:rule="self.all(e, self.exists_one(other, other.port == e.port))",message="expose ports must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.all(e, self.exists_one(other, other.name == e.name))",message="expose names must be unique"
 	Exposes []Expose `json:"exposes"`
 	// Peers allowed to reach this node (policy grant src), e.g. ["group:team-a"]. Only used when
 	// the Tailnet generates policy; every entry must match Tailnet.spec.policy.ingressSourceAllowlist,
 	// otherwise the CR gets PolicyDenied and no grant is written.
-	// +optional
-	AllowFrom []string `json:"allowFrom,omitempty"`
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MinLength=1
+	AllowFrom []string `json:"allowFrom"`
 	// Override the Tailnet's default agent image.
 	// +optional
 	Image string `json:"image,omitempty"`
@@ -115,11 +122,12 @@ type TailnetIngressStatus struct {
 
 // TailnetIngress exposes in-cluster L4 services on the tailnet as one tsnet node with a MagicDNS
 // name. It lives in the tenant namespace; the tag's grants decide which tailnet peers may reach it.
+// +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="name must be a DNS label of at most 40 characters"
 type TailnetIngress struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   TailnetIngressSpec   `json:"spec,omitempty"`
+	Spec   TailnetIngressSpec   `json:"spec"`
 	Status TailnetIngressStatus `json:"status,omitempty"`
 }
 

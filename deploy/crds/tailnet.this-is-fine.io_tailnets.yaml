@@ -26,8 +26,14 @@ spec:
     - jsonPath: .status.apiKeyExpiresAt
       name: Expires
       type: string
+    - jsonPath: .status.conditions[?(@.type=="HeadscaleCompatible")].reason
+      name: Compat
+      type: string
     - jsonPath: .status.conditions[?(@.type=="PolicyApplied")].reason
       name: Policy
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="SplitDNS")].reason
+      name: DNS
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -62,7 +68,11 @@ spec:
                 default: 720h
                 description: Lifetime of the self-minted working API key. Rotated
                   at half-life.
+                maxLength: 32
                 type: string
+                x-kubernetes-validations:
+                - message: apiKeyLifetime must be a valid duration of at least 1h
+                  rule: duration(self) >= duration('1h')
               apiSecretRef:
                 description: |-
                   Bootstrap API key, read only. The operator mints its own rotating working key from it and
@@ -99,6 +109,30 @@ spec:
                       Template for a TailnetIngress's DNS name; {name} is the CR name, {namespace} its namespace.
                       Keep the result one label below your gateway's wildcard certificate, e.g.
                       "{name}-{namespace}.prod-1.tailnet.example.internal". Empty → ingresses get no name.
+                    maxLength: 253
+                    type: string
+                    x-kubernetes-validations:
+                    - message: ingressNameTemplate must contain {name} and end in
+                        a literal lowercase DNS zone with at least two labels
+                      rule: self == '' || (self.contains('{name}') && self.replace('{name}',
+                        'n').replace('{namespace}', 'ns').matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?([.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$')
+                        && self.matches('[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'))
+                type: object
+              headscale:
+                description: External Headscale metadata; compatibility is checked
+                  against the API, not the version hint.
+                properties:
+                  ref:
+                    description: Reserved for an operator-managed Headscale. Must
+                      remain empty until managed mode is supported.
+                    type: string
+                    x-kubernetes-validations:
+                    - message: headscale.ref is reserved; managed Headscale is not
+                        supported yet
+                      rule: self == ''
+                  version:
+                    description: Optional version hint for diagnostics, e.g. "0.29.3".
+                      Does not bypass capability checks.
                     type: string
                 type: object
               hostnameTemplate:
@@ -132,6 +166,8 @@ spec:
                       live in tenant namespaces, so this is the admin's veto over who tenants may grant access to.
                       Empty → no ingress grants are generated (only the tag is declared).
                     items:
+                      maxLength: 253
+                      pattern: ^((group:|tag:|autogroup:)[^[:space:]]+|[^@[:space:]]+@[^@[:space:]]+)$
                       type: string
                     type: array
                   mode:
@@ -255,6 +291,8 @@ spec:
               server:
                 description: Login/control URL, becomes the agent's ControlURL (e.g.
                   https://ts.example.com).
+                minLength: 9
+                pattern: ^https://
                 type: string
               tagTemplate:
                 default: tag:egress-{name}
@@ -276,8 +314,9 @@ spec:
                 format: date-time
                 type: string
               conditions:
-                description: 'Conditions: ApiReachable, ApiKeyValid, PolicyRendered,
-                  PolicyApplied.'
+                description: |-
+                  Conditions: ApiReachable, ApiKeyValid, HeadscaleCompatible, PolicyMode, SplitDNS,
+                  PolicyRendered, PolicyApplied.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -374,6 +413,8 @@ spec:
                   and the printcolumn.
                 type: string
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

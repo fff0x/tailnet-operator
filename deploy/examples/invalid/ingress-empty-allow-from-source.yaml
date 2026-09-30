@@ -1,0 +1,22 @@
+# ExpectedError: spec.allowFrom[0]
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: TailnetIngress
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  allowFrom:
+    - ''
+  exposes:
+    - name: postgres
+      port: 5432
+      backend:
+        service: shop-db-rw
+        port: 5432
+    - name: redis
+      port: 6379
+      backend:
+        service: shop-redis
+        port: 6379

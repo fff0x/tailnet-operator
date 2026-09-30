@@ -1,0 +1,15 @@
+# ExpectedError: address must be an IP or a lowercase DNS name, not a CIDR or host:port
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  consumerNamespaces:
+    - billing
+  targets:
+    - name: db
+      address: 10.0.0.0/24
+      port: 5432

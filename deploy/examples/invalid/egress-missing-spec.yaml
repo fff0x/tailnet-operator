@@ -1,0 +1,6 @@
+# ExpectedError: spec: Required value
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: invalid

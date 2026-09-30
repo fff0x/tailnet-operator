@@ -1,0 +1,11 @@
+# ExpectedError: apiKeyLifetime must be a valid duration of at least 1h
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: Tailnet
+metadata:
+  name: invalid
+spec:
+  server: https://ts.example.com
+  apiSecretRef:
+    name: bootstrap
+  apiKeyLifetime: 59m

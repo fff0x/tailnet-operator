@@ -1,0 +1,26 @@
+# ExpectedError: spec.targets[0].address
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  consumerNamespaces:
+    - billing-dev
+  targets:
+    - name: oracle-db-1
+      address: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      port: 1521
+    - name: oracle-db-2
+      address: 10.0.10.21
+      port: 1521
+    - name: broker-1
+      address: 10.0.20.10
+      port: 5672
+    - name: api-corp
+      address: 10.0.30.10
+      port: 443
+      aliases:
+        - api.corp.example

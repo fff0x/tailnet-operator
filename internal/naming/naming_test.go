@@ -1,6 +1,9 @@
 package naming
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRender(t *testing.T) {
 	cases := []struct{ tmpl, name, want string }{
@@ -51,6 +54,50 @@ func TestRenderDNSName(t *testing.T) {
 		if err := ValidateDNSName(s); err == nil {
 			t.Errorf("ValidateDNSName(%q) expected error, got nil", s)
 		}
+	}
+}
+
+func TestValidateDNSNameBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dns  string
+		ok   bool
+	}{
+		{"label-63", strings.Repeat("a", 63) + ".example", true},
+		{"label-64", strings.Repeat("a", 64) + ".example", false},
+		{"rendered-label-81", RenderDNSName("{name}-{namespace}.cluster.example", strings.Repeat("a", 40), strings.Repeat("b", 40)), false},
+		{"separate-labels", RenderDNSName("{name}.{namespace}.cluster.example", strings.Repeat("a", 40), strings.Repeat("b", 40)), true},
+		{"total-253", strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 61), true},
+		{"total-254", strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 62), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateDNSName(tc.dns); (err == nil) != tc.ok {
+				t.Fatalf("ValidateDNSName(%q) = %v, want valid=%t", tc.dns, err, tc.ok)
+			}
+		})
+	}
+}
+
+func TestZoneOf(t *testing.T) {
+	for _, tc := range []struct{ template, want string }{
+		{"{name}-{namespace}.hydra.tif.internal", "hydra.tif.internal"},
+		{"{name}-app.{namespace}.tailnet.example", "tailnet.example"},
+		{"{name}-app.prod.example", "prod.example"},
+		{"{name}.internal", "internal"},
+		{"fixed.prod.example", ""},
+		{"", ""},
+		{"{name}", ""},
+		{"{name}.{namespace}", ""},
+		{"{name}.UPPER.example", ""},
+		{"{name}..example", ""},
+		{"{unknown}.example", ""},
+		{"{name.example", ""},
+	} {
+		t.Run(tc.template, func(t *testing.T) {
+			if got := ZoneOf(tc.template); got != tc.want {
+				t.Fatalf("ZoneOf(%q) = %q, want %q", tc.template, got, tc.want)
+			}
+		})
 	}
 }
 

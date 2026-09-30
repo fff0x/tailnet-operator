@@ -22,11 +22,23 @@ tasks:
     cmds:
       - go test ./...
 
+  test-validation:
+    desc: Validate CRDs, examples and optional LIVE_CR_FILE in an isolated envtest API server
+    requires:
+      vars: [KUBEBUILDER_ASSETS]
+    cmds:
+      - go test -tags=integration ./test/validation -count=1 -v
+
+  validate-examples:
+    desc: Check invalid fixtures against the current kube-context (server dry-run only)
+    cmds:
+      - bash hack/validate-examples.sh {{.CLI_ARGS}}
+
   lint:
     desc: gofmt + go vet
     cmds:
       # gofmt -l prints unformatted files; make it fail the task if the list is non-empty.
-      - test -z "$(gofmt -l cmd internal api)"
+      - test -z "$(gofmt -l cmd internal api test)"
       - go vet ./...
 
   crds:

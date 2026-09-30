@@ -35,10 +35,34 @@ func RenderDNSName(tmpl, name, namespace string) string {
 	return strings.ReplaceAll(Render(tmpl, name), "{namespace}", namespace)
 }
 
-// ValidateDNSName checks a rendered DNS name is a DNS-1123 subdomain (≤253, lowercase labels).
+// ZoneOf returns the literal DNS suffix after the last label containing a placeholder.
+// It returns empty for invalid templates, static names (whose zone is ambiguous), or templates
+// without a literal suffix. Literal text in the placeholder's label is not part of the zone.
+func ZoneOf(tmpl string) string {
+	if ValidateDNSName(RenderDNSName(tmpl, "name", "namespace")) != nil {
+		return ""
+	}
+	last := strings.LastIndexByte(tmpl, '}')
+	if last < 0 {
+		return ""
+	}
+	_, zone, ok := strings.Cut(tmpl[last+1:], ".")
+	if !ok || ValidateDNSName(zone) != nil {
+		return ""
+	}
+	return zone
+}
+
+// ValidateDNSName checks a rendered DNS name (≤253 characters, lowercase labels of ≤63).
 func ValidateDNSName(n string) error {
 	if errs := apivalidation.IsDNS1123Subdomain(n); len(errs) > 0 {
 		return fmt.Errorf("dns name %q: %s", n, strings.Join(errs, "; "))
+	}
+	// Kubernetes' subdomain validator does not enforce individual DNS label lengths.
+	for _, label := range strings.Split(n, ".") {
+		if errs := apivalidation.IsDNS1123Label(label); len(errs) > 0 {
+			return fmt.Errorf("dns name %q, label %q: %s", n, label, strings.Join(errs, "; "))
+		}
 	}
 	return nil
 }

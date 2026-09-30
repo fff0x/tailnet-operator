@@ -1,0 +1,27 @@
+# ExpectedError: spec.policy.ingressSourceAllowlist[0]
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: Tailnet
+metadata:
+  name: invalid
+spec:
+  server: https://ts.example.com
+  apiUrl: http://headscale.tailnet-system.svc:8080
+  apiSecretRef:
+    name: headscale-bootstrap
+    key: apiKey
+  proxy:
+    mtu: 1200
+    probeInterval: 5m
+  dns:
+    hostsConfigMap: tailnet-dns-hosts
+    ingressNameTemplate: '{name}-{namespace}.prod-1.tailnet.example.internal'
+  policy:
+    baseConfigMap: headscale-policy
+    mode: DryRun
+    tagOwners:
+      - group:operator
+    routeApprovers:
+      - tag:fabric
+    ingressSourceAllowlist:
+      - group:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

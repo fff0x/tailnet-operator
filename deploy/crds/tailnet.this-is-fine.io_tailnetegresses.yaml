@@ -61,6 +61,8 @@ spec:
                 description: Namespaces whose pods may reach this proxy's Services
                   (NetworkPolicy ingress).
                 items:
+                  maxLength: 63
+                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                   type: string
                 minItems: 1
                 type: array
@@ -149,23 +151,30 @@ spec:
                     published as a Service.
                   properties:
                     address:
-                      description: IPv4/IPv6 address or MagicDNS name of the host
-                        at the far site.
+                      description: IPv4/IPv6 address or lowercase MagicDNS name, not
+                        a CIDR, URL or host:port.
+                      maxLength: 253
                       type: string
+                      x-kubernetes-validations:
+                      - message: address must be an IP or a lowercase DNS name, not
+                          a CIDR or host:port
+                        rule: isIP(self) || (!self.matches('^[0-9.]+$') && self.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?([.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$'))
                     aliases:
                       description: |-
                         Extra DNS names that resolve to this target's Service ClusterIP, rendered into the Tailnet's
                         dns.hostsConfigMap. Use them when the far end routes by name (TLS SNI, HTTP Host): a consumer
                         dialling the alias sends the real hostname, and the L4 tunnel passes it through untouched.
                       items:
-                        maxLength: 253
+                        maxLength: 63
                         pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                         type: string
                       type: array
                     name:
-                      description: DNS label; used verbatim as the Service name, so
-                        consumers dial <name>.<ns>:<port>.
-                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      description: |-
+                        DNS-1035 label; used verbatim as the Service name, so consumers dial <name>.<ns>:<port>.
+                        Start with a letter for compatibility with Kubernetes 1.31 Service admission.
+                      maxLength: 63
+                      pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
                       type: string
                     port:
                       format: int32
@@ -177,8 +186,12 @@ spec:
                   - name
                   - port
                   type: object
+                maxItems: 50
                 minItems: 1
                 type: array
+                x-kubernetes-validations:
+                - message: target names must be unique
+                  rule: self.all(t, self.exists_one(other, other.name == t.name))
             required:
             - consumerNamespaces
             - tailnetRef
@@ -301,7 +314,12 @@ spec:
                   type: object
                 type: array
             type: object
+        required:
+        - spec
         type: object
+        x-kubernetes-validations:
+        - message: name must be a DNS label of at most 40 characters
+          rule: size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
     served: true
     storage: true
     subresources:

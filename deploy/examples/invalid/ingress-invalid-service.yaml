@@ -1,0 +1,17 @@
+# ExpectedError: spec.exposes[0].backend.service
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: TailnetIngress
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  allowFrom:
+    - group:ops
+  exposes:
+    - name: db
+      port: 5432
+      backend:
+        service: Bad_Service
+        port: 5432

@@ -68,7 +68,9 @@ spec:
                   the Tailnet generates policy; every entry must match Tailnet.spec.policy.ingressSourceAllowlist,
                   otherwise the CR gets PolicyDenied and no grant is written.
                 items:
+                  minLength: 1
                   type: string
+                minItems: 1
                 type: array
               exposes:
                 items:
@@ -85,6 +87,7 @@ spec:
                             Namespace of the Service. Empty → the CR's namespace. Set it to funnel HTTPS through a
                             shared gateway (e.g. Envoy in envoy-gateway-system) so TLS terminates there while the tailnet
                             identity stays per app.
+                          maxLength: 63
                           pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                           type: string
                         port:
@@ -95,6 +98,7 @@ spec:
                         service:
                           description: Service name; in the CR's own namespace unless
                             Namespace is set.
+                          maxLength: 63
                           pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                           type: string
                       required:
@@ -104,6 +108,7 @@ spec:
                     name:
                       description: DNS label; identifies the expose in status and
                         in the agent config.
+                      maxLength: 63
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                       type: string
                     port:
@@ -118,8 +123,14 @@ spec:
                   - name
                   - port
                   type: object
+                maxItems: 50
                 minItems: 1
                 type: array
+                x-kubernetes-validations:
+                - message: expose ports must be unique
+                  rule: self.all(e, self.exists_one(other, other.port == e.port))
+                - message: expose names must be unique
+                  rule: self.all(e, self.exists_one(other, other.name == e.name))
               hostname:
                 description: Explicit tailnet (MagicDNS) hostname. Empty → rendered
                   from the Tailnet's ingressHostnameTemplate.
@@ -200,6 +211,7 @@ spec:
                 - name
                 type: object
             required:
+            - allowFrom
             - exposes
             - tailnetRef
             type: object
@@ -319,7 +331,12 @@ spec:
                   type: string
                 type: array
             type: object
+        required:
+        - spec
         type: object
+        x-kubernetes-validations:
+        - message: name must be a DNS label of at most 40 characters
+          rule: size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
     served: true
     storage: true
     subresources:

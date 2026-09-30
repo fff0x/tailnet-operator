@@ -1,0 +1,12 @@
+# ExpectedError: headscale.ref is reserved
+---
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: Tailnet
+metadata:
+  name: invalid
+spec:
+  server: https://ts.example.com
+  apiSecretRef:
+    name: bootstrap
+  headscale:
+    ref: managed
