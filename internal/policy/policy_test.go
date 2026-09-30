@@ -126,6 +126,29 @@ func TestRenderGuards(t *testing.T) {
 	}
 }
 
+func TestParserRedactsInvalidLiterals(t *testing.T) {
+	const secret = "synthetic-credential-do-not-emit"
+	doc := []byte(`{"value":"` + secret + `\q"}`)
+	for _, check := range []struct {
+		name string
+		call func() error
+	}{
+		{"render", func() error { _, _, err := Render(doc, inputs); return err }},
+		{"normalize", func() error { _, err := Normalize(doc); return err }},
+		{"approvers", func() error { _, err := Approvers(doc); return err }},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			err := check.call()
+			if !errors.Is(err, ErrBaseInvalid) {
+				t.Fatal("invalid literal must retain its error classification")
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatal("parser disclosed an input literal (output withheld)")
+			}
+		})
+	}
+}
+
 func TestAllowed(t *testing.T) {
 	if !Allowed("group:shop", []string{"group:*"}) || Allowed("tag:bot", []string{"group:*"}) || Allowed("group:x", nil) {
 		t.Fatal("glob allowlist wrong")

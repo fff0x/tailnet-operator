@@ -88,18 +88,61 @@ func (c *Client) Health(ctx context.Context) error {
 	return c.do(ctx, http.MethodGet, "/health", nil, nil)
 }
 
+// requestError withholds arbitrary transport/codec text from logs, events and status while
+// preserving errors.Is/As (including context cancellation). Callers must not log the unwrapped cause.
+// In particular, url.Error, JSON type errors and custom transports can contain credentials.
+type requestError struct {
+	message string
+	cause   error
+}
+
+func (e *requestError) Error() string { return e.message }
+func (e *requestError) Unwrap() error { return e.cause }
+
+// safeOperation uses only bounded constants, never URL, header, body or dynamic path data.
+func safeOperation(method, path string) string {
+	switch method {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete:
+	default:
+		method = "request"
+	}
+	route := "unknown endpoint"
+	switch path {
+	case "/health", "/api/v1/node", "/api/v1/preauthkey", "/api/v1/preauthkey/expire",
+		"/api/v1/apikey", "/api/v1/apikey/expire", "/api/v1/policy":
+		route = path
+	default:
+		parts := strings.Split(path, "/")
+		if len(parts) >= 5 && parts[0] == "" && parts[1] == "api" && parts[2] == "v1" && parts[3] == "node" {
+			switch {
+			case len(parts) == 5:
+				route = "/api/v1/node/{id}"
+			case len(parts) == 6 && parts[5] == "approve_routes":
+				route = "/api/v1/node/{id}/approve_routes"
+			case len(parts) == 7 && parts[5] == "rename":
+				route = "/api/v1/node/{id}/rename/{name}"
+			}
+		}
+	}
+	return "headscale " + method + " " + route
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	op := safeOperation(method, path)
+	fail := func(stage string, cause error) error {
+		return &requestError{message: op + ": " + stage, cause: cause}
+	}
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return fail("encode request failed", err)
 		}
 		rdr = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, rdr)
 	if err != nil {
-		return err
+		return fail("create request failed", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	if body != nil {
@@ -107,16 +150,20 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return fail("transport failed", err)
 	}
 	defer resp.Body.Close()
-	rb, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return &StatusError{Code: resp.StatusCode, Msg: fmt.Sprintf("headscale %s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(rb)))}
+		// Neither the status text nor error body is trustworthy. Do not read the error body.
+		return &StatusError{Code: resp.StatusCode, Msg: fmt.Sprintf("%s: HTTP %d", op, resp.StatusCode)}
+	}
+	rb, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fail("read response failed", err)
 	}
 	if out != nil {
 		if err := json.Unmarshal(rb, out); err != nil {
-			return fmt.Errorf("decode %s %s: %w", method, path, err)
+			return fail("decode response failed", err)
 		}
 	}
 	return nil
