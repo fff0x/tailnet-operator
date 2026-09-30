@@ -25,6 +25,7 @@ import (
 	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
 	"this-is-fine.io/tailnet-operator/internal/headscale"
 	"this-is-fine.io/tailnet-operator/internal/keys"
+	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
 	"this-is-fine.io/tailnet-operator/internal/naming"
 	"this-is-fine.io/tailnet-operator/internal/ports"
 	"this-is-fine.io/tailnet-operator/internal/routes"
@@ -33,6 +34,7 @@ import (
 // TailnetEgressReconciler turns one CR into an egress identity: a tag, a pre-auth key, an agent pod
 // and one Service per target. It never writes the tailnet policy; a missing grant becomes status.
 type TailnetEgressReconciler struct {
+	Metrics *operatormetrics.Metrics
 	client.Client
 	Scheme                *runtime.Scheme
 	OperatorNamespace     string
@@ -44,6 +46,9 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	l := log.FromContext(ctx)
 	var eg tnv1.TailnetEgress
 	if err := r.Get(ctx, req.NamespacedName, &eg); err != nil {
+		if apierrors.IsNotFound(err) {
+			r.Metrics.Delete("TailnetEgress", req.Namespace, req.Name)
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	ns := eg.Namespace
@@ -53,7 +58,7 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Get(ctx, types.NamespacedName{Name: eg.Spec.TailnetRef.Name}, &tn); err != nil {
 		setCond(&eg.Status.Conditions, eg.Generation, "Ready", metav1.ConditionFalse, "NoTailnet",
 			fmt.Sprintf("Tailnet %q not found", eg.Spec.TailnetRef.Name))
-		_ = r.Status().Update(ctx, &eg)
+		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &eg)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 	apiURL := tn.Spec.APIURL
@@ -65,10 +70,10 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// The Tailnet controller has not minted the working key yet; wait for it.
 		setCond(&eg.Status.Conditions, eg.Generation, "Ready", metav1.ConditionFalse, "NoAPIKey",
 			"waiting for the Tailnet working API key")
-		_ = r.Status().Update(ctx, &eg)
+		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &eg)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
-	hs := headscale.New(apiURL, apiKey)
+	hs := headscale.New(apiURL, apiKey, r.Metrics.Headscale(tn.Name))
 
 	// Render + validate tag and hostname.
 	tag := eg.Spec.Tag
@@ -105,7 +110,7 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		setCond(&eg.Status.Conditions, eg.Generation, "Ready", metav1.ConditionFalse, "TagUnknown",
 			"tag not in policy")
 		eg.Status.ObservedGeneration = eg.Generation
-		_ = r.Status().Update(ctx, &eg)
+		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &eg)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 	setCond(&eg.Status.Conditions, eg.Generation, "TagKnown", metav1.ConditionTrue, "Known", "tag declared in policy")
@@ -118,7 +123,6 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if authExp != nil {
 		et := metav1.NewTime(*authExp)
 		eg.Status.AuthKeyExpiresAt = &et
-		authKeyExpiresSeconds.WithLabelValues(ns, eg.Name).Set(time.Until(*authExp).Seconds())
 	}
 
 	// Stable listen ports: keep whatever the current ConfigMap already assigned.
@@ -158,19 +162,20 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	r.computeTargetStatus(&eg, listen, netmap, advertised, approved, probes, probeErr)
 
 	eg.Status.ObservedGeneration = eg.Generation
-	if err := r.Status().Update(ctx, &eg); err != nil {
+	if err := updateObservedStatus(ctx, r.Client, r.Metrics, &eg); err != nil {
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
 		return ctrl.Result{}, err
 	}
+	r.Metrics.ObserveNodes(&eg, nodes, tag, hostname)
 	l.V(1).Info("reconciled", "hostname", hostname, "nodeId", eg.Status.NodeID)
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
 func (r *TailnetEgressReconciler) fail(ctx context.Context, eg *tnv1.TailnetEgress, reason string, err error) (ctrl.Result, error) {
 	setCond(&eg.Status.Conditions, eg.Generation, "Ready", metav1.ConditionFalse, reason, err.Error())
-	_ = r.Status().Update(ctx, eg)
+	_ = updateObservedStatus(ctx, r.Client, r.Metrics, eg)
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
@@ -415,7 +420,6 @@ func (r *TailnetEgressReconciler) computeTargetStatus(eg *tnv1.TailnetEgress, li
 		})
 	}
 	eg.Status.Targets = ts
-	routesMissing.WithLabelValues(eg.Namespace, eg.Name).Set(float64(missing))
 
 	rgStatus := metav1.ConditionTrue
 	rgReason, rgMsg := "AllGranted", "all target routes present in the netmap"

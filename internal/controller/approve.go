@@ -64,6 +64,8 @@ func approvals(nodes []headscale.Node, approvers map[string][]string) map[string
 			}
 		}
 		if len(add) > 0 {
+			slices.Sort(add)
+			add = slices.Compact(add)
 			all := append(slices.Clone(n.ApprovedRoutes), add...)
 			slices.Sort(all)
 			out[n.ID] = approval{Routes: slices.Compact(all), Added: add}
@@ -93,6 +95,7 @@ func (r *TailnetPolicyReconciler) approveRoutes(ctx context.Context, hs *headsca
 			}
 			continue
 		}
+		r.Metrics.Approved(tn.Name, len(a.Added))
 		l.Info("routes approved (autoApprover replay)", "node", id, "routes", a.Added)
 		if r.Recorder != nil {
 			r.Recorder.Eventf(tn, corev1.EventTypeNormal, "RoutesApproved", "node %s: %s", id, strings.Join(a.Added, ", "))

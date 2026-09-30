@@ -23,6 +23,7 @@ import (
 	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
 	"this-is-fine.io/tailnet-operator/internal/headscale"
 	"this-is-fine.io/tailnet-operator/internal/keys"
+	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
 	"this-is-fine.io/tailnet-operator/internal/naming"
 	pol "this-is-fine.io/tailnet-operator/internal/policy"
 )
@@ -31,6 +32,7 @@ import (
 // pod that listens on the tailnet and forwards to in-cluster backends. Like the egress reconciler it
 // never writes the tailnet policy; a missing grant is a policy concern, not a mint-time check.
 type TailnetIngressReconciler struct {
+	Metrics *operatormetrics.Metrics
 	client.Client
 	Scheme                *runtime.Scheme
 	OperatorNamespace     string
@@ -42,6 +44,9 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	l := log.FromContext(ctx)
 	var in tnv1.TailnetIngress
 	if err := r.Get(ctx, req.NamespacedName, &in); err != nil {
+		if apierrors.IsNotFound(err) {
+			r.Metrics.Delete("TailnetIngress", req.Namespace, req.Name)
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	ns := in.Namespace
@@ -50,7 +55,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.Get(ctx, types.NamespacedName{Name: in.Spec.TailnetRef.Name}, &tn); err != nil {
 		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, "NoTailnet",
 			fmt.Sprintf("Tailnet %q not found", in.Spec.TailnetRef.Name))
-		_ = r.Status().Update(ctx, &in)
+		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 	apiURL := tn.Spec.APIURL
@@ -61,10 +66,10 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, "NoAPIKey",
 			"waiting for the Tailnet working API key")
-		_ = r.Status().Update(ctx, &in)
+		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
-	hs := headscale.New(apiURL, apiKey)
+	hs := headscale.New(apiURL, apiKey, r.Metrics.Headscale(tn.Name))
 
 	// Render + validate tag and hostname from the ingress templates.
 	tag := in.Spec.Tag
@@ -125,7 +130,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, "TagUnknown",
 			"tag not in policy")
 		in.Status.ObservedGeneration = in.Generation
-		_ = r.Status().Update(ctx, &in)
+		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 	setCond(&in.Status.Conditions, in.Generation, "TagKnown", metav1.ConditionTrue, "Known", "tag declared in policy")
@@ -137,7 +142,6 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if authExp != nil {
 		et := metav1.NewTime(*authExp)
 		in.Status.AuthKeyExpiresAt = &et
-		ingressAuthKeyExpiresSeconds.WithLabelValues(ns, in.Name).Set(time.Until(*authExp).Seconds())
 	}
 
 	image := in.Spec.Image
@@ -161,19 +165,20 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	r.computeExposeStatus(&in, probes, probeErr)
 
 	in.Status.ObservedGeneration = in.Generation
-	if err := r.Status().Update(ctx, &in); err != nil {
+	if err := updateObservedStatus(ctx, r.Client, r.Metrics, &in); err != nil {
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
 		return ctrl.Result{}, err
 	}
+	r.Metrics.ObserveNodes(&in, nodes, tag, hostname)
 	l.V(1).Info("reconciled", "hostname", hostname, "nodeId", in.Status.NodeID)
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
 func (r *TailnetIngressReconciler) fail(ctx context.Context, in *tnv1.TailnetIngress, reason string, err error) (ctrl.Result, error) {
 	setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, reason, err.Error())
-	_ = r.Status().Update(ctx, in)
+	_ = updateObservedStatus(ctx, r.Client, r.Metrics, in)
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
@@ -310,7 +315,6 @@ func (r *TailnetIngressReconciler) computeExposeStatus(in *tnv1.TailnetIngress, 
 		})
 	}
 	in.Status.Exposes = es
-	ingressBackendsUnreachable.WithLabelValues(in.Namespace, in.Name).Set(float64(unreachable))
 
 	brStatus := metav1.ConditionTrue
 	brReason, brMsg := "AllReachable", "all backends reachable"
