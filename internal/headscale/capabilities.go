@@ -36,7 +36,7 @@ func (c *Client) GetPolicyWithMode(ctx context.Context) (string, *bool, error) {
 	}
 	var updatedAt *time.Time
 	if err := json.Unmarshal(out.UpdatedAt, &updatedAt); err != nil {
-		return "", nil, fmt.Errorf("decode policy updatedAt: %w", err)
+		return "", nil, &requestError{message: "decode policy updatedAt failed", cause: err}
 	}
 	database := updatedAt != nil
 	return *out.Policy, &database, nil

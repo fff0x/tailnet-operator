@@ -224,7 +224,8 @@ func Approvers(doc []byte) (map[string][]string, error) {
 func parse(doc []byte) (map[string]any, error) {
 	std, err := hujson.Standardize(doc)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBaseInvalid, err)
+		// HuJSON parser errors can quote entire input literals, including credentials.
+		return nil, fmt.Errorf("%w: invalid HuJSON syntax", ErrBaseInvalid)
 	}
 	dec := json.NewDecoder(bytes.NewReader(std))
 	dec.UseNumber()
