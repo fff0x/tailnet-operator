@@ -55,6 +55,7 @@ func (p *prober) replace(results map[string]probeResult) {
 //	/healthz  503 until the backend is Running, then 200 — drives the pod readiness gate
 //	/status   the raw ipnstate.Status, so the operator can classify missing routes
 //	/targets  the last probe result per target
+//	/metrics  bounded per-target/expose connection, byte and dial metrics
 func serveHealth(ctx context.Context, addr string, ts *tsnet.Server, lc statuser, fw *forwarder, interval time.Duration) {
 	pr := &prober{results: map[string]probeResult{}}
 	if interval > 0 {
@@ -62,6 +63,9 @@ func serveHealth(ctx context.Context, addr string, ts *tsnet.Server, lc statuser
 	}
 
 	mux := http.NewServeMux()
+	if fw.metrics != nil {
+		mux.Handle("/metrics", fw.metrics.handler())
+	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		st, err := lc.Status(r.Context())
 		if err != nil || st == nil || st.BackendState != "Running" {
@@ -100,16 +104,32 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// probe dials every running target and closes immediately. A connect is enough: egress proves
-// grant, route approval and the far-side path in one shot; ingress proves the in-cluster backend
-// answers. A refusal (RST) still counts as reachable — the host answered; only a timeout or dial
-// error is unreachable. fw.dial picks the right leg, so the probe mirrors real traffic.
+type probeTarget struct {
+	t    target
+	dial upstreamDial
+}
+
+// probeTargets captures targets and their metric generations under the same lock as reload.
+// Keep observers out of target: current and diffTargets compare only static configuration.
+func (f *forwarder) probeTargets() []probeTarget {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]probeTarget, 0, len(f.run))
+	for _, r := range f.run {
+		out = append(out, probeTarget{t: r.t, dial: f.metrics.connection(r.t.Name).wrapDial(f.dial)})
+	}
+	return out
+}
+
+// probe dials every running target and closes immediately. It measures the upstream TCP path:
+// tailnet for egress, in-cluster backend for ingress.
 func (p *prober) probe(ctx context.Context, fw *forwarder) {
-	cur := fw.current()
+	cur := fw.probeTargets()
 	results := make(map[string]probeResult, len(cur))
-	for _, t := range cur {
+	for _, probe := range cur {
+		t := probe.t
 		dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		c, err := fw.dial(dctx, t)
+		c, err := probe.dial(dctx, t)
 		cancel()
 		res := probeResult{Name: t.Name, LastProbe: time.Now()}
 		if err != nil {
@@ -118,6 +138,7 @@ func (p *prober) probe(ctx context.Context, fw *forwarder) {
 			res.Reachable = true
 			c.Close()
 		}
+
 		results[t.Name] = res
 	}
 	p.replace(results)

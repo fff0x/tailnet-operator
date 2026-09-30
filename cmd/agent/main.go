@@ -89,9 +89,9 @@ func main() {
 			log.Fatalf("edit prefs (RouteAll): %v", err)
 		}
 	}
-	log.Printf("tailnet-agent up: mode=%s hostname=%s control=%s", mode, hostname, controlURL)
+	log.Printf("tailnet-agent up: mode=%s hostname=%s", mode, hostname)
 
-	fw := &forwarder{ts: ts, mode: mode, run: map[string]running{}, changed: make(chan struct{}, 1)}
+	fw := &forwarder{ts: ts, mode: mode, run: map[string]running{}, changed: make(chan struct{}, 1), metrics: newAgentMetrics(mode)}
 	defer fw.stopAll()
 
 	// First load must parse; after that a bad reload is logged and the last good set stays up.
@@ -124,16 +124,17 @@ func (r running) stop() {
 // which side of each hop is the tailnet: egress listens local and dials the tailnet; ingress listens
 // on the tailnet and dials the in-cluster backend.
 type forwarder struct {
-	ts   *tsnet.Server
-	mode string
-	mu   sync.Mutex
-	run  map[string]running
+	ts      *tsnet.Server
+	mode    string
+	mu      sync.Mutex
+	run     map[string]running
+	metrics *agentMetrics
 	// changed gets a non-blocking signal whenever a listener was started; the prober drains it.
 	// nil (tests) is fine: the send falls through to default.
 	changed chan struct{}
 }
 
-// current returns a snapshot of the running targets (for diffing and for the probe).
+// current returns a snapshot of the running targets for value-based diffing.
 func (f *forwarder) current() map[string]target {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -159,6 +160,7 @@ func (f *forwarder) reload(ctx context.Context, path string) (pending int, err e
 	for _, name := range stop {
 		if r, ok := f.run[name]; ok {
 			r.stop()
+			f.metrics.remove(name)
 			delete(f.run, name)
 			log.Printf("target %s: listener stopped", name)
 		}
@@ -196,22 +198,27 @@ func (f *forwarder) listen(ctx context.Context, t target) (net.Listener, error) 
 	if err != nil {
 		return nil, err
 	}
+	metrics := f.metrics.connection(t.Name)
+	dial := metrics.wrapDial(f.dial)
+	if f.metrics != nil {
+		ln = &measuredListener{Listener: ln, metrics: metrics}
+	}
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return // listener closed by running.stop
 			}
-			go f.handle(ctx, c, t)
+			go f.handle(ctx, c, t, dial)
 		}
 	}()
 	return ln, nil
 }
 
-func (f *forwarder) handle(ctx context.Context, client net.Conn, t target) {
+func (f *forwarder) handle(ctx context.Context, client net.Conn, t target, dial upstreamDial) {
 	dctx, dcancel := context.WithTimeout(ctx, 10*time.Second)
 	defer dcancel()
-	upstream, err := f.dial(dctx, t)
+	upstream, err := dial(dctx, t)
 	if err != nil {
 		log.Printf("target %s: dial %s:%d: %v", t.Name, t.Address, t.Port, err)
 		client.Close()
@@ -222,7 +229,7 @@ func (f *forwarder) handle(ctx context.Context, client net.Conn, t target) {
 
 // dial opens the upstream leg of a hop: ingress dials the in-cluster backend with the process netns
 // (cluster DNS + ClusterIP), egress dials the far address over the tailnet. Shared by handle and the
-// health prober so both measure the same path.
+// health prober so both measure the same path. Callers capture generation-bound metrics separately.
 func (f *forwarder) dial(ctx context.Context, t target) (net.Conn, error) {
 	addr := net.JoinHostPort(t.Address, strconv.Itoa(t.Port))
 	if f.mode == "ingress" {
@@ -237,6 +244,7 @@ func (f *forwarder) stopAll() {
 	defer f.mu.Unlock()
 	for name, r := range f.run {
 		r.stop()
+		f.metrics.remove(name)
 		delete(f.run, name)
 	}
 }
