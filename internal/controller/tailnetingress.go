@@ -32,9 +32,10 @@ import (
 // never writes the tailnet policy; a missing grant is a policy concern, not a mint-time check.
 type TailnetIngressReconciler struct {
 	client.Client
-	Scheme            *runtime.Scheme
-	OperatorNamespace string
-	OperatorImage     string
+	Scheme                *runtime.Scheme
+	OperatorNamespace     string
+	OperatorImage         string
+	AgentImagePullSecrets []string
 }
 
 func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -236,7 +237,7 @@ func (r *TailnetIngressReconciler) applyChildren(ctx context.Context, in *tnv1.T
 	if err != nil {
 		return err
 	}
-	dep := ingressAgentDeployment(in, tn, ns, image)
+	dep := ingressAgentDeployment(in, tn, ns, image, r.AgentImagePullSecrets)
 	np := ingressNetworkPolicy(in, ns, r.OperatorNamespace)
 	for _, obj := range []client.Object{cm, dep, np} {
 		if err := controllerutil.SetControllerReference(in, obj, r.Scheme); err != nil {

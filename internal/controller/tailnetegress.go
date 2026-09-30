@@ -34,9 +34,10 @@ import (
 // and one Service per target. It never writes the tailnet policy; a missing grant becomes status.
 type TailnetEgressReconciler struct {
 	client.Client
-	Scheme            *runtime.Scheme
-	OperatorNamespace string
-	OperatorImage     string
+	Scheme                *runtime.Scheme
+	OperatorNamespace     string
+	OperatorImage         string
+	AgentImagePullSecrets []string
 }
 
 func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -252,7 +253,7 @@ func (r *TailnetEgressReconciler) applyChildren(ctx context.Context, eg *tnv1.Ta
 	if err != nil {
 		return err
 	}
-	dep := agentDeployment(eg, tn, ns, image)
+	dep := agentDeployment(eg, tn, ns, image, r.AgentImagePullSecrets)
 	np := egressNetworkPolicy(eg, ns, r.OperatorNamespace)
 	for _, obj := range []client.Object{cm, dep, np} {
 		if err := controllerutil.SetControllerReference(eg, obj, r.Scheme); err != nil {
