@@ -12,6 +12,54 @@
 #   * both containers must set an explicit numeric runAsUser (scratch has no USER directive).
 
 ##
+## TEST — native architecture only; never published or used as the bundle carrier.
+## Debian supplies the glibc userspace required by official Headscale/envtest assets.
+## Only tools and module downloads are cached. CI executes hack/ci-test.sh with
+## `buildah run` in a fresh working container, NOT a cacheable Dockerfile RUN.
+##
+# renovate: datasource=docker depName=golang versioning=docker
+FROM docker.io/library/golang:1.26.7-bookworm AS TEST
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl jq sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Helm release checksums verified against get.helm.sh; no floating install script.
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) arch=amd64; checksum=a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496 ;; \
+      arm64) arch=arm64; checksum=440cf7add0aee27ebc93fada965523c1dc2e0ab340d4348da2215737fc0d76ad ;; \
+      *) echo 'TEST supports native Linux amd64/arm64 only' >&2; exit 1 ;; \
+    esac; \
+    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+      --connect-timeout 10 --max-time 180 --retry 2 \
+      "https://get.helm.sh/helm-v3.19.0-linux-${arch}.tar.gz" -o /tmp/helm.tar.gz; \
+    printf '%s  /tmp/helm.tar.gz\n' "$checksum" | sha256sum -c -; \
+    tar -xzf /tmp/helm.tar.gz -C /tmp; \
+    install -m 0755 "/tmp/linux-${arch}/helm" /usr/local/bin/helm; \
+    rm -rf /tmp/helm.tar.gz "/tmp/linux-${arch}"
+
+# Go's module checksum database verifies this version-pinned scanner and its dependencies.
+RUN GOTOOLCHAIN=local GOBIN=/usr/local/bin go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+
+WORKDIR /src
+ENV GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
+COPY go.mod go.sum ./
+RUN go mod download
+# Native CI supplies a tracked-source-only context without the production .dockerignore
+# (which excludes deploy/). Do not pass credentials, host homes or runtime sockets.
+COPY cmd ./cmd
+COPY internal ./internal
+COPY api ./api
+COPY test ./test
+COPY charts ./charts
+COPY deploy ./deploy
+COPY hack ./hack
+COPY docs/USAGE.md ./docs/USAGE.md
+COPY docs/reference/rbac.md ./docs/reference/rbac.md
+COPY .radicle/native.yaml ./.radicle/native.yaml
+
+##
 ## BUILD — both binaries, static (CGO off), cross-compiled for every target arch.
 ##
 # renovate: datasource=docker depName=golang versioning=docker

@@ -1,9 +1,58 @@
-# Radicle CI run spec for radicle-native-ci (0.11).
+# Radicle CI run spec for radicle-native-ci (0.14).
 # Schema: a single `shell` field; the snippet runs under bash with
 # `set -xeuo pipefail` in the checked-out repo root. deny_unknown_fields.
 #
 # `ci-build` is the generic build entrypoint baked into the radicle/ci-broker image
-# (single source of truth): it auto-detects this repo as a container image (Dockerfile
-# with ARG CAT=/APP=) and builds + pushes + signs it. No per-repo build.sh.
+# (single source of truth): it auto-detects this repo as a bundle image.
+# The broker has Buildah/Helm/kubeconform but no Task/Go/helm-docs. Run the portable
+# rendering/drift gate, then the native TEST container before publishing the image.
+# Fail before publication on old brokers: they silently build only the image.
+# Release/deploy the mixed publisher, image-result protocol and pinned audit tools first.
+# CI_BUILDER_IMAGE must identify that deployed broker image by immutable digest.
 shell: |
-  ci-build
+  publisher=$(command -v ci-build)
+  for capability in mixed-helm-v1 image-result-v1; do
+    grep -qx "# ci-build-capability: $capability" "$publisher" || {
+      echo "ci-build lacks $capability; upgrade the broker before publishing this repo" >&2
+      exit 1
+    }
+  done
+  bash hack/chart-check.sh
+  bash hack/audit-image.sh --check-tools
+  # No credentials/build args/host mounts: only tracked test inputs enter this context.
+  # In particular exclude .git, .env, broker signing material and local ignored files.
+  # The production .dockerignore excludes deploy/, which admission tests need.
+  umask 077
+  test_tmp=$(mktemp -d)
+  test_container=''
+  cleanup_tests() {
+    local result=$?
+    trap - EXIT
+    if [[ -n "$test_container" ]]; then buildah rm "$test_container" || result=1; fi
+    rm -rf -- "$test_tmp" || result=1
+    exit "$result"
+  }
+  trap cleanup_tests EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  mkdir "$test_tmp/context"
+  git ls-files -z -- Dockerfile go.mod go.sum cmd internal api test charts deploy hack docs/USAGE.md docs/reference/rbac.md .radicle/native.yaml |
+    tar --null -T - -cf - | tar -xf - -C "$test_tmp/context"
+  case "$(uname -m)" in
+    x86_64) test_arch=amd64 ;;
+    aarch64 | arm64) test_arch=arm64 ;;
+    *) echo 'CI tests support native Linux amd64/arm64 only' >&2; exit 1 ;;
+  esac
+  # Cache the toolchain/module layers, NEVER a test result. A fresh working container
+  # executes the suite on every run, even for identical source SHAs. Compilation and
+  # verified E2E downloads repeat: no host cache mounts or test-result image commits.
+  buildah bud --http-proxy=false --layers --target TEST --platform "linux/$test_arch" \
+    --iidfile "$test_tmp/image-id" -f "$test_tmp/context/Dockerfile" "$test_tmp/context"
+  test_container=$(buildah from --http-proxy=false --pull=never "$(<"$test_tmp/image-id")")
+  buildah run "$test_container" -- bash hack/ci-test.sh
+  buildah rm "$test_container"
+  test_container=''
+  # The publisher writes authoritative JSON only after all selected artifacts succeed.
+  # Auditing is post-publication: failure rejects acceptance but cannot roll artifacts back.
+  CI_BUILD_RESULT_FILE="$test_tmp/published.json" ci-build
+  bash hack/audit-image.sh --result "$test_tmp/published.json"

@@ -217,6 +217,51 @@ func matches(t *testing.T, selector metav1.LabelSelector, podLabels map[string]s
 	return s.Matches(labels.Set(podLabels))
 }
 
+func TestNativeCICapabilityGate(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".radicle", "native.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec struct {
+		Shell string `json:"shell"`
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatal(err)
+	}
+	gate, _, found := strings.Cut(spec.Shell, "\nbash hack/chart-check.sh")
+	if !found {
+		t.Fatal("capability gate must precede chart checks and publication")
+	}
+	for _, tc := range []struct {
+		name, marker string
+		supported    bool
+	}{
+		{"neither", "", false},
+		{"charts only", "# ci-build-capability: mixed-helm-v1\n", false},
+		{"result only", "# ci-build-capability: image-result-v1\n", false},
+		{"both", "# ci-build-capability: mixed-helm-v1\n# ci-build-capability: image-result-v1\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			marker := tc.marker
+			invoked := filepath.Join(dir, "invoked")
+			stub := "#!/bin/sh\n" + marker + "touch '" + invoked + "'\nexit 99\n"
+			if err := os.WriteFile(filepath.Join(dir, "ci-build"), []byte(stub), 0700); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", gate)
+			cmd.Env = []string{"PATH=" + dir + ":" + os.Getenv("PATH"), "HOME=" + dir, "TMPDIR=" + dir}
+			out, err := cmd.CombinedOutput()
+			if (err == nil) != tc.supported {
+				t.Fatalf("supported=%v, gate error=%v: %s", tc.supported, err, out)
+			}
+			if _, err := os.Stat(invoked); !os.IsNotExist(err) {
+				t.Fatalf("capability detection executed the publisher: %v", err)
+			}
+		})
+	}
+}
+
 func TestDefaultRender(t *testing.T) {
 	m := render(t, "")
 	for _, kind := range []string{"Deployment", "ServiceAccount", "Role", "RoleBinding", "Service"} {
