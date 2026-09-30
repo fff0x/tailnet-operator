@@ -37,8 +37,9 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
 
 ## Quickstart
 
-Installation (Headscale key, `kubectl apply -k deploy`, CoreDNS) is in
-[docs/INSTALL.md](docs/INSTALL.md). With that in place, three manifests:
+Installation (Helm chart, Headscale key, CoreDNS; `kubectl apply -k deploy` alternative) is in
+[docs/INSTALL.md](docs/INSTALL.md). Chart `0.3.1` is prepared but not yet published; see its
+[values and release prerequisites](charts/tailnet-operator/README.md). With that in place, three manifests:
 
 ```yaml
 apiVersion: tailnet.this-is-fine.io/v1alpha1
@@ -112,6 +113,7 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | `apiSecretRef.{name,key}` | key `apiKey` | Secret (operator namespace) with the read-only bootstrap API key |
 | `apiKeyLifetime` / `authKeyLifetime` | `720h` / `168h` | working API key (minimum 1h) / per-CR pre-auth key; both rotated at half-life |
 | `proxy.{image,resources,mtu,probeInterval}` | operator image, –, `1200`, `5m` | agent pod defaults |
+| `proxy.imagePullSecrets` | operator default | registry Secret names in each agent namespace; omitted inherits `AGENT_IMAGE_PULL_SECRETS` (JSON array), `[]` clears the operator-supplied list; credentials are never copied |
 | `tagTemplate` / `hostnameTemplate` | `tag:egress-{name}` / `egress-{name}` | egress tag and MagicDNS name when the CR sets none |
 | `ingressTagTemplate` / `ingressHostnameTemplate` | `tag:ingress-{name}` / `ingress-{name}` | same for ingress |
 | `dns.hostsConfigMap` | off | ConfigMap (key `hosts`) receiving the rendered CoreDNS hosts file |
@@ -203,27 +205,57 @@ A single image carries both binaries; the operator runs `/tailnet-operator`, eac
 ## Develop
 
 ```sh
-nix-shell          # go toolchain + go-task + kubectl + kustomize
+nix-shell          # Go, Task, kubectl, kustomize, Helm, helm-docs, kubeconform
 task lint test     # gofmt + go vet + unit tests
-task crds          # regenerate deploy/crds/ from the Go types
+task crds          # regenerate deploy/crds/ and chart CRD copies from Go types
+task deploy-gen    # regenerate deploy/operator.yaml from default chart values
+task chart         # chart docs, lint, render, drift and contract checks (no cluster)
 # With KUBEBUILDER_ASSETS pointing to local envtest binaries (Kubernetes >=1.31):
 task test-validation # real API-server admission tests; optional LIVE_CR_FILE export
+task e2e           # isolated API server + real Headscale; downloads pinned public assets
+task e2e-kind      # disposable installation + leader failover; rootless Podman/kind delegation
 task image         # build the combined bundle image locally
 ```
 
-CI is radicle-native: `.radicle/native.yaml` runs `ci-build`, which cross-compiles both binaries for
-`linux/amd64` + `linux/arm64`, publishes a cosign-signed multi-arch index at
-`oci.<domain>/tailnet/operator` (private) and mirrors it to `docker.io/ff0x/tailnet-operator`
-(public).
+The prepared `.radicle/native.yaml` runs the portable chart lint/render/drift gate before tests.
+It then builds the native Dockerfile `TEST` target and runs `hack/ci-test.sh` in a fresh Buildah container.
+The test gate includes formatting, vet, uncached unit/chart tests, admission and real Headscale Tier 1.
+No signing credentials or host mounts enter the test container; test results are never cached in an image layer.
+Only after success does `ci-build` cross-compile both binaries for `linux/amd64` + `linux/arm64` and publish a
+cosign-signed multi-arch index at `oci.<domain>/tailnet/operator` (private).
+Docker Hub mirroring to `docker.io/ff0x/tailnet-operator` is a separate publication step.
+The prepared broker needs `mixed-helm-v1`, `image-result-v1`, Syft 1.52.0, Trivy 0.74.0 and Cosign 2.5.0.
+Deploy it and configure `CI_BUILDER_IMAGE` with its immutable image reference before publishing this repo.
+Native CI checks capabilities and audit configuration before building; it rejects older brokers.
+After publication, `hack/audit-image.sh` consumes the publisher's private JSON report, not log output.
+It verifies the signed index, scans both immutable platform children, then signs and verifies SPDX and SLSA-v1 predicates.
+HIGH/CRITICAL findings warn on main and reject versioned releases; operational failures always fail.
+This is post-publication acceptance, not a transaction or rollback. Existing releases do not gain this evidence retroactively.
+See [the security policy](docs/SECURITY.md#build-and-verification-gates) for limits.
+Local `task chart` additionally generates helm-docs and runs Go-based Helm contract tests.
+Tier 1 covers preflight, policy lifecycle, working-key rotation and metadata repair,
+InSync approval replay, tag-sourced policy tests, IPv4-only hosts output and credential redaction.
+See [the compatibility matrix and remaining gates](docs/COMPATIBILITY.md).
+The new CI gate still requires deployment and a successful broker run on main.
+The [Tier-2 tests](test/e2e-kind/README.md) have passed installation and two-replica leader failover in a delegated rootless user scope.
+The combined RBAC/metrics run converged in 16.884 seconds against a 30-second bound (previously 17.935 seconds).
+One of the initial four integrated runs failed during early Helm installation; its cause remains unknown.
+The subsequent combined run passed after the readiness-timing correction.
+A later independently exported index passed with 17.393-second policy convergence and verified cleanup.
+This is local control-plane evidence, not HTTP-ingress, data-plane, nightly or week-long HA acceptance.
 
 | Path | What |
 | --- | --- |
 | `api/v1alpha1` | `Tailnet`, `TailnetEgress`, `TailnetIngress` CRD types |
 | `cmd/operator` | control plane entry point |
 | `cmd/agent` | `tailnet-agent`: tsnet node, egress/ingress TCP forwarders, health/probe |
+| `internal/manager` | shared production/test controller wiring and cache scopes |
 | `internal/controller` | reconcilers (tailnet, egress, ingress, dns, policy) and resource builders |
 | `internal/headscale` | Headscale REST client (Bearer): nodes, keys, policy |
 | `internal/policy` | base + CR → rendered policy, normalisation, hashing (tested) |
 | `internal/{keys,ports,routes,naming}` | pure functions: key rotation, port assignment, route diagnosis, templating (tested) |
-| `deploy/` | CRDs, RBAC, Deployment, ServiceMonitor (kustomize); `examples/` incl. a base policy |
-| `docs/` | [INSTALL.md](docs/INSTALL.md), [USAGE.md](docs/USAGE.md) |
+| `charts/tailnet-operator/` | Helm chart, copied CRDs, documented values and optional monitoring/network isolation |
+| `deploy/` | generated default chart bundle and CRDs (kustomize); `examples/` incl. a base policy |
+| `test/e2e/` | isolated Tier-1 manager + real Headscale tests and pinned asset hashes |
+| `test/e2e-kind/` | rootless kind installation, leader failover and owned-kubeconfig safety tests |
+| `docs/` | [INSTALL.md](docs/INSTALL.md), [USAGE.md](docs/USAGE.md), [COMPATIBILITY.md](docs/COMPATIBILITY.md) |

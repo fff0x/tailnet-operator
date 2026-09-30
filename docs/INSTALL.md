@@ -132,7 +132,10 @@ Preflight does not change Headscale configuration. DryRun still publishes the re
 ### Helm installation
 
 **Release preparation:** this checkout prepares chart `0.3.1` and image `v0.3.1`; it does not prove publication.
-The prepared `mixed-helm-v1` broker extension must be released and deployed first; a planned consumer CI gate will reject older brokers before publication.
+First, release and deploy a broker with `mixed-helm-v1`, `image-result-v1` and the pinned audit tools.
+Configure its immutable `CI_BUILDER_IMAGE` identity.
+The prepared consumer CI rejects missing capabilities or audit prerequisites before publication.
+See [security gates](SECURITY.md#build-and-verification-gates).
 Verify actual chart publication and signatures before using the OCI command below.
 Verify chart/image availability, registry authentication and signatures first; a private build does not prove Docker Hub mirror availability.
 Use Helm 3 or 4. The default chart needs no Prometheus or Grafana CRDs.
