@@ -1,0 +1,123 @@
+# -- Override the resource name with a letter-first DNS label (at most 53 characters). Install only one operator per cluster.
+fullnameOverride: ""
+# -- Operator namespace; empty uses the Helm release namespace. Bootstrap and working keys live here.
+namespace: ""
+# -- Operator replicas; more than one requires leaderElection.enabled. A PDB with minAvailable=1 is rendered for multiple replicas.
+replicas: 1
+leaderElection:
+  # -- Elect one active operator using a Lease in the operator namespace. Disable only for a single replica with Recreate updates.
+  enabled: true
+# -- Optional operator pod topology spread constraints. Supply a labelSelector matching app.kubernetes.io/name: tailnet-operator.
+topologySpreadConstraints: []
+image:
+  # -- Operator image repository. Verify mirror availability before installation.
+  repository: docker.io/ff0x/tailnet-operator
+  # -- Image tag; empty uses Chart.appVersion.
+  tag: ""
+  # -- Optional sha256 digest; takes precedence over the tag.
+  digest: ""
+  # -- Operator pull policy.
+  pullPolicy: IfNotPresent
+agentImage:
+  # -- Agent repository; empty inherits image.repository.
+  repository: ""
+  # -- Agent tag. With an explicit repository, empty uses Chart.appVersion; otherwise inherits image.tag.
+  tag: ""
+  # -- Agent digest. An entirely empty agentImage inherits the complete operator image, including its digest.
+  digest: ""
+# -- Pull-secret references for the operator pod, e.g. [{name: dockerconfig}].
+imagePullSecrets: []
+agent:
+  # -- Default agent pull-secret names, e.g. [dockerconfig]. Tailnet.spec.proxy.imagePullSecrets overrides these. Secrets must exist in each agent namespace.
+  imagePullSecrets: []
+# -- Operator resource requests and limits.
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+# -- Pod security context; the scratch image requires a numeric non-root UID.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+# -- Operator container hardening. Agents are configured separately by the controller.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+env:
+  # -- Additional EnvVar entries. POD_NAMESPACE, OPERATOR_IMAGE, AGENT_IMAGE_PULL_SECRETS and SSL_CERT_FILE are reserved.
+  extra: []
+monitoring:
+  serviceMonitor:
+    # -- Requires Prometheus Operator CRDs. Disabled for a fresh Kubernetes installation.
+    enabled: false
+    # -- Additional ServiceMonitor labels for your Prometheus selector.
+    labels: {}
+    # -- Scrape interval.
+    interval: 30s
+  podMonitor:
+    # -- Scrape generated agents on health TCP/9080. Requires PodMonitor CRD and site-owned NetworkPolicy access for external scrapers.
+    enabled: false
+    # -- Additional PodMonitor labels for your Prometheus selector.
+    labels: {}
+    # -- Agent namespace selection. Set any: false with matchNames to restrict namespaces; any: false without names selects only the PodMonitor namespace.
+    namespaceSelector:
+      any: true
+    # -- Agent scrape interval.
+    interval: 30s
+  rules:
+    # -- Render a PrometheusRule. Requires Prometheus Operator CRDs.
+    enabled: false
+    # -- API-key expiry warning threshold in seconds (7 days). For shorter key lifetimes, set below half-life to avoid warning before normal rotation.
+    apiKeyExpiryWarningSeconds: 604800
+    # -- Egress/ingress auth-key expiry warning threshold in seconds (1 day). For shorter key lifetimes, set below half-life to avoid warning before normal rotation.
+    authKeyExpiryWarningSeconds: 86400
+    # -- Nonempty groups replace all bundled rules, without merging or template evaluation.
+    groups: []
+  dashboard:
+    # -- Render the bundled dashboard, or the json override below. Disabled by default.
+    enabled: false
+    # -- GrafanaDashboard requires Grafana Operator v5 CRDs; ConfigMap supports dashboard sidecars.
+    kind: GrafanaDashboard
+    # -- Nonempty JSON replaces the bundled dashboard; custom JSON is not template evaluated.
+    json: ""
+    # -- Labels for the dashboard resource, including the optional ConfigMap sidecar label.
+    labels:
+      grafana_dashboard: "1"
+    # -- Grafana Operator instance selector.
+    instanceSelector:
+      matchLabels:
+        grafana.internal/instance: grafana
+    # -- Grafana Operator dashboard folder.
+    folder: Tailnet
+    # -- Allow Grafana Operator to import into matching instances in other namespaces.
+    allowCrossNamespaceImport: true
+    # -- Grafana Operator datasource name mapped to the bundled DS_PROMETHEUS input. Sidecar users must configure input substitution separately.
+    datasourceName: Prometheus
+networkPolicy:
+  # -- Enable operator isolation. Requires explicit kubeAPI and Headscale CIDRs; CNI Service-DNAT behavior must be checked locally.
+  enabled: false
+  # -- API endpoint and/or Service CIDRs appropriate for your CNI, e.g. [10.96.0.1/32]. Required when enabled.
+  kubeAPICIDRs: []
+  # -- Kubernetes API TCP ports.
+  kubeAPIPorts: [443, 6443]
+  # -- Headscale API endpoint CIDRs (not hostnames). Required when enabled; update when DNS addresses change.
+  headscaleCIDRs: []
+  # -- Headscale REST API TCP ports.
+  headscalePorts: [443, 8080]
+  # -- DNS NetworkPolicy peers; customize for NodeLocal DNS or a different resolver.
+  dnsPeers:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+  # -- Peers permitted to scrape metrics. Empty denies metrics ingress when isolation is enabled.
+  metricsPeers: []

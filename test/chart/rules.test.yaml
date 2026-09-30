@@ -1,0 +1,280 @@
+# Evaluated by the real promtool against Helm-rendered bundled rules.
+rule_files: [rules.yaml]
+evaluation_interval: 1m
+tests:
+  - name: Healthy operator metrics Service suppresses availability alert
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="release-system",service="tailnet-operator-metrics"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TailnetOperatorDown
+        exp_alerts: []
+  - name: Stable InSync never becomes stale merely because applied timestamp is old
+    interval: 1m
+    input_series:
+      - series: 'tailnet_policy_pending{tailnet="stable"}'
+        values: '0x40'
+      - series: 'tailnet_policy_applied_timestamp_seconds{tailnet="stable"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: TailnetPolicyStale
+        exp_alerts: []
+  - name: Pending policy waits fifteen minutes and clears on convergence
+    interval: 1m
+    input_series:
+      - series: 'tailnet_policy_pending{tailnet="pending"}'
+        values: '1x20 0x10'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: TailnetPolicyStale
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TailnetPolicyStale
+        exp_alerts:
+          - exp_labels: {tailnet: pending, severity: warning}
+            exp_annotations:
+              summary: Rendered policy has not been applied
+              description: Apply mode has a nonempty rendered hash different from the applied hash for fifteen minutes. A stable InSync policy is healthy regardless of its applied timestamp age.
+              runbook_url: docs/USAGE.md#monitoring-policy-stale
+      - eval_time: 22m
+        alertname: TailnetPolicyStale
+        exp_alerts: []
+  - name: Not-ready alert includes only the current Ready reason
+    interval: 1m
+    input_series:
+      - series: 'tailnet_resource_ready{kind="TailnetEgress",namespace="tenant",name="db",tailnet="lab"}'
+        values: '0x20'
+      - series: 'tailnet_resource_condition{kind="TailnetEgress",namespace="tenant",name="db",type="Ready",reason="NoRoute"}'
+        values: '1x20'
+      - series: 'tailnet_resource_condition{kind="TailnetEgress",namespace="tenant",name="db",type="Ready",reason="Ready"}'
+        values: '0x20'
+      # Tailnet has no Ready gauge; a policy condition must not become ResourceNotReady.
+      - series: 'tailnet_resource_condition{kind="Tailnet",namespace="",name="lab",type="PolicyApplied",reason="InSync"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: TailnetResourceNotReady
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: TailnetResourceNotReady
+        exp_alerts:
+          - exp_labels: {kind: TailnetEgress, namespace: tenant, name: db, tailnet: lab, reason: NoRoute, severity: warning}
+            exp_annotations: &not_ready_annotations
+              summary: Tailnet resource remains not ready
+              description: The reason label is the current Ready reason, not a historical reason. Resources without a Ready condition, including Tailnet, are not evaluated.
+              runbook_url: docs/USAGE.md#monitoring-resource-not-ready
+  - name: Healthy resources and historical rejection do not alert
+    interval: 1m
+    input_series:
+      - series: 'tailnet_resource_ready{kind="TailnetIngress",namespace="tenant",name="web",tailnet="lab"}'
+        values: '1x20'
+      - series: 'tailnet_resource_condition{kind="TailnetIngress",namespace="tenant",name="web",type="Ready",reason="Ready"}'
+        values: '1x20'
+      - series: 'tailnet_resource_condition{kind="Tailnet",namespace="",name="lab",type="PolicyApplied",reason="PolicyRejected"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TailnetResourceNotReady
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: TailnetPolicyRejected
+        exp_alerts: []
+  - name: Ratio and count thresholds use actual PromQL evaluation
+    interval: 1m
+    input_series:
+      - series: 'tailnet_headscale_api_requests_total{tailnet="lab",code="500",method="GET",path_template="/api/v1/node"}'
+        values: '0+6x60'
+      - series: 'tailnet_headscale_api_requests_total{tailnet="lab",code="200",method="GET",path_template="/api/v1/node"}'
+        values: '0+94x60'
+      - series: 'tailnet_policy_apply_errors_total{tailnet="lab"}'
+        values: '0+1x60'
+      - series: 'tailnet_route_approvals_replayed_total{tailnet="lab"}'
+        values: '0+1x60'
+      - series: 'tailnet_policy_generated{tailnet="lab",kind="grants"}'
+        values: '10x10 4x5'
+    promql_expr_test:
+      - expr: sum by (tailnet) (rate(tailnet_headscale_api_requests_total{code=~"5.."}[10m])) / sum by (tailnet) (rate(tailnet_headscale_api_requests_total[10m])) > bool 0.05
+        eval_time: 20m
+        exp_samples:
+          - labels: '{tailnet="lab"}'
+            value: 1
+      - expr: sum by (tailnet) (increase(tailnet_policy_apply_errors_total[30m])) >= bool 6
+        eval_time: 30m
+        exp_samples:
+          - labels: '{tailnet="lab"}'
+            value: 1
+      - expr: sum by (tailnet) (increase(tailnet_route_approvals_replayed_total[1h])) > bool 3
+        eval_time: 1h
+        exp_samples:
+          - labels: '{tailnet="lab"}'
+            value: 1
+      - expr: max by (tailnet, kind) (tailnet_policy_generated) < bool 0.5 * max by (tailnet, kind) (max_over_time(tailnet_policy_generated[10m]))
+        eval_time: 12m
+        exp_samples:
+          - labels: '{tailnet="lab",kind="grants"}'
+            value: 1
+  - name: Overlapping exporters with different active Ready reasons do not cause many-to-many matching
+    interval: 1m
+    input_series:
+      - series: 'tailnet_resource_ready{instance="old",job="operator",kind="TailnetEgress",namespace="tenant",name="db",tailnet="lab"}'
+        values: '0x20'
+      - series: 'tailnet_resource_ready{instance="new",job="operator",kind="TailnetEgress",namespace="tenant",name="db",tailnet="lab"}'
+        values: '0x20'
+      - series: 'tailnet_resource_condition{instance="old",job="operator",kind="TailnetEgress",namespace="tenant",name="db",type="Ready",reason="NoAPIKey"}'
+        values: '1x20'
+      - series: 'tailnet_resource_condition{instance="new",job="operator",kind="TailnetEgress",namespace="tenant",name="db",type="Ready",reason="NotReady"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: TailnetResourceNotReady
+        exp_alerts:
+          - exp_labels: {kind: TailnetEgress, namespace: tenant, name: db, tailnet: lab, reason: NoAPIKey, severity: warning}
+            exp_annotations: *not_ready_annotations
+          - exp_labels: {kind: TailnetEgress, namespace: tenant, name: db, tailnet: lab, reason: NotReady, severity: warning}
+            exp_annotations: *not_ready_annotations
+  - name: A stale healthy exporter cannot mask a failing exporter or supply its Ready reason
+    interval: 1m
+    input_series:
+      - series: 'tailnet_resource_ready{instance="old",job="operator",kind="TailnetIngress",namespace="tenant",name="web",tailnet="lab"}'
+        values: '1x20'
+      - series: 'tailnet_resource_ready{instance="new",job="operator",kind="TailnetIngress",namespace="tenant",name="web",tailnet="lab"}'
+        values: '0x20'
+      - series: 'tailnet_resource_condition{instance="old",job="operator",kind="TailnetIngress",namespace="tenant",name="web",type="Ready",reason="Ready"}'
+        values: '1x20'
+      - series: 'tailnet_resource_condition{instance="new",job="operator",kind="TailnetIngress",namespace="tenant",name="web",type="Ready",reason="Unreachable"}'
+        values: '1x20'
+      - series: 'tailnet_resource_condition{instance="new",job="operator",kind="TailnetIngress",namespace="tenant",name="web",type="Ready",reason="Ready"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: TailnetResourceNotReady
+        exp_alerts:
+          - exp_labels: {kind: TailnetIngress, namespace: tenant, name: web, tailnet: lab, reason: Unreachable, severity: warning}
+            exp_annotations: *not_ready_annotations
+  - name: First four route approvals after an idle zero scrape are counted and alert
+    interval: 1m
+    input_series:
+      # Reconcile initializes Approved(tailnet, 0) before the first replay.
+      - series: 'tailnet_route_approvals_replayed_total{tailnet="lab"}'
+        values: '0x20 4x10'
+    promql_expr_test:
+      - expr: sum by (tailnet) (increase(tailnet_route_approvals_replayed_total[1h]))
+        eval_time: 21m
+        exp_samples:
+          - labels: '{tailnet="lab"}'
+            value: 4
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TailnetApprovalReplays
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: TailnetApprovalReplays
+        exp_alerts:
+          - exp_labels: {tailnet: lab, severity: warning}
+            exp_annotations:
+              summary: Route approvals are being replayed repeatedly
+              description: More than three routes were successfully approved by replay in one hour. This counts routes, not API requests; inspect Headscale restarts and route stability.
+              runbook_url: docs/USAGE.md#monitoring-route-replays
+  - name: Reconcile error rate must exceed point one per second for ten minutes
+    interval: 1m
+    input_series:
+      - series: 'controller_runtime_reconcile_errors_total{controller="tailnet",namespace="release-system",service="tailnet-operator-metrics"}'
+        values: '0+12x30'
+      - series: 'controller_runtime_reconcile_errors_total{controller="tailnetegress",namespace="release-system",service="tailnet-operator-metrics"}'
+        values: '0+6x30'
+    alert_rule_test:
+      # The five-minute rate first exceeds 0.1/s at 3m as its window fills.
+      - eval_time: 12m
+        alertname: TailnetReconcileErrors
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: TailnetReconcileErrors
+        exp_alerts:
+          - exp_labels: {controller: tailnet, severity: warning}
+            exp_annotations:
+              summary: Tailnet controller reconciliation is failing
+              description: Reconciliation errors exceed 0.1 per second for ten minutes. Inspect controller logs and the affected custom resource conditions.
+              runbook_url: docs/USAGE.md#monitoring-reconcile-errors
+  - name: Observed offline nodes alert after five minutes but online and unknown nodes do not
+    interval: 1m
+    input_series:
+      - series: 'tailnet_node_online{kind="TailnetEgress",namespace="tenant",name="db"}'
+        values: '0x7 stale'
+      - series: 'tailnet_node_online{kind="TailnetIngress",namespace="tenant",name="web"}'
+        values: '1x20'
+      # A known last-seen timestamp alone does not prove offline state.
+      - series: 'tailnet_node_last_seen_seconds{kind="TailnetIngress",namespace="tenant",name="unknown"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TailnetNodeOffline
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: TailnetNodeOffline
+        exp_alerts:
+          - exp_labels: {kind: TailnetEgress, namespace: tenant, name: db, severity: warning}
+            exp_annotations:
+              summary: No matching Headscale node is online
+              description: A successful node listing found no matching online node for five minutes. An absent series means no current observation, not an offline node.
+              runbook_url: docs/USAGE.md#monitoring-node-offline
+      - eval_time: 8m
+        alertname: TailnetNodeOffline
+        exp_alerts: []
+    promql_expr_test:
+      - expr: time() - min by (kind, namespace, name) (tailnet_node_last_seen_seconds)
+        eval_time: 5m
+        exp_samples:
+          - labels: '{kind="TailnetIngress",namespace="tenant",name="unknown"}'
+            value: 299
+  - name: Key expiry warnings use seven days for API keys and one day for auth keys with a five minute hold
+    interval: 1m
+    input_series:
+      - series: 'tailnet_apikey_expires_seconds{tailnet="expiring"}'
+        values: '604799x10'
+      - series: 'tailnet_apikey_expires_seconds{tailnet="boundary"}'
+        values: '604800x10'
+      - series: 'tailnetegress_authkey_expires_seconds{namespace="tenant",name="expiring"}'
+        values: '86399x10'
+      - series: 'tailnetegress_authkey_expires_seconds{namespace="tenant",name="boundary"}'
+        values: '86400x10'
+      - series: 'tailnetingress_authkey_expires_seconds{namespace="tenant",name="expiring"}'
+        values: '86399x10'
+      - series: 'tailnetingress_authkey_expires_seconds{namespace="tenant",name="boundary"}'
+        values: '86400x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TailnetAPIKeyExpiringSoon
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: TailnetEgressAuthKeyExpiringSoon
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: TailnetIngressAuthKeyExpiringSoon
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: TailnetAPIKeyExpiringSoon
+        exp_alerts:
+          - exp_labels: {tailnet: expiring, severity: warning}
+            exp_annotations:
+              summary: Working Headscale API key is nearing expiry
+              description: Less than 604800 seconds remain. Check automatic rotation and the bootstrap credential. Negative values mean the key has already expired.
+              runbook_url: docs/USAGE.md#monitoring-key-expiry
+      - eval_time: 5m
+        alertname: TailnetEgressAuthKeyExpiringSoon
+        exp_alerts:
+          - exp_labels: {namespace: tenant, name: expiring, severity: warning}
+            exp_annotations:
+              summary: Egress pre-auth key is nearing expiry
+              description: Less than 86400 seconds remain. Check key rotation before an agent needs to register again. Key expiry alone does not prove an existing node is offline.
+              runbook_url: docs/USAGE.md#monitoring-key-expiry
+      - eval_time: 5m
+        alertname: TailnetIngressAuthKeyExpiringSoon
+        exp_alerts:
+          - exp_labels: {namespace: tenant, name: expiring, severity: warning}
+            exp_annotations:
+              summary: Ingress pre-auth key is nearing expiry
+              description: Less than 86400 seconds remain. Check key rotation before an agent needs to register again. Key expiry alone does not prove an existing node is offline.
+              runbook_url: docs/USAGE.md#monitoring-key-expiry

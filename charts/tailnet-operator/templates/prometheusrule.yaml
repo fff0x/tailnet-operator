@@ -1,0 +1,15 @@
+{{- if .Values.monitoring.rules.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "tailnet-operator.name" . | quote }}
+  namespace: {{ include "tailnet-operator.namespace" . | quote }}
+spec:
+  groups:
+    {{- if .Values.monitoring.rules.groups }}
+    {{- toYaml .Values.monitoring.rules.groups | nindent 4 }}
+    {{- else }}
+    {{- /* Only the bundled file is templated; custom Prometheus annotations stay literal. */}}
+    {{- tpl (.Files.Get "files/rules.yaml") . | nindent 4 }}
+    {{- end }}
+{{- end }}

@@ -2,6 +2,8 @@
 version: "3"
 
 vars:
+  # Chart publication destination; the current broker needs separate mixed-repo publishing support.
+  OCI_CHART_PATH: oci://oci.this-is-fine.io/charts
   # Injected into the OCI version label; ci-build overrides this too.
   VERSION:
     sh: git describe --tags --always --dirty 2>/dev/null || echo dev
@@ -38,13 +40,45 @@ tasks:
     desc: gofmt + go vet
     cmds:
       # gofmt -l prints unformatted files; make it fail the task if the list is non-empty.
-      - test -z "$(gofmt -l cmd internal api test)"
+      - test -z "$(gofmt -l cmd internal api test hack)"
       - go vet ./...
 
   crds:
     desc: Regenerate DeepCopy + CRDs from the Go types
     cmds:
       - go tool controller-gen object crd paths=./api/... output:crd:dir=deploy/crds
+      - mkdir -p charts/tailnet-operator/crds
+      - cp deploy/crds/*.yaml charts/tailnet-operator/crds/
+
+  chart:
+    desc: Generate chart docs, lint/render/validate, check generated files and run chart contracts (no cluster)
+    cmds:
+      - helm-docs --chart-search-root charts --log-level error
+      - bash hack/chart-check.sh
+      - bash hack/rbac-diff.sh --check
+      - go test -tags=chart ./test/chart -count=1
+
+  rbac-check:
+    desc: Compare default chart RBAC with the reviewed permission reference (no cluster)
+    cmds:
+      - bash hack/rbac-diff.sh --check
+
+  rbac-gen:
+    desc: Update the RBAC reference after reviewing intentional permission changes
+    cmds:
+      - bash hack/rbac-diff.sh --write
+
+  deploy-gen:
+    desc: Regenerate the standalone kustomize bundle from default chart values (no cluster)
+    cmds:
+      - bash hack/deploy-gen.sh
+
+  crd-upgrade:
+    desc: Apply reviewed CRDs to an explicitly selected cluster (Helm CLI does not upgrade CRDs)
+    requires:
+      vars: [KUBE_CONTEXT]
+    cmds:
+      - kubectl --context {{.KUBE_CONTEXT | shellQuote}} apply --server-side -f deploy/crds {{.CLI_ARGS}}
 
   image:
     # Bundle mode (ARG BUNDLE=1): this produces a FROM-scratch image carrying /bundle, NOT a

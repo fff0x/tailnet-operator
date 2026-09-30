@@ -14,7 +14,7 @@ func TestLeaderElectionFlag(t *testing.T) {
 		args []string
 		want bool
 	}{
-		{name: "default", want: false},
+		{name: "default", want: true},
 		{name: "enabled", args: []string{"--leader-elect=true"}, want: true},
 		{name: "disabled", args: []string{"--leader-elect=false"}, want: false},
 	} {

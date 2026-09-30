@@ -50,7 +50,7 @@ func main() {
 }
 
 func leaderElectionFlag(fs *flag.FlagSet) *bool {
-	return fs.Bool("leader-elect", false, "Elect one active operator using a namespaced Lease; disable only for a single non-overlapping process")
+	return fs.Bool("leader-elect", true, "Elect one active operator using a namespaced Lease; disable only for a single non-overlapping process")
 }
 
 // parseAgentImagePullSecrets deliberately omits input values from errors: startup logs must not

@@ -43,8 +43,9 @@ life and store it once:
 
 ```sh
 headscale apikeys create --expiration 8760h
-kubectl -n tailnet-system create secret generic headscale-bootstrap --from-literal=apiKey=<key>
 ```
+
+Create the Kubernetes Secret after installing the operator namespace in §3. Do not commit the plaintext key.
 
 ### 2.2 Policy: what must exist
 
@@ -128,41 +129,98 @@ Preflight does not change Headscale configuration. DryRun still publishes the re
 
 ## 3. Operator
 
+### Helm installation
+
+**Release preparation:** this checkout prepares chart `0.3.1` and image `v0.3.1`; it does not prove publication.
+The prepared `mixed-helm-v1` broker extension must be released and deployed first; a planned consumer CI gate will reject older brokers before publication.
+Verify actual chart publication and signatures before using the OCI command below.
+Verify chart/image availability, registry authentication and signatures first; a private build does not prove Docker Hub mirror availability.
+Use Helm 3 or 4. The default chart needs no Prometheus or Grafana CRDs.
+
+After the release is available, configure the placeholders and run these three commands:
+
 ```sh
-kubectl apply -k deploy        # namespace tailnet-system, CRDs, RBAC, Deployment, ServiceMonitor
-kubectl -n tailnet-system rollout status deploy/tailnet-operator
-```
+helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
+  --version 0.3.1 --namespace tailnet-system --create-namespace
 
-`deploy/` is organisation-free. In your own overlay set the image (both the container image and
-`OPERATOR_IMAGE`, which the agents use), and add a NetworkPolicy for the operator: it needs the
-kube-apiserver, cluster DNS, the Headscale API and the agent pods' health port (`:8080`, for the
-route/probe diagnosis — otherwise every CR reports `ProbeFailed`). With Cilium note that
-`toEndpoints` selectors are **namespace-scoped**: to reach ingress agents in tenant namespaces add
-`k8s:io.kubernetes.pod.namespace: {operator: Exists}` to the selector. Run **one replica** — the operator holds no
-lease, and two would race the key rotation (and, in [§7](#7-operator-owned-policy), the policy).
-
-Then bind the cluster to your control server:
-
-```yaml
+kubectl apply -f - <<'EOF'
 apiVersion: tailnet.this-is-fine.io/v1alpha1
 kind: Tailnet
 metadata:
   name: corp
 spec:
-  server: https://ts.example.com                    # agents' ControlURL
-  apiUrl: http://headscale.tailnet-system.svc:8080  # in-cluster REST endpoint
+  server: https://ts.example.com
+  apiUrl: http://headscale.tailnet-system.svc:8080
   apiSecretRef: { name: headscale-bootstrap, key: apiKey }
   proxy: { mtu: 1200, probeInterval: 5m }
+EOF
+
+kubectl -n tailnet-system create secret generic headscale-bootstrap --from-literal=apiKey='<key>'
 ```
+
+Use your secret manager for the last command in production; avoid storing the key in shell history.
+The Tailnet initially reports missing credentials and retries after the Secret appears.
+For a source installation, replace the OCI URL with `./charts/tailnet-operator` and supply a built image through values.
+
+Check the result:
 
 ```sh
+kubectl -n tailnet-system rollout status deploy/tailnet-operator
 kubectl get tailnet corp
-# NAME   SERVER                   APIKEY   EXPIRES                POLICY   AGE
-# corp   https://ts.example.com   True     2026-10-28T12:00:00Z            1m
+kubectl describe tailnet corp
 ```
 
-`ApiReachable=True` and `ApiKeyValid=True` in `kubectl describe tailnet corp` mean the working key
-exists and the API answers. The `POLICY` column stays empty until [§7](#7-operator-owned-policy).
+`ApiReachable=True` and `ApiKeyValid=True` mean the working key exists and the API answers.
+The `POLICY` column stays empty until [§7](#7-operator-owned-policy).
+Run **one operator installation per cluster**, with all replicas in the same operator namespace.
+The chart defaults to leader election and rolling updates; `replicas > 1` requires election and adds a PDB.
+The shared Lease is `tailnet-operator.this-is-fine.io`; changing namespace creates a different election domain.
+Election does not fence in-flight external writes. Isolated failover passed; production handover and soak acceptance remain open.
+With election disabled, only one replica and `Recreate` are allowed.
+
+When upgrading a pre-election installation or changing election mode, stop the old operator before starting the new one.
+Do not rely on `RollingUpdate` to prevent overlap with an instance that does not participate in the same Lease.
+Use a reviewed stop-first GitOps handover; agents keep their existing state while the control plane is stopped.
+See the [chart migration guidance](../charts/tailnet-operator/README.md) before rollout.
+
+### Images, private registries and isolation
+
+See the [chart values](../charts/tailnet-operator/README.md#values) for configuration.
+`image.digest` wins over the image tag. An empty `agentImage` inherits the complete operator image.
+`imagePullSecrets` takes Kubernetes reference objects, for example `[{name: dockerconfig}]`, for the operator pod.
+`agent.imagePullSecrets` takes Secret names, for example `[dockerconfig]`, as the default for agents.
+`Tailnet.spec.proxy.imagePullSecrets` replaces that list; omitted means inherit, `[]` means no operator-supplied references.
+ServiceAccount admission can still add that namespace's pull secrets. Token automounting does not control this inheritance.
+Secrets must exist in each agent namespace; the operator does not replicate credentials.
+Prefer a verified public agent mirror for tenant namespaces.
+
+Enable `networkPolicy.enabled` only after setting Kubernetes API and Headscale CIDRs/ports for your CNI.
+The policy also permits cluster DNS and agent status traffic on **TCP 9080** across namespaces.
+Configure `networkPolicy.metricsPeers` for scraping; an empty list denies metrics ingress when isolation is enabled.
+Standard NetworkPolicy cannot select a Headscale URL by hostname. DNS changes, Service DNAT and NodeLocal DNS need site-specific handling.
+With Cilium custom policies, `toEndpoints` selectors are namespace-scoped; add
+`k8s:io.kubernetes.pod.namespace: {operator: Exists}` to the selector for tenant agents.
+
+### Kustomize alternative
+
+```sh
+kubectl apply -k deploy
+```
+
+`deploy/operator.yaml` is generated by `task deploy-gen` from default chart values; edit the chart, not the generated bundle.
+It contains the Namespace, RBAC, ServiceAccount, Deployment and metrics Service. The three CRDs remain under `deploy/crds/`.
+The old separate `deploy/rbac.yaml` and `deploy/servicemonitor.yaml` files are replaced by this bundle.
+ServiceMonitor is now opt-in through Helm; plain Kubernetes needs no monitoring CRDs.
+Use an overlay for namespace/images and site-specific policies when using Kustomize.
+
+### Existing GitOps installations
+
+Do not replace copied manifests with a HelmRelease by simply removing their files.
+First protect CRDs from Flux pruning, preserve CRs and credentials, and plan Helm ownership adoption for existing names.
+Avoid overlapping operator instances. Test the handover in lab first; production migration is a separate step.
+Configure Flux HelmRelease `install.crds: CreateReplace` and `upgrade.crds: CreateReplace` after the CRD ownership handover.
+Do not let the old Kustomization and Helm independently manage the same CRDs.
+A Git revert alone does not reverse Helm ownership or CRD schema changes; never delete CRDs to force adoption.
 
 ## 4. First egress
 
@@ -452,6 +510,14 @@ Do not install stricter CRDs until existing objects pass that check; it does not
    `DNS=CannotVerify` is a manual configuration hint, not proof that DNS is broken or working.
 4. `kubectl get tailnetegress,tailnetingress -A` — everything back to `READY=True`.
    Verify an actual egress connection and ingress connection after the rollout.
+
+### Helm and Flux CRD upgrades
+
+Helm CLI installs missing files from `crds/` but does not upgrade, roll back or uninstall those CRDs.
+After validating existing objects, use `task crd-upgrade KUBE_CONTEXT=<reviewed-context>` for a manually managed installation,
+then `helm upgrade` to the new chart version. This task changes the selected cluster; it is not a validation command.
+Flux HelmRelease can upgrade CRDs with `install.crds: CreateReplace` and `upgrade.crds: CreateReplace`.
+Keep schema changes and their rollback manifests in Git. CRD retention is intentional; there is no deletion-based rollback.
 
 ### Operator restart versus agent upgrade
 

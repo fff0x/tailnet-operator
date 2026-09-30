@@ -1,0 +1,74 @@
+{{- include "tailnet-operator.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tailnet-operator.name" . | quote }}
+  namespace: {{ include "tailnet-operator.namespace" . | quote }}
+  labels:
+    {{- include "tailnet-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  strategy:
+    {{- if .Values.leaderElection.enabled }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    {{- else }}
+    # Without election, old and new operator processes must never overlap.
+    type: Recreate
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "tailnet-operator.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tailnet-operator.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "tailnet-operator.name" . | quote }}
+      # The manager has a 20-second drain budget; leave time for process exit.
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: operator
+          image: {{ include "tailnet-operator.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/tailnet-operator"]
+          args: [{{ printf "--leader-elect=%t" .Values.leaderElection.enabled | quote }}]
+          env:
+            # The scratch bundle carries the CA roots here, for HTTPS Headscale APIs.
+            - name: SSL_CERT_FILE
+              value: /ca-certificates.crt
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OPERATOR_IMAGE
+              value: {{ include "tailnet-operator.agentImage" . | quote }}
+            - name: AGENT_IMAGE_PULL_SECRETS
+              value: {{ .Values.agent.imagePullSecrets | toJson | quote }}
+            {{- with .Values.env.extra }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - {name: metrics, containerPort: 8080}
+            - {name: health, containerPort: 8081}
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+            initialDelaySeconds: 15
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
