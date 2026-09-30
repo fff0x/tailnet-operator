@@ -53,6 +53,11 @@ tasks:
       - test -z "$(gofmt -l cmd internal api test hack)"
       - go vet ./...
 
+  security:
+    desc: Check reachable Go vulnerabilities using the version-pinned scanner and current public database
+    cmds:
+      - GOTOOLCHAIN=local go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
   crds:
     desc: Regenerate DeepCopy + CRDs from the Go types
     cmds:
