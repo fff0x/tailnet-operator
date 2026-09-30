@@ -26,6 +26,7 @@ domain `tailnet.example.internal`, tenant namespaces `billing-dev` / `billing`, 
 10. [Keys and expiry](#10-operations-keys-and-expiry)
 11. [Diagnosis cheat sheet](#11-operations-diagnosis-cheat-sheet)
 12. [Upgrade the operator](#12-operations-upgrade-the-operator)
+13. [Validation](#13-validation)
 
 ---
 
@@ -294,6 +295,7 @@ expired **bootstrap** key only matters at the next working-key rotation (`ApiKey
 | Question | Command | Healthy output |
 | --- | --- | --- |
 | Is the control server reachable? | `kubectl describe tailnet corp` | `ApiReachable=True`, `ApiKeyValid=True` |
+| Does preflight pass? | `kubectl get tailnet corp`, `kubectl describe tailnet corp` | `COMPAT=Compatible`, `PolicyMode=True/Database`; `DNS=CannotVerify` is a manual split-DNS configuration hint |
 | Why is an egress not ready? | `kubectl -n tailnet-system get tailnetegress X -o jsonpath='{range .status.targets[*]}{.name} {.present} {.reachable} {.reason}{"\n"}{end}'` | `true true` per target, empty reason |
 | Is the route on the router? | `kubectl -n tailnet-system exec deploy/headscale -- headscale nodes list-routes` | the target's `/32` or a covering subnet under the router's approved routes |
 | Does the agent reach the host? | `kubectl -n tailnet-system logs deploy/X \| grep target` | no `dial …: context deadline exceeded` |
@@ -314,7 +316,77 @@ expired **bootstrap** key only matters at the next working-key rotation (`ApiKey
 kubectl -n tailnet-system rollout status deploy/tailnet-operator
 kubectl get tailnetegress,tailnetingress -A
 # every row READY=True
-kubectl get tailnet corp          # POLICY column: Applied / InSync (or empty when not enabled)
+kubectl get tailnet corp          # COMPAT=Compatible; POLICY=Applied/InSync; DNS=CannotVerify (manual)
 ```
 
 Version-specific notes: [INSTALL §8](INSTALL.md#8-upgrade).
+
+## 13. Validation
+
+Kubernetes **1.31 or later** is required. The API server validates these rules before storing a CR:
+
+| Object / field | Rule |
+| --- | --- |
+| All three kinds | `spec` is required |
+| Egress / ingress CR name | Lowercase DNS label, at most 40 characters; no dots |
+| Egress `targets` | 1–50 entries; unique names, each a DNS-1035 label of at most 63 characters, starting with a letter (Service compatibility with Kubernetes 1.31) |
+| Target `address` | Single IPv4/IPv6 address or lowercase DNS name (≤253 characters, labels ≤63); no CIDR, URL, host:port, IPv6 zone ID or malformed numeric IP |
+| Target `aliases` | Each a lowercase DNS name of at most **63 characters** (a product limit, not the DNS FQDN maximum) |
+| Egress `consumerNamespaces` | At least one namespace; each a DNS label of at most 63 characters |
+| Ingress `allowFrom` | Required, at least one non-empty entry; the Tailnet's source allowlist still controls authorization |
+| Ingress `exposes` | 1–50 entries; unique names and listener ports; names are DNS labels of at most 63 characters |
+| Backend `service` / optional `namespace` | DNS labels of at most 63 characters |
+| Target, listener and backend ports | 1–65535 |
+| Tailnet `server` | HTTPS scheme and a non-empty remainder; `apiUrl` may still use an internal HTTP endpoint |
+| Tailnet `apiKeyLifetime` | Valid duration ≥1h, at most 32 characters; omitted defaults to 720h |
+| Tailnet `policy.mode` | `DryRun` or `Apply` |
+| Tailnet `dns.ingressNameTemplate` | Empty disables ingress DNS names; otherwise contains `{name}`, uses only `{name}`/`{namespace}`, and ends in a literal lowercase zone with at least two labels; at most 253 characters |
+| Tailnet `policy.ingressSourceAllowlist` | Each entry begins with `group:`, `tag:` or `autogroup:` plus a non-empty suffix, or is an email-shaped pattern; at most 253 characters; bare `*` is rejected |
+| Tailnet `headscale.ref` | Reserved; only empty is accepted |
+
+The list limits bound CEL's duplicate checks. Validation does not prove that a backend Service,
+Headscale group or DNS delegation exists. Rendered ingress DNS names are also validated at reconcile
+time because their length depends on the ingress name and namespace. Each rendered label must fit
+63 characters, even when it combines `{name}` and `{namespace}`. When policy generation is off,
+`allowFrom` does not itself create a Headscale grant.
+
+### Test without changing a cluster
+
+Use upstream [controller-tools envtest binaries](https://github.com/kubernetes-sigs/controller-tools/releases)
+for Kubernetes 1.31 or later. Set `KUBEBUILDER_ASSETS` to the directory containing `kube-apiserver`,
+`etcd` and `kubectl`, then run:
+
+```sh
+export KUBEBUILDER_ASSETS=/path/to/envtest/binaries
+task test-validation
+```
+
+This starts a disposable local API server with the generated CRDs. It checks valid examples,
+boundaries and every file in `deploy/examples/invalid/`, including the shell checker below.
+It ignores the current kube-context and asserts that no test CR was persisted. The ordinary
+`task test` does not start envtest; admission tests require this explicit task.
+
+Before a CRD upgrade, also test a fresh export of the existing CRs:
+
+```sh
+live=$(mktemp)
+kubectl get tailnet,tailnetegress,tailnetingress -A -o json > "$live"
+LIVE_CR_FILE="$live" task test-validation
+rm -f -- "$live"
+```
+
+The export is read-only. The test submits each spec as a fresh dry-run object to the **local** API
+server, so unchanged legacy fields cannot bypass validation through ratcheting.
+
+### Check an installed schema
+
+After installing the new CRDs in a test cluster, run:
+
+```sh
+task validate-examples -- --context <test-context> --namespace <existing-namespace>
+```
+
+`hack/validate-examples.sh` uses server-side dry-run **create**, not apply/merge with an existing CR.
+Every negative fixture must fail with its `ExpectedError` header. Missing CRDs, authentication,
+RBAC and connection errors do not count as successful validation tests. Do not apply the invalid
+examples without dry-run.
