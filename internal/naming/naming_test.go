@@ -80,7 +80,7 @@ func TestValidateDNSNameBoundaries(t *testing.T) {
 
 func TestZoneOf(t *testing.T) {
 	for _, tc := range []struct{ template, want string }{
-		{"{name}-{namespace}.hydra.tif.internal", "hydra.tif.internal"},
+		{"{name}-{namespace}.prod-1.tailnet.example.com", "prod-1.tailnet.example.com"},
 		{"{name}-app.{namespace}.tailnet.example", "tailnet.example"},
 		{"{name}-app.prod.example", "prod.example"},
 		{"{name}.internal", "internal"},

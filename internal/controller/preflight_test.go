@@ -42,7 +42,7 @@ func TestPreflightConditions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tn := &tnv1.Tailnet{ObjectMeta: metav1.ObjectMeta{Generation: 7}, Spec: tnv1.TailnetSpec{
 				Headscale: tnv1.HeadscaleSpec{Version: "99.0.0"},
-				DNS:       tnv1.DNSSpec{IngressNameTemplate: "{name}-{namespace}.hydra.tif.internal"},
+				DNS:       tnv1.DNSSpec{IngressNameTemplate: "{name}-{namespace}.prod-1.tailnet.example.com"},
 			}}
 			setPreflightConditions(tn, headscale.Capabilities{PolicyDatabaseMode: tc.mode, PolicyCheck: tc.check}, tc.err)
 			if got := condReason(tn.Status.Conditions, "PolicyMode"); got != tc.modeReason {
@@ -57,7 +57,7 @@ func TestPreflightConditions(t *testing.T) {
 			}
 			dns := meta.FindStatusCondition(tn.Status.Conditions, "SplitDNS")
 			if dns == nil || dns.Status != metav1.ConditionUnknown || dns.Reason != "CannotVerify" ||
-				!strings.Contains(dns.Message, "dns.nameservers.split.hydra.tif.internal") {
+				!strings.Contains(dns.Message, "dns.nameservers.split.prod-1.tailnet.example.com") {
 				t.Fatalf("SplitDNS=%+v", dns)
 			}
 			for _, cond := range tn.Status.Conditions {
