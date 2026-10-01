@@ -297,6 +297,9 @@ func TestHTTPProbeRejectsSameNameRecreation(t *testing.T) {
 	old.dial = func(ctx context.Context, _ target) (net.Conn, error) {
 		close(entered)
 		<-release
+		// Listener closure schedules cancellation through context.AfterFunc; it may
+		// not have reached this dial yet. Never return the invalid (nil, nil) pair.
+		<-ctx.Done()
 		return nil, ctx.Err()
 	}
 	go func() { defer close(done); p.publish(fw, probeOne(context.Background(), old)) }()
