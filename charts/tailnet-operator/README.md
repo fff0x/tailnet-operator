@@ -4,188 +4,82 @@ Tsunaro — userspace TailnetEgress and TailnetIngress with an external Headscal
 
 ![Version: 0.4.0](https://img.shields.io/badge/Version-0.4.0-informational?style=flat-square)  ![AppVersion: v0.4.0](https://img.shields.io/badge/AppVersion-v0.4.0-informational?style=flat-square)
 
-## Status and installation
-
-Chart 0.4.0 and image v0.4.0 are release preparation, not a publication claim.
-The API group, metadata keys and leader-election Lease change in this release.
-Read the [v0.4.0 migration warning](../../docs/INSTALL.md#80-v040-api-group-migration) before upgrading an existing installation.
-Verify both artifacts in your chosen registry before installation.
-Install only one operator release per cluster. Replicas within that release share one leader-election Lease;
-releases in different namespaces do not share a lock and can race key rotation and policy writes.
+## Installation
 
 ```sh
-# From a source checkout, after building/publishing the matching image:
-helm install tailnet-operator ./charts/tailnet-operator \
-  --namespace tailnet-system --create-namespace
-# Once the upgraded broker and the chart release are published:
 helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
   --version 0.4.0 --namespace tailnet-system --create-namespace
+# or from a source checkout:
+helm install tailnet-operator ./charts/tailnet-operator --namespace tailnet-system --create-namespace
 ```
 
-`namespace` defaults to the release namespace. A different override namespace must already exist;
-`--create-namespace` only creates the release namespace. Keep them equal unless you need separate release storage.
-The namespace is not a chart-owned resource. Uninstall does not delete the namespace or CRDs.
+Install one release per cluster. `namespace` defaults to the release namespace; a different value
+must already exist (`--create-namespace` only creates the release namespace). Uninstall keeps the
+namespace and the CRDs. The Tailnet CR, bootstrap key, Headscale policy and DNS wiring are described
+in [INSTALL](../../docs/INSTALL.md).
 
-See [INSTALL](../../docs/INSTALL.md) for the Tailnet CR, bootstrap key, Headscale policy and DNS setup.
-The default chart needs no Prometheus or Grafana CRDs. All monitoring features are disabled by default.
+## CRDs
 
-## Monitoring
-
-Enable each feature independently after installing its CRD:
-
-- `monitoring.serviceMonitor.enabled`: scrape the operator metrics Service on TCP 8080.
-  `honorLabels: true` preserves the observed CR's `namespace` label instead of replacing it with the operator namespace.
-- `monitoring.podMonitor.enabled`: scrape generated egress and ingress pods at `/metrics` on the named `health` port (TCP 9080).
-  `namespaceSelector` defaults to all namespaces; restrict it with `any: false` and `matchNames` when appropriate.
-  Configure monitor labels to match your Prometheus selectors and grant Prometheus discovery RBAC in the selected namespaces.
-- `monitoring.rules.enabled`: install the bundled PrometheusRule. Nonempty `rules.groups` replaces **all** bundled groups unchanged.
-  Custom Prometheus annotations are not Helm templates. This requires the PrometheusRule CRD.
-- `monitoring.dashboard.enabled`: install the seven-row bundled dashboard. Nonempty `dashboard.json` replaces it unchanged.
-  The default `kind: GrafanaDashboard` requires Grafana Operator v5 (`grafana.integreatly.org/v1beta1`).
-  Its instance selector defaults to `grafana.internal/instance: grafana`, folder to `Tailnet`, and cross-namespace import to `true`.
-  `datasourceName` maps the `DS_PROMETHEUS` input to a Grafana datasource (default `Prometheus`).
-  For dashboard sidecars, set `kind: ConfigMap`; the `grafana_dashboard: "1"` label remains available.
-  Sidecar users must configure datasource input substitution themselves; Grafana Operator mappings do not apply to ConfigMaps.
-
-**Network access is not granted by a PodMonitor.** Existing generated agent NetworkPolicies allow health/metrics access
-only from the operator namespace. A scraper in another namespace needs a site-owned, additive NetworkPolicy selecting
-the agent pods and allowing only that scraper on TCP 9080. This chart does not silently broaden agent policies.
-The operator's separate `networkPolicy.metricsPeers` controls TCP 8080 when operator isolation is enabled.
-
-Bundled alerts cover operator availability, reconciliation errors, Headscale 5xx, current Ready reasons and policy convergence/rejection/write failures.
-They also cover generated-entry drops, route approval replays, offline nodes and key expiry.
-`TailnetReconcileErrors` requires more than 0.1 errors/second for 10 minutes.
-`TailnetHeadscaleAPIErrors` requires more than 5% HTTP 5xx over 10 minutes, sustained for 10 minutes.
-`TailnetApprovalReplays` detects more than three successfully replayed route approvals in one hour.
-`TailnetAPIKeyExpiringSoon` defaults to 7 days (604800 seconds); `TailnetEgressAuthKeyExpiringSoon` and
-`TailnetIngressAuthKeyExpiringSoon` default to 1 day (86400 seconds), each sustained for 5 minutes.
-Configure `monitoring.rules.apiKeyExpiryWarningSeconds` and `monitoring.rules.authKeyExpiryWarningSeconds` as positive integer seconds.
-For shorter-than-default key lifetimes, set thresholds **below half the configured lifetime** to avoid warnings before normal rotation.
-These thresholds affect only bundled rules, not custom `rules.groups`.
-`PolicyStale` uses `tailnet_policy_pending == 1` for 15 minutes, **not** age of the applied timestamp.
-Stable `InSync` policies retain their original timestamp and must not trigger a stale-policy alert.
-Generated-entry drops can be intentional, and replays count routes rather than requests; review before remediation.
-Runbook annotations use relative `docs/USAGE.md#monitoring-*` links until documentation hosting is available.
-
-Readiness exists only for resources with a current Ready condition; Tailnet has no Ready gauge.
-Condition reasons are 1 for the active reason and 0 for previously observed reasons, not a boolean success indicator.
-The not-ready alert joins readiness and its active reason within each exporter before aggregation.
-Overlapping replica observations can show multiple failing reasons; a stale Ready=1 observation cannot hide a failure.
-The dashboard documents which namespace/tailnet/kind filters apply to each family. Agent namespace/pod identity comes
-from scrape metadata; egress pod namespace can differ from the CR namespace. TCP byte counts cover accepted connections,
-including encrypted bytes in TLS pass-through traffic. Agent TLS termination remains an unreleased source feature.
-In-memory TLS component probes do not count as accepted tailnet connections. Dial latency includes backend health probes.
-No IPs, user identities, credentials or hashes are metric labels. `tailnet_node_online` is 1 for a matching online node and 0 when a successful Headscale node listing
-finds none online. An absent series means no current observation, not an offline node.
-`TailnetNodeOffline` requires an observed zero for 5 minutes. `tailnet_node_last_seen_seconds` is the selected Headscale
-node's Unix timestamp; it is absent when unknown. The dashboard displays its age in seconds, not the raw timestamp.
-Both families use resource kind/namespace/name, without a tailnet label. Dedicated gateway and TLS dashboard panels remain explicit placeholders.
-
-This is source-prepared monitoring, not a live-tested or Grafana-exported dashboard. `hack/dashboard-lint.sh` uses only jq
-to validate JSON and every nested panel description, including rows. Local chart tests use real promtool when installed
-to parse alert/dashboard queries and evaluate rule fixtures. Kubeconform skips missing monitoring/Grafana schemas;
-render tests do not prove CRD admission, scrape discovery, NetworkPolicy reachability or successful Grafana import.
-
-## HTTP TLS termination (unreleased)
-
-Agent termination uses an HTTP expose on port 443 and a namespace-local TLS Secret or cert-manager issuer reference.
-The optional issuer workflow grants Certificate get/create/patch/delete, without Issuer, CertificateRequest or CRD-object access.
-Managed CR finalizers-update grants authorize existing blocking owner references when OwnerReferencesPermissionEnforcement is enabled.
-TailnetEgress authorization stays operator-namespaced; Tailnet/TailnetIngress authorization is cluster-wide. These grants do not permit CR spec writes.
-Missing cert-manager CRDs do not block startup or external-Secret/L4 operation.
-Local TLS readiness does not prove remote tailnet reachability or client CA trust.
-Peer traffic, certificate rotation and real deployment acceptance remain required.
-See [HTTP usage and transition limits](../../docs/USAGE.md#61-agent-tls-termination-unreleased) before enabling this source feature.
-Do not downgrade to an older operator while HTTP CRs remain active.
+`task crds` generates `deploy/crds/` and copies the files into this chart's `crds/`. Helm installs
+missing CRDs but never upgrades or removes them: use `task crd-upgrade KUBE_CONTEXT=<context>` for a
+manual installation, or `install.crds: CreateReplace` / `upgrade.crds: CreateReplace` on a Flux
+`HelmRelease`. Validate existing CRs against a new schema first ([USAGE §13](../../docs/USAGE.md#13-validation)).
 
 ## Leader election and availability
 
-Defaults are `replicas: 1` and `leaderElection.enabled: true` (`--leader-elect=true`).
-All five controllers run only on the elected replica. The Lease is named `tailnet-operator.tsunaro.io`
-in the operator namespace, independent of the release name. Election uses 15s lease duration,
-10s renew deadline and 2s retry period. Namespaced Lease RBAC is enabled with election.
-
-Election-enabled updates use `RollingUpdate` with `maxSurge: 1` and `maxUnavailable: 0`.
-Multiple replicas require election. The chart adds a `policy/v1` PodDisruptionBudget with `minAvailable: 1`
-only when `replicas > 1`. Optional `topologySpreadConstraints` can spread replicas across nodes or zones;
-supply a selector matching `app.kubernetes.io/name: tailnet-operator`.
-The PDB limits voluntary disruptions, not node failures. Readiness includes standby replicas and does not prove leadership.
-Generated agents remain singletons with their existing update strategies; operator replicas do not make agents highly available.
-
-The manager allows 20s for graceful shutdown; the pod termination grace is 30s.
-It does not release the Lease early (`ReleaseOnCancel=false`): a drain timeout cannot prove that all workers stopped.
-Controller-runtime continues renewal during normal draining; a successor then waits for Lease expiry.
-On leadership loss, the process exits without graceful draining. Lease election is not external-write fencing;
-process pauses, partitions and in-flight Headscale requests still require failover testing.
-These source and rendering contracts do not establish live failover or week-long soak acceptance.
-
-With `leaderElection.enabled: false`, only one replica is allowed and updates use `Recreate`.
-**Migration requires a non-overlapping handover.**
-Before enabling election from a disabled or older non-electing binary, stop the old operator.
-Wait for its pod to terminate. Before disabling election, stop all electing replicas.
-Do not roll between electing and non-electing processes: a Lease cannot protect against a process that ignores it.
-Keep the existing app-name-only Deployment selector for manifest adoption; it is immutable.
+`leaderElection.enabled: true` (default) runs all controllers on the elected replica; the Lease is
+`tailnet-operator.tsunaro.io` in the operator namespace (15 s lease, 10 s renew, 2 s retry).
+Updates use `RollingUpdate` with `maxSurge: 1`, `maxUnavailable: 0`; `replicas > 1` adds a
+PodDisruptionBudget with `minAvailable: 1`, and `topologySpreadConstraints` can spread replicas.
+With election disabled, only one replica is allowed and updates use `Recreate`. Do not run electing
+and non-electing operators at the same time. Generated agents stay singletons; operator replicas do
+not make agents highly available.
 
 ## Images and credentials
 
-An empty `agentImage` inherits the complete operator image, including its digest.
-An explicit agent repository uses `Chart.appVersion` unless its own tag or digest is set.
-An agent tag or digest without a repository uses `image.repository`.
-CR image precedence remains: per-CR `spec.image`, then `Tailnet.spec.proxy.image`, then the chart's agent image.
-
-`imagePullSecrets` configures the operator pod. `agent.imagePullSecrets` supplies a separate default
-list of Secret **names** for generated pods. `Tailnet.spec.proxy.imagePullSecrets` replaces this default;
-omit it to inherit, or use `[]` to clear it. It applies independently of image overrides.
-The operator never copies registry credentials. Each referenced Secret must exist in the agent's namespace
-(operator namespace for egress, tenant namespace for ingress). Prefer the public Docker Hub mirror for
-agents in tenant namespaces, after checking that the required release has actually been mirrored.
-ServiceAccount pull-secret inheritance is independent of service-account token automounting;
-`automountServiceAccountToken: false` does not disable image-pull-secret inheritance.
+An empty `agentImage` inherits the operator image including its digest; an explicit agent repository
+uses `Chart.appVersion` unless it sets its own tag or digest. Per-CR `spec.image`, then
+`Tailnet.spec.proxy.image`, then the chart's agent image. `imagePullSecrets` configures the operator
+pod; `agent.imagePullSecrets` is the default list of Secret **names** for generated agent pods, which
+`Tailnet.spec.proxy.imagePullSecrets` replaces (`[]` clears). Each Secret must exist in the agent's
+namespace — the operator never copies registry credentials.
 
 ## Network isolation
 
-The optional NetworkPolicy isolates the operator, not its generated agents (which have their own policies).
-Set Kubernetes API and Headscale endpoint CIDRs and ports explicitly. Standard NetworkPolicy cannot select
-an external hostname; refresh CIDRs when DNS addresses change. Service DNAT and node-local DNS behavior are
-CNI-specific: test these paths before enabling isolation. DNS defaults select kube-dns in kube-system.
-Agent status traffic is allowed on TCP 9080 across namespaces, with agent pod label selectors.
-Metrics ingress is denied unless `networkPolicy.metricsPeers` permits the scraper.
+`networkPolicy.enabled` isolates the operator pod (agents have their own generated policies). Set the
+Kubernetes API and Headscale CIDRs and ports explicitly — NetworkPolicy cannot select a hostname.
+DNS defaults to kube-dns in `kube-system`; agent status traffic on TCP 9080 stays allowed; metrics
+ingress on TCP 8080 is denied unless `networkPolicy.metricsPeers` lists the scraper.
 
-## CRD lifecycle and migration
+## Monitoring
 
-`task crds` generates `deploy/crds/` and copies those exact files into this chart's `crds/`.
-Helm CLI installs missing CRDs but does **not** upgrade, roll back or uninstall them. They are retained;
-there is no `crds.keep` toggle that could safely remove them and all their custom resources.
-Before changing CRDs, validate existing CRs against the new schema as described in INSTALL.
-For a manually managed installation, use `task crd-upgrade KUBE_CONTEXT=<reviewed-context>`, then `helm upgrade`.
-For Flux, use `HelmRelease.spec.install.crds: CreateReplace` and `upgrade.crds: CreateReplace`.
-Do not combine independent CRD writers without an explicit ownership handover.
+All monitoring objects are disabled by default and each needs its CRD installed:
 
-Switching from copied manifests is **not** a blind delete-and-install operation.
-First, protect CRDs from Flux pruning. Retain CRs and bootstrap Secrets.
-Plan Helm ownership adoption. Prevent overlapping operator instances. Keep existing resource names, namespace and Deployment selectors. Test the handover
-in lab before production. A Git revert alone does not undo Helm ownership or schema changes.
-Never delete CRDs as a migration or rollback shortcut.
+- `monitoring.serviceMonitor.enabled` — operator metrics on TCP 8080 (`honorLabels: true` keeps the CR's `namespace` label).
+- `monitoring.podMonitor.enabled` — agent `/metrics` on the `health` port (TCP 9080) in all namespaces unless `namespaceSelector` restricts it.
+- `monitoring.rules.enabled` — the bundled PrometheusRule (13 alerts). Non-empty `rules.groups` replaces all of them.
+- `monitoring.dashboard.enabled` — the bundled dashboard as `GrafanaDashboard` (Grafana Operator v5, selector `grafana.internal/instance: grafana`, datasource `datasourceName`) or `kind: ConfigMap` for sidecars. Non-empty `dashboard.json` replaces it.
 
-## Development and publishing
+A PodMonitor grants no network access; agent NetworkPolicies allow TCP 9080 from the operator
+namespace only, so a scraper elsewhere needs its own additive policy. Key-expiry alert thresholds are
+`monitoring.rules.apiKeyExpiryWarningSeconds` (7 d) and `authKeyExpiryWarningSeconds` (1 d); keep
+them below half the configured key lifetime. Alert semantics and runbooks:
+[USAGE §14](../../docs/USAGE.md#14-monitoring-and-alert-runbooks).
 
-- `task chart`: helm-docs, lint, kubeconform, CRD/render drift checks and local Helm contract tests.
-- `task deploy-gen`: replace the generated standalone `deploy/operator.yaml` with default chart resources.
-- The prepared native CI specification runs portable chart checks and a fresh native TEST container before publication.
-  The broker itself does not provide Go, Task or helm-docs; local checks do not establish broker execution.
-- Before publishing, release a broker whose `ci-build` supports `mixed-helm-v1` and `image-result-v1`, with the pinned audit tools.
-  Deploy that broker. Configure its immutable `CI_BUILDER_IMAGE` identity. Consumer preflight rejects missing capabilities or tools.
-  Post-publication image audit checks both platform children and verifies SBOM/provenance attestations;
-  failure rejects acceptance but cannot roll back artifacts. The chart alone does not install that CI gate,
-  and existing releases are not claimed to carry its evidence. See `docs/SECURITY.md` in the source tree.
-- Chart destination: `Taskfile.yaml` variable `OCI_CHART_PATH` plus Chart.name.
-  Mixed branch builds publish `0.4.0-dev.g<sha>` with appVersion set to the commit SHA, plus SHA/latest aliases.
-  The annotated release publishes plain Chart.version (`0.4.0`), **not** `v0.4.0`; it must match the Git tag without `v`.
-  Stable versions reject existing tags or uncertain registry lookups; sign/verify the digest before moving aliases.
-  Client-side checks are not atomic: serialize publishers and enforce registry-side version protection.
-- Image/chart publication is not a transaction. Inspect partial failures before recovery; never overwrite an existing release.
-  The broker's explicit `CI_BUILD_ARTIFACTS=charts` recovery skips image building but still rejects existing protected chart versions.
-  Verify actual artifacts and Cosign signatures before any rollout. Sources stay in this repo; no separate chart Git repo is required.
+## HTTP TLS termination
+
+A `TailnetIngress` with a `mode: http` expose terminates TLS on the agent using a namespace-local
+`kubernetes.io/tls` Secret or a cert-manager issuer ([USAGE §6.1](../../docs/USAGE.md#61-ingress-terminate-tls-on-the-agent)).
+The chart grants `Certificate` get/create/patch/delete for the issuer path; missing cert-manager CRDs
+do not affect startup or L4 operation. Do not downgrade below v0.4.0 while HTTP CRs exist.
+
+## Development
+
+- `task chart` — helm-docs, lint, kubeconform, CRD/render drift and Go contract tests.
+- `task deploy-gen` — regenerate `deploy/operator.yaml` from the default values.
+- `task rbac-check` / `task rbac-gen` — compare or update [the RBAC reference](../../docs/reference/rbac.md).
+- Chart destination: `OCI_CHART_PATH` in `Taskfile.yaml` plus `Chart.name`. Release tags publish the
+  plain `Chart.version` (`0.4.0`, without `v`); branch builds publish `-dev.g<sha>` pre-releases.
 
 ## Values
 

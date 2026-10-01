@@ -1,51 +1,80 @@
 # Changelog
 
 Notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versions before v0.4.0 are summarized in [INSTALL](docs/INSTALL.md#8-upgrade).
 
 ## [Unreleased]
 
-### v0.4.0 release preparation
+### Changed
 
-This version is not yet published. Local tests do not establish registry availability,
-signed artifacts, broker-CI acceptance or production migration safety.
+- Product name: **Tsunaro**. Go module `tsunaro.io/tailnet-operator`. Chart name, image repository
+  and binary names are unchanged.
+- **Breaking:** API group `tailnet.this-is-fine.io` → `tsunaro.io`; annotation/label keys become
+  `tsunaro.io/<key>`; the leader Lease is `tailnet-operator.tsunaro.io`. There is no conversion:
+  install the new CRDs, re-create the CRs under the new group, then delete the old CRDs.
+- Agent containers use a read-only root filesystem and no longer mount a ServiceAccount token.
+- Headscale error bodies are withheld from logs, Events and status because they can echo credentials.
 
 ### Added
 
-- Helm chart with generated standalone manifests, CRDs, configurable agent images and namespace-local image-pull Secret references.
-- Operator leader election, optional multi-replica disruption budget and topology spread settings.
-- Optional ServiceMonitor, PodMonitor, Prometheus alerts and Grafana Operator or ConfigMap dashboard provisioning.
-- Agent-side HTTPS termination for `TailnetIngress`: one `mode: http` expose on port 443,
-  namespace-local TLS Secret or cert-manager issuer, and a Tailnet-wide default issuer.
-  The listener binds SNI and HTTP Host to the ingress DNS name; upstream traffic is plain HTTP.
-  Certificates reload without an agent restart. `TLSReady` reports local certificate and listener readiness,
-  not client trust or remote reachability.
-- Isolated API-server/Headscale tests, local kind installation/failover tests and an isolated HTTP ingress/renewal fixture.
-- Internal per-child API-group metadata-transfer primitive with ownership, expiry and role translation,
-  optimistic concurrency checks and isolated API-server regression tests. A read-only discovery inventory rejects
-  unmatched parents, unsupported direct dependencies and incomplete scans. These are not a live migration command
-  or automatic runtime adoption; full-fleet migration acceptance remains required.
-- Native CI test gates and post-publication image verification, vulnerability scanning,
-  SPDX SBOM and provenance attestations. These require the upgraded broker and audit tools;
-  their presence in source is not evidence of a successful published release.
-- Security policy, reviewed RBAC reference and dependency-update configuration.
+- Helm chart (`charts/tailnet-operator`) with generated standalone manifests under `deploy/`,
+  configurable agent image and namespace-local image-pull Secret references.
+- Leader election (default on), PodDisruptionBudget for `replicas > 1`, topology spread settings.
+- Optional ServiceMonitor, PodMonitor, bundled Prometheus alerts and a Grafana dashboard
+  (Grafana Operator or ConfigMap).
+- `TailnetIngress` HTTP mode: one `mode: http` expose on port 443 terminates TLS on the agent with a
+  `kubernetes.io/tls` Secret (`spec.tls.secretName`), a cert-manager issuer (`spec.tls.issuerRef`) or
+  the Tailnet-wide default (`Tailnet.spec.defaults.tls.issuerRef`). SNI and Host are bound to the
+  ingress DNS name; the backend receives plain HTTP; certificates reload without a restart.
+  New condition `TLSReady`, status fields `tlsSecretName`, `tlsNotAfter`, `exposes[].tlsReady`.
+- Metrics: per-target/per-expose state, Headscale request duration/count, policy write duration,
+  `tailnet_policy_pending`, `tailnet_policy_generated`, node online/last-seen, route replay counter,
+  agent connection/byte/dial families.
+- RBAC: `Certificate` get/create/patch/delete; `finalizers` update on the managed CRs.
+- Signed multi-arch images with SPDX SBOM and SLSA v1 provenance attestations; `govulncheck` in CI.
+- `internal/migration`: library helpers for explicit child ownership transfer (not wired into the controllers).
+- Security policy, RBAC reference, Renovate configuration.
 
-### Changed
+## [0.3.0]
 
-- Product name: **Tsunaro**. Go module: `tsunaro.io/tailnet-operator`.
-  Chart name, image repository and binary names remain unchanged.
-- **Breaking:** Kubernetes API group changes from `tailnet.this-is-fine.io` to `tsunaro.io`.
-  Metadata keys and the leader-election Lease also change. There is no CR conversion or coordinated child-adoption migration.
-  CRs must be recreated under the new group through a reviewed, stop-first migration.
-  Do not delete old CRDs or permit Flux pruning before accounting for every dependent resource.
-  See the [migration warning](docs/INSTALL.md#80-v040-api-group-migration).
-- Agent containers use a read-only root filesystem and do not automatically mount ServiceAccount tokens.
-- Headscale error handling and tests redact credentials from logs, Events and status.
+- Headscale capability preflight: conditions `HeadscaleCompatible`, `PolicyMode`, `SplitDNS`;
+  `COMPAT`/`DNS` columns; optional `headscale.version` hint. File mode blocks policy writes and
+  route-approval replay; bootstrap works against an empty policy database.
+- **Breaking admission rules:** Kubernetes ≥ 1.31; `spec` required; non-empty ingress `allowFrom`;
+  stricter names, addresses and templates; unique target/expose names and expose ports; bounded
+  list sizes and lifetimes. Validate existing CRs with `task test-validation` before upgrading.
 
-### Release acceptance still required
+## [0.2.3]
 
-- Rehearse the API-group/ownership migration before any production upgrade.
-- Verify image/chart publication, signatures, attestations and the public image mirror.
-- Complete the remaining data-plane, nightly, production monitoring and soak gates listed in
-  [COMPATIBILITY](docs/COMPATIBILITY.md#remaining-acceptance-gates).
-- Migrate applications and verify their HTTP access before removing a shared tailnet gateway.
+- `ApiReachable` follows Headscale `/health` (new reason `Unhealthy`); `ApiKeyValid` follows a live
+  authenticated call (new reason `Rejected`); both re-checked at least every 5 min.
+
+## [0.2.2]
+
+- The policy controller no longer re-reconciles on its own rendered ConfigMap write.
+
+## [0.2.1]
+
+- Missed `autoApprovers` approvals are replayed after every successful policy write/InSync check
+  (event `RoutesApproved`). Rejected or failed policy writes retry with backoff (15 s doubling to
+  5 min); `TailnetPolicyApplyErrors` therefore counts more increments per outage.
+
+## [0.2.0]
+
+- **Breaking:** API group `tailnet.fr0st.dev` → `tailnet.this-is-fine.io` without conversion.
+- Reason `ProbeFailed`; `status.tag` and `TAG` column; ingress DNS names publish IPv4 only;
+  MagicDNS name restored after a duplicate; transient `ApplyFailed` logged at info; status-only
+  updates no longer re-trigger reconciles.
+
+## [0.1.1]
+
+- Route diagnosis is prefix-aware: a target covered by an aggregate advertised route is `Present`.
+
+## [0.1.0]
+
+- `Tailnet.spec.policy` (operator-owned policy, `DryRun`/`Apply`), `TailnetIngress.spec.allowFrom`,
+  conditions `PolicyRendered`/`PolicyApplied`/`PolicyGranted`, reasons `PolicyPending`/`PolicyDenied`.
+
+## [0.0.6]
+
+- `Tailnet.spec.dns`, `TailnetEgress.spec.targets[].aliases`, `TailnetIngress.status.dnsName`,
+  `Backend.namespace`.

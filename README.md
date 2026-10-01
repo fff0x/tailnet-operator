@@ -27,26 +27,20 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
   pre-auth key, a userspace agent pod and one Service per target. Consumers in `consumerNamespaces`
   dial `<target>.<operator-ns>.svc:<port>`; **aliases** let them dial the real hostname when the far
   end routes by SNI/Host.
-- **`TailnetIngress`** (tenant namespace) — the mirror: expose in-cluster **L4** Services *on* the
-  tailnet as one node with a MagicDNS name and, with a template, a DNS name under your zone. HTTPS
-  keeps terminating at your shared gateway; the ingress adds a per-app tailnet identity.
+- **`TailnetIngress`** (tenant namespace) — the mirror: expose in-cluster Services *on* the tailnet
+  as one node with a MagicDNS name and, with a template, a DNS name under your zone. L4 exposes
+  forward TCP; one `mode: http` expose terminates TLS on the agent with a Secret or cert-manager
+  certificate and forwards plain HTTP to the app — no shared gateway needed.
 - **The tag is the authorization.** Each CR is its own node with its own tag; the policy's grants for
   that tag decide what it may reach (egress) or who may reach it (ingress). Without
   `Tailnet.spec.policy` the operator only *reads* the policy and reports what is missing; with it, the
   operator renders your base policy plus the CR-derived entries and writes the result to Headscale.
 
-Agent-side TLS termination is an **unreleased source feature**, separate from the L4 behavior above.
-Its local readiness checks do not prove remote tailnet reachability or client CA trust.
-See [HTTP source configuration and acceptance limits](docs/USAGE.md#61-agent-tls-termination-unreleased).
-Do not replace production gateway paths based on source tests alone.
-
 ## Quickstart
 
 Installation (Helm chart, Headscale key, CoreDNS; `kubectl apply -k deploy` alternative) is in
-[docs/INSTALL.md](docs/INSTALL.md). Chart `0.4.0` is prepared but not yet published; see its
-[values and release prerequisites](charts/tailnet-operator/README.md).
-Existing installations must first review the [breaking API-group migration](docs/INSTALL.md#80-v040-api-group-migration).
-See [CHANGELOG.md](CHANGELOG.md) for the unreleased changes. With that in place, three manifests:
+[docs/INSTALL.md](docs/INSTALL.md); chart values in the [chart README](charts/tailnet-operator/README.md).
+With that in place, three manifests:
 
 ```yaml
 apiVersion: tsunaro.io/v1alpha1
@@ -131,6 +125,7 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | `policy.tagOwners` | required when on | owners of generated tags, e.g. `[group:operator]` |
 | `policy.routeApprovers` | required when on | approvers of generated `/32` routes, e.g. `[tag:fabric]` |
 | `policy.ingressSourceAllowlist` | none | globs an ingress `allowFrom` entry must match, e.g. `["group:*"]` |
+| `defaults.tls.issuerRef` | none | cert-manager issuer used by `mode: http` ingresses that select no TLS source |
 
 ### TailnetEgress (operator namespace)
 
@@ -153,6 +148,8 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | `allowFrom[]` | required | at least one non-empty peer source (policy `src`); each must match `ingressSourceAllowlist` when policy generation is enabled |
 | `exposes[].name`, `.port` | — | listener on the tailnet node; 1–50 exposes, unique names and ports |
 | `exposes[].backend.{service,namespace,port}` | namespace = CR's | in-cluster backend; another namespace only to funnel through a shared gateway |
+| `exposes[].mode` | `l4` | `http`: terminate TLS on the agent (port 443, one per CR) and forward plain HTTP |
+| `tls.secretName` / `tls.issuerRef` | `Tailnet.spec.defaults.tls.issuerRef` | certificate for the `http` expose: a `kubernetes.io/tls` Secret in the CR namespace, or a cert-manager `Issuer`/`ClusterIssuer` |
 | `image`, `resources` | Tailnet defaults | agent overrides |
 
 Kubernetes ≥1.31 is required. CR names, addresses, ports, list sizes and policy inputs are checked
@@ -164,7 +161,7 @@ at admission. See [validation rules and tests](docs/USAGE.md#13-validation) befo
 | --- | --- | --- |
 | `Tailnet` | `ApiReachable`, `ApiKeyValid`, `HeadscaleCompatible`, `PolicyMode`, `SplitDNS`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable` / `Unhealthy` (database down); `Valid` / `Rejected` / `Error`; `Compatible` / `Incompatible` / `CannotVerify` / `ProbeFailed`; `Database` / `File`; `SplitDNS=Unknown/CannotVerify` (manual configuration required); `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyModeFile` (write skipped), `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
 | `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`, `ProbeFailed` (agent not scraped — NetworkPolicy or pod down; nothing is known about routes/dials); `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`; per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved` (re-approved by the operator on the next policy reconcile), `NoGrant`, `ProbeFailed` |
-| `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist) and `InvalidDNSName` |
+| `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `TLSReady`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist), `InvalidDNSName`, and for `mode: http` the `TLS*` reasons ([USAGE §6.1](docs/USAGE.md#61-ingress-terminate-tls-on-the-agent)) |
 
 `Tailnet.status.policy` = `{renderedHash, appliedHash, appliedAt, generated{tags,grants,routes}}`;
 `TailnetIngress.status.dnsName` is the rendered DNS name (published as A record only — the IPv4 node
@@ -175,10 +172,13 @@ observations stay `Unknown`. See [preflight details](docs/INSTALL.md#25-prefligh
 Event `PolicyDriftOverwritten` fires when
 the live policy was changed behind the operator's back and rewritten.
 
-Metrics (controller-runtime registry): `tailnet_apikey_expires_seconds`,
+Metrics (operator, TCP 8080): `tailnet_resource_ready`, `tailnet_resource_condition`,
+`tailnet_egress_target_state`, `tailnet_ingress_expose_reachable`, `tailnet_node_online`,
+`tailnet_node_last_seen_seconds`, `tailnet_policy_pending`, `tailnet_policy_generated`,
 `tailnet_policy_applied_timestamp_seconds`, `tailnet_policy_apply_errors_total`,
-`tailnetegress_authkey_expires_seconds`, `tailnetegress_routes_missing`,
-`tailnetingress_authkey_expires_seconds`, `tailnetingress_backends_unreachable`.
+`tailnet_route_approvals_replayed_total`, `tailnet_headscale_api_requests_total`, key expiry gauges;
+agents (TCP 9080): `tailnet_agent_connections_active`, `tailnet_agent_bytes_total`,
+`tailnet_agent_dial_duration_seconds`. Bundled alerts and runbooks: [USAGE §14](docs/USAGE.md#14-monitoring-and-alert-runbooks).
 
 ## How it works
 
@@ -203,8 +203,10 @@ restart to add or remove a target:
   approver existed) on the routers, so `NotApproved` heals without `headscale nodes approve-routes`.
 - **Data plane** — one agent pod per CR is a userspace tsnet node. `AGENT_MODE` sets the direction:
   egress takes `--accept-routes` and `Dial`s the off-cluster address over the tailnet; ingress listens
-  on the tailnet and `Dial`s an in-cluster backend. Same binary, `io.Copy` with half-close, no
-  SOCKS5, no second container; state is in-memory and ephemeral by design.
+  on the tailnet and `Dial`s an in-cluster backend; an `http` expose terminates TLS on that listener
+  (SNI and Host bound to the ingress DNS name, certificate reloaded from the projected Secret) and
+  proxies HTTP/1.1 and HTTP/2 to the backend. Same binary, `io.Copy` with half-close, no SOCKS5, no
+  second container; state is in-memory and ephemeral by design.
 
 A single image carries both binaries; the operator runs `/tailnet-operator`, each agent pod runs
 `/tailnet-agent`.
@@ -212,57 +214,29 @@ A single image carries both binaries; the operator runs `/tailnet-operator`, eac
 ## Develop
 
 ```sh
-nix-shell          # Go, Task, kubectl, kustomize, Helm, helm-docs, kubeconform
-task lint test     # gofmt + go vet + unit tests
-task crds          # regenerate deploy/crds/ and chart CRD copies from Go types
-task deploy-gen    # regenerate deploy/operator.yaml from default chart values
-task chart         # chart docs, lint, render, drift and contract checks (no cluster)
-# With KUBEBUILDER_ASSETS pointing to local envtest binaries (Kubernetes >=1.31):
-task test-validation # real API-server admission tests; optional LIVE_CR_FILE export
-task e2e           # isolated API server + real Headscale; downloads pinned public assets
-task e2e-kind      # disposable installation + leader failover; rootless Podman/kind delegation
-task image         # build the combined bundle image locally
+nix-shell            # Go, Task, kubectl, kustomize, Helm, helm-docs, kubeconform
+task lint test       # gofmt, go vet, unit tests
+task chart           # helm-docs, lint, kubeconform, drift and contract checks (no cluster)
+task crds deploy-gen # regenerate CRDs and deploy/operator.yaml from their sources
+task test-validation # admission tests on envtest (KUBEBUILDER_ASSETS)
+task e2e             # manager against envtest + real Headscale (pinned downloads)
+task e2e-kind        # rootless kind: install, failover, HTTP ingress with cert-manager
+task image           # build the combined image locally
 ```
 
-The prepared `.radicle/native.yaml` runs the portable chart lint/render/drift gate before tests.
-It then builds the native Dockerfile `TEST` target and runs `hack/ci-test.sh` in a fresh Buildah container.
-The test gate includes formatting, vet, uncached unit/chart tests, admission and real Headscale Tier 1.
-No signing credentials or host mounts enter the test container; test results are never cached in an image layer.
-Only after success does `ci-build` cross-compile both binaries for `linux/amd64` + `linux/arm64` and publish a
-cosign-signed multi-arch index at `oci.<domain>/tailnet/operator` (private).
-Docker Hub mirroring to `docker.io/ff0x/tailnet-operator` is a separate publication step.
-The prepared broker needs `mixed-helm-v1`, `image-result-v1`, Syft 1.52.0, Trivy 0.74.0 and Cosign 2.5.0.
-Deploy it and configure `CI_BUILDER_IMAGE` with its immutable image reference before publishing this repo.
-Native CI checks capabilities and audit configuration before building; it rejects older brokers.
-After publication, `hack/audit-image.sh` consumes the publisher's private JSON report, not log output.
-It verifies the signed index, scans both immutable platform children, then signs and verifies SPDX and SLSA-v1 predicates.
-HIGH/CRITICAL findings warn on main and reject versioned releases; operational failures always fail.
-This is post-publication acceptance, not a transaction or rollback. Existing releases do not gain this evidence retroactively.
-See [the security policy](docs/SECURITY.md#build-and-verification-gates) for limits.
-Local `task chart` additionally generates helm-docs and runs Go-based Helm contract tests.
-Tier 1 covers preflight, policy lifecycle, working-key rotation and metadata repair,
-InSync approval replay, tag-sourced policy tests, IPv4-only hosts output and credential redaction.
-See [the compatibility matrix and remaining gates](docs/COMPATIBILITY.md).
-The new CI gate still requires deployment and a successful broker run on main.
-The [Tier-2 tests](test/e2e-kind/README.md) have passed installation and two-replica leader failover in a delegated rootless user scope.
-The combined RBAC/metrics run converged in 16.884 seconds against a 30-second bound (previously 17.935 seconds).
-One of the initial four integrated runs failed during early Helm installation; its cause remains unknown.
-The subsequent combined run passed after the readiness-timing correction.
-A later independently exported index passed with 17.393-second policy convergence and verified cleanup.
-This is local control-plane evidence, not HTTP-ingress, data-plane, nightly or week-long HA acceptance.
+CI runs the same gates in a fresh container, then publishes a cosign-signed multi-arch image and the
+chart; see [CONTRIBUTING](CONTRIBUTING.md), [COMPATIBILITY](docs/COMPATIBILITY.md) and
+[SECURITY](docs/SECURITY.md#supply-chain).
 
 | Path | What |
 | --- | --- |
 | `api/v1alpha1` | `Tailnet`, `TailnetEgress`, `TailnetIngress` CRD types |
-| `cmd/operator` | control plane entry point |
-| `cmd/agent` | `tailnet-agent`: tsnet node, egress/ingress TCP forwarders, health/probe |
-| `internal/manager` | shared production/test controller wiring and cache scopes |
+| `cmd/operator`, `cmd/agent` | control plane; `tailnet-agent`: tsnet node, TCP/HTTP forwarders, health and probe endpoints |
 | `internal/controller` | reconcilers (tailnet, egress, ingress, dns, policy) and resource builders |
-| `internal/headscale` | Headscale REST client (Bearer): nodes, keys, policy |
-| `internal/policy` | base + CR → rendered policy, normalisation, hashing (tested) |
-| `internal/{keys,ports,routes,naming}` | pure functions: key rotation, port assignment, route diagnosis, templating (tested) |
-| `charts/tailnet-operator/` | Helm chart, copied CRDs, documented values and optional monitoring/network isolation |
-| `deploy/` | generated default chart bundle and CRDs (kustomize); `examples/` incl. a base policy |
-| `test/e2e/` | isolated Tier-1 manager + real Headscale tests and pinned asset hashes |
-| `test/e2e-kind/` | rootless kind installation, leader failover and owned-kubeconfig safety tests |
-| `docs/` | [INSTALL.md](docs/INSTALL.md), [USAGE.md](docs/USAGE.md), [COMPATIBILITY.md](docs/COMPATIBILITY.md) |
+| `internal/{headscale,policy,certificates}` | Headscale REST client; base + CR → rendered policy; TLS serving and certificate validation |
+| `internal/{keys,ports,routes,naming,metrics,manager}` | key rotation, port assignment, route diagnosis, templating, metrics, controller wiring |
+| `charts/tailnet-operator/` | Helm chart, copied CRDs, alerts, dashboard |
+| `deploy/` | generated default bundle and CRDs (kustomize); `examples/` incl. a base policy and admission fixtures |
+| `test/{validation,chart,security}` | envtest admission tests, chart contracts, image-audit tests |
+| `test/e2e/`, `test/e2e-kind/` | Headscale integration suite; rootless kind cluster suite |
+| `docs/` | [INSTALL](docs/INSTALL.md), [USAGE](docs/USAGE.md), [COMPATIBILITY](docs/COMPATIBILITY.md), [SECURITY](docs/SECURITY.md), [RBAC reference](docs/reference/rbac.md) |
