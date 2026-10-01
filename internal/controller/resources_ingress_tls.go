@@ -11,8 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/naming"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/naming"
 )
 
 const ingressTLSMount = "/tls"
@@ -31,7 +31,7 @@ func ingressHTTPProtocol(in *tnv1.TailnetIngress) bool {
 
 func ingressProtocolAnnotations(in *tnv1.TailnetIngress) map[string]string {
 	if ingressHTTPProtocol(in) {
-		return map[string]string{"tailnet.this-is-fine.io/agent-config-protocol": "http-v1"}
+		return map[string]string{"tsunaro.io/agent-config-protocol": "http-v1"}
 	}
 	return nil
 }

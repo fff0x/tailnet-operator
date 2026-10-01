@@ -22,7 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"tailscale.com/ipn/ipnstate"
-	"this-is-fine.io/tailnet-operator/test/internal/kindfixture"
+	"tsunaro.io/tailnet-operator/test/internal/kindfixture"
 )
 
 func httpFixturePod(name, image string) *corev1.Pod {
@@ -330,7 +330,7 @@ func newHTTPPeerFixtureWithServingCA(t *testing.T, servingCA []byte) *httpPeerFi
 	barrier.Spec.Containers[0].Name = "agent"
 	barrier.Spec.Containers[0].Command = []string{"/tailnet-agent"}
 	barrier.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "AGENT_MODE", Value: "ingress"}, {Name: "SSL_CERT_FILE", Value: "/ca-certificates.crt"}}
-	barrier.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: "fixture.this-is-fine.io/admission-only"}}
+	barrier.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: "fixture.tsunaro.io/admission-only"}}
 	eventually(t, "shared agent admission armed", func() bool {
 		preview := barrier.DeepCopy()
 		return f.kube.Create(t.Context(), preview, client.DryRunAll) == nil && len(preview.Spec.InitContainers) == 1 &&
@@ -360,7 +360,7 @@ func TestAgentHTTPSPeer(t *testing.T) {
 	create(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "http-agent-targets", Namespace: namespace}, Data: map[string]string{"targets.json": string(rawTargets)}})
 	agent := httpFixturePod("http-agent", agentImage)
 	agent.Labels = map[string]string{"app.kubernetes.io/name": "tailnet-ingress", "app.kubernetes.io/managed-by": "tailnet-operator"}
-	agent.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: "fixture.this-is-fine.io/verify-admission"}}
+	agent.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: "fixture.tsunaro.io/verify-admission"}}
 	ac := &agent.Spec.Containers[0]
 	ac.Name = "agent"
 	ac.Command = []string{"/tailnet-agent"}

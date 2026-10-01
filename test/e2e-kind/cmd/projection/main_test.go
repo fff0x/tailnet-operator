@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"this-is-fine.io/tailnet-operator/test/internal/kindfixture"
+	"tsunaro.io/tailnet-operator/test/internal/kindfixture"
 )
 
 func TestProjectionObservation(t *testing.T) {

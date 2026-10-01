@@ -28,11 +28,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/headscale"
-	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
-	"this-is-fine.io/tailnet-operator/internal/naming"
-	"this-is-fine.io/tailnet-operator/internal/policy"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/headscale"
+	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
+	"tsunaro.io/tailnet-operator/internal/naming"
+	"tsunaro.io/tailnet-operator/internal/policy"
 )
 
 const (
@@ -40,7 +40,7 @@ const (
 	policyKey = "policy"
 	// roleLabel tells the operator's ConfigMaps apart (dns hosts file vs rendered policy) so one
 	// feature switching off never deletes the other's output.
-	roleLabel        = "tailnet.this-is-fine.io/role"
+	roleLabel        = "tsunaro.io/role"
 	roleDNSHosts     = "dns-hosts"
 	rolePolicyRender = "policy-rendered"
 

@@ -11,7 +11,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
 // collect must see egress CRs of the operator namespace and ingress CRs of any namespace, only those

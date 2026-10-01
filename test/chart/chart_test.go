@@ -329,17 +329,17 @@ func TestRBACPrivilegesExact(t *testing.T) {
 			m := render(t, fmt.Sprintf("leaderElection: {enabled: %t}", election))
 			local := append([]grant{}, workloads...)
 			local = append(local, grant{"", "services", write},
-				grant{"tailnet.this-is-fine.io", "tailnetegresses", read},
-				grant{"tailnet.this-is-fine.io", "tailnetegresses/status", status},
-				grant{"tailnet.this-is-fine.io", "tailnetegresses/finalizers", "update"})
+				grant{"tsunaro.io", "tailnetegresses", read},
+				grant{"tsunaro.io", "tailnetegresses/status", status},
+				grant{"tsunaro.io", "tailnetegresses/finalizers", "update"})
 			if election {
 				local = append(local, grant{"coordination.k8s.io", "leases", "get list watch create update patch"})
 			}
 			expected := map[string][]grant{
 				"ClusterRole/tailnet-operator-crds": {
-					{"tailnet.this-is-fine.io", "tailnets tailnetingresses", read},
-					{"tailnet.this-is-fine.io", "tailnets/status tailnetingresses/status", status},
-					{"tailnet.this-is-fine.io", "tailnets/finalizers tailnetingresses/finalizers", "update"},
+					{"tsunaro.io", "tailnets tailnetingresses", read},
+					{"tsunaro.io", "tailnets/status tailnetingresses/status", status},
+					{"tsunaro.io", "tailnets/finalizers tailnetingresses/finalizers", "update"},
 				},
 				"ClusterRole/tailnet-operator-workloads": append(append([]grant{}, workloads...),
 					grant{"cert-manager.io", "certificates", "get create patch delete"}),

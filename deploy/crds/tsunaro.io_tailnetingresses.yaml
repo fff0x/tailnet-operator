@@ -4,16 +4,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
-  name: tailnetegresses.tailnet.this-is-fine.io
+  name: tailnetingresses.tsunaro.io
 spec:
-  group: tailnet.this-is-fine.io
+  group: tsunaro.io
   names:
-    kind: TailnetEgress
-    listKind: TailnetEgressList
-    plural: tailnetegresses
+    kind: TailnetIngress
+    listKind: TailnetIngressList
+    plural: tailnetingresses
     shortNames:
-    - tneg
-    singular: tailnetegress
+    - tning
+    singular: tailnetingress
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -22,6 +22,9 @@ spec:
       type: string
     - jsonPath: .status.hostname
       name: Hostname
+      type: string
+    - jsonPath: .status.dnsName
+      name: DNS
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
@@ -33,8 +36,8 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          TailnetEgress is a per-identity egress into a Tailnet. It lives in the operator's namespace; a
-          NetworkPolicy decides which namespaces may use it.
+          TailnetIngress exposes in-cluster L4 services on the tailnet as one tsnet node with a MagicDNS
+          name. It lives in the tenant namespace; the tag's grants decide which tailnet peers may reach it.
         properties:
           apiVersion:
             description: |-
@@ -54,21 +57,98 @@ spec:
           metadata:
             type: object
           spec:
-            description: TailnetEgressSpec is the desired egress into a tailnet for
-              one identity.
+            description: |-
+              TailnetIngressSpec exposes in-cluster services through one tsnet node. L4 forwards TCP;
+              HTTP mode terminates TLS and proxies plain HTTP to the selected backend.
             properties:
-              consumerNamespaces:
-                description: Namespaces whose pods may reach this proxy's Services
-                  (NetworkPolicy ingress).
+              allowFrom:
+                description: |-
+                  Peers allowed to reach this node (policy grant src), e.g. ["group:team-a"]. Only used when
+                  the Tailnet generates policy; every entry must match Tailnet.spec.policy.ingressSourceAllowlist,
+                  otherwise the CR gets PolicyDenied and no grant is written.
                 items:
-                  maxLength: 63
-                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                  minLength: 1
                   type: string
                 minItems: 1
                 type: array
+              exposes:
+                items:
+                  description: Expose publishes one in-cluster backend on the tailnet
+                    node, listening on Port.
+                  properties:
+                    backend:
+                      description: |-
+                        Backend is the in-cluster Service an Expose forwards to. Namespace defaults to the CR's
+                        namespace; an explicit namespace can reference a shared gateway or another backend.
+                      properties:
+                        namespace:
+                          description: |-
+                            Namespace of the Service. Empty → the CR's namespace. Set it to funnel HTTPS through a
+                            shared gateway (e.g. Envoy in envoy-gateway-system) so TLS terminates there while the tailnet
+                            identity stays per app.
+                          maxLength: 63
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        port:
+                          format: int32
+                          maximum: 65535
+                          minimum: 1
+                          type: integer
+                        service:
+                          description: Service name; in the CR's own namespace unless
+                            Namespace is set.
+                          maxLength: 63
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                      required:
+                      - port
+                      - service
+                      type: object
+                    mode:
+                      default: l4
+                      description: Listener mode. Omitted means L4 forwarding; HTTP
+                        requests TLS termination.
+                      enum:
+                      - l4
+                      - http
+                      maxLength: 4
+                      type: string
+                    name:
+                      description: DNS label; identifies the expose in status and
+                        in the agent config.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    port:
+                      description: Port the tailnet node listens on — what a tailnet
+                        peer dials on this node's MagicDNS name/IP.
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                  required:
+                  - backend
+                  - name
+                  - port
+                  type: object
+                  x-kubernetes-validations:
+                  - message: HTTP exposes must listen on port 443
+                    rule: '!has(self.mode) || self.mode != ''http'' || self.port ==
+                      443'
+                maxItems: 50
+                minItems: 1
+                type: array
+                x-kubernetes-validations:
+                - message: expose ports must be unique
+                  rule: self.all(e, self.exists_one(other, other.port == e.port))
+                - message: expose names must be unique
+                  rule: self.all(e, self.exists_one(other, other.name == e.name))
+                - message: at most one HTTP expose is allowed
+                  rule: self.filter(e, has(e.mode) && e.mode == 'http').size() <=
+                    1
               hostname:
-                description: Explicit tailnet hostname. Empty → rendered from the
-                  Tailnet's hostnameTemplate.
+                description: Explicit tailnet (MagicDNS) hostname. Empty → rendered
+                  from the Tailnet's ingressHostnameTemplate.
                 type: string
               image:
                 description: Override the Tailnet's default agent image.
@@ -134,8 +214,8 @@ spec:
                 type: object
               tag:
                 description: |-
-                  Explicit tailnet tag. Empty → rendered from the Tailnet's tagTemplate. The tag is the
-                  authorization: its grants in the tailnet policy decide which routes this node receives.
+                  Explicit tailnet tag. Empty → rendered from the Tailnet's ingressTagTemplate. The tag is the
+                  authorization: policy grants with dst = this tag decide which peers may reach the node.
                 type: string
               tailnetRef:
                 description: TailnetRef selects a cluster-scoped Tailnet by name.
@@ -145,60 +225,57 @@ spec:
                 required:
                 - name
                 type: object
-              targets:
-                items:
-                  description: Target is one off-cluster host reachable over the tailnet,
-                    published as a Service.
-                  properties:
-                    address:
-                      description: IPv4/IPv6 address or lowercase MagicDNS name, not
-                        a CIDR, URL or host:port.
-                      maxLength: 253
-                      type: string
-                      x-kubernetes-validations:
-                      - message: address must be an IP or a lowercase DNS name, not
-                          a CIDR or host:port
-                        rule: isIP(self) || (!self.matches('^[0-9.]+$') && self.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?([.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$'))
-                    aliases:
-                      description: |-
-                        Extra DNS names that resolve to this target's Service ClusterIP, rendered into the Tailnet's
-                        dns.hostsConfigMap. Use them when the far end routes by name (TLS SNI, HTTP Host): a consumer
-                        dialling the alias sends the real hostname, and the L4 tunnel passes it through untouched.
-                      items:
-                        maxLength: 63
+              tls:
+                description: TLS source for the HTTP expose. An omitted or empty source
+                  may use Tailnet defaults.
+                properties:
+                  issuerRef:
+                    description: |-
+                      TLSIssuerReference identifies a cert-manager issuer without requiring its API dependency.
+                      Issuer references resolve in the ingress namespace; ClusterIssuer references are cluster-scoped.
+                    properties:
+                      group:
+                        default: cert-manager.io
+                        description: Only cert-manager.io issuers are supported.
+                        enum:
+                        - cert-manager.io
+                        type: string
+                      kind:
+                        default: Issuer
+                        enum:
+                        - Issuer
+                        - ClusterIssuer
+                        type: string
+                      name:
+                        description: Name of the issuer.
+                        maxLength: 253
+                        minLength: 1
                         pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                         type: string
-                      type: array
-                    name:
-                      description: |-
-                        DNS-1035 label; used verbatim as the Service name, so consumers dial <name>.<ns>:<port>.
-                        Start with a letter for compatibility with Kubernetes 1.31 Service admission.
-                      maxLength: 63
-                      pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
-                      type: string
-                    port:
-                      format: int32
-                      maximum: 65535
-                      minimum: 1
-                      type: integer
-                  required:
-                  - address
-                  - name
-                  - port
-                  type: object
-                maxItems: 50
-                minItems: 1
-                type: array
+                    required:
+                    - name
+                    type: object
+                  secretName:
+                    description: Existing TLS Secret in the ingress namespace.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                type: object
                 x-kubernetes-validations:
-                - message: target names must be unique
-                  rule: self.all(t, self.exists_one(other, other.name == t.name))
+                - message: tls.secretName and tls.issuerRef are mutually exclusive
+                  rule: '!has(self.secretName) || !has(self.issuerRef)'
             required:
-            - consumerNamespaces
+            - allowFrom
+            - exposes
             - tailnetRef
-            - targets
             type: object
+            x-kubernetes-validations:
+            - message: tls requires an HTTP expose
+              rule: '!has(self.tls) || self.exposes.exists(e, has(e.mode) && e.mode
+                == ''http'')'
           status:
-            description: TailnetEgressStatus is the observed state.
+            description: TailnetIngressStatus is the observed state.
             properties:
               authKeyExpiresAt:
                 description: Expiry of the reusable pre-auth key currently in the
@@ -206,8 +283,8 @@ spec:
                 format: date-time
                 type: string
               conditions:
-                description: 'Conditions: TagKnown, Registered, RoutesGranted, TargetsReachable,
-                  Ready.'
+                description: 'Conditions: TagKnown, Registered, BackendsReachable,
+                  TLSReady, Ready.'
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -266,6 +343,42 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              dnsName:
+                description: |-
+                  DNS name rendered from the Tailnet's dns.ingressNameTemplate; resolves to TailnetIPs via the
+                  hosts ConfigMap. Empty when no template is set.
+                type: string
+              exposes:
+                items:
+                  description: ExposeStatus is the per-expose observed state.
+                  properties:
+                    backend:
+                      description: The in-cluster backend the agent dials, as service:port.
+                      type: string
+                    listenPort:
+                      description: Port the tailnet node listens on for this expose.
+                      format: int32
+                      type: integer
+                    name:
+                      type: string
+                    reachable:
+                      description: True once the agent last dialled the backend successfully.
+                      type: boolean
+                    reason:
+                      description: Empty when reachable; "Unreachable" otherwise.
+                      type: string
+                    tlsReady:
+                      description: |-
+                        Local TLS component readiness for an HTTP expose; omitted for L4.
+                        This does not establish remote tailnet reachability or client CA trust.
+                      type: boolean
+                  required:
+                  - backend
+                  - listenPort
+                  - name
+                  - reachable
+                  type: object
+                type: array
               hostname:
                 type: string
               nodeId:
@@ -281,38 +394,14 @@ spec:
                 items:
                   type: string
                 type: array
-              targets:
-                items:
-                  description: TargetStatus is the per-target observed state.
-                  properties:
-                    listenPort:
-                      description: Local port the agent listens on and the Service
-                        forwards to.
-                      format: int32
-                      type: integer
-                    name:
-                      type: string
-                    present:
-                      description: True once that route is present in the pod's netmap.
-                      type: boolean
-                    reachable:
-                      description: True once the agent last dialled the target successfully.
-                      type: boolean
-                    reason:
-                      description: 'When the route is missing: NotAdvertised, NotApproved
-                        or NoGrant. Empty when present.'
-                      type: string
-                    route:
-                      description: The /32 or /128 this target needs in the netmap.
-                      type: string
-                  required:
-                  - listenPort
-                  - name
-                  - present
-                  - reachable
-                  - route
-                  type: object
-                type: array
+              tlsNotAfter:
+                description: Expiry of the serving TLS certificate.
+                format: date-time
+                type: string
+              tlsSecretName:
+                description: Name of the effective TLS Secret in the ingress namespace;
+                  never certificate or key content.
+                type: string
             type: object
         required:
         - spec

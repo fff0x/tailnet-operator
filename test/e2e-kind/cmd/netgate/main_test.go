@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-	"this-is-fine.io/tailnet-operator/test/internal/netproof"
+	"tsunaro.io/tailnet-operator/test/internal/netproof"
 )
 
 const testUID = "7df84f6a-1fbc-4114-a0c8-713dbe3716bc"

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
 // A scrape failure must not masquerade as NoGrant/Unreachable: with an empty netmap the classifier

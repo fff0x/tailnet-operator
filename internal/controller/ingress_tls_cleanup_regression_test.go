@@ -10,7 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
 func TestIngressCleanupSurvivesMissingInheritedSource(t *testing.T) {

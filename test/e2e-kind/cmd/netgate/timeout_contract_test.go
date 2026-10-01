@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"this-is-fine.io/tailnet-operator/test/internal/netproof"
+	"tsunaro.io/tailnet-operator/test/internal/netproof"
 )
 
 func TestTimeoutSnapshotRetainsApprovalContract(t *testing.T) {

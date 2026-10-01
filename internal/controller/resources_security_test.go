@@ -7,7 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
 func TestAgentDeploymentSecurity(t *testing.T) {

@@ -20,8 +20,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"this-is-fine.io/tailnet-operator/test/internal/kindfixture"
-	"this-is-fine.io/tailnet-operator/test/internal/netproof"
+	"tsunaro.io/tailnet-operator/test/internal/kindfixture"
+	"tsunaro.io/tailnet-operator/test/internal/netproof"
 )
 
 type nodeObservation struct {

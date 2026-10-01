@@ -24,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"this-is-fine.io/tailnet-operator/test/internal/kindfixture"
+	"tsunaro.io/tailnet-operator/test/internal/kindfixture"
 )
 
 // admissionFailureCategory never returns API messages, addresses or request data.
@@ -333,7 +333,7 @@ func TestFixtureCAProjection(t *testing.T) {
 	})
 	gated := template.DeepCopy()
 	gated.Name = "agent-admission-only"
-	gated.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: "fixture.this-is-fine.io/admission-only"}}
+	gated.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: "fixture.tsunaro.io/admission-only"}}
 	var gatedPreview *corev1.Pod
 	eventually(t, "optional init admission mutation", func() bool {
 		p := gated.DeepCopy()

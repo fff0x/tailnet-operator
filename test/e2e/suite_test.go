@@ -18,8 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"this-is-fine.io/tailnet-operator/internal/manager"
-	"this-is-fine.io/tailnet-operator/test/internal/isolation"
+	"tsunaro.io/tailnet-operator/internal/manager"
+	"tsunaro.io/tailnet-operator/test/internal/isolation"
 )
 
 const namespace = "operator-e2e"

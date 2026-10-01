@@ -19,15 +19,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/headscale"
-	"this-is-fine.io/tailnet-operator/internal/keys"
-	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/headscale"
+	"tsunaro.io/tailnet-operator/internal/keys"
+	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 )
 
 const (
-	annExpiresAt = "tailnet.this-is-fine.io/expires-at"
-	annPrefix    = "tailnet.this-is-fine.io/prefix"
+	annExpiresAt = "tsunaro.io/expires-at"
+	annPrefix    = "tsunaro.io/prefix"
 	apiKeyData   = "apiKey"
 )
 

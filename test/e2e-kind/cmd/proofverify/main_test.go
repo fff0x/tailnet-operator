@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"this-is-fine.io/tailnet-operator/test/internal/netproof"
+	"tsunaro.io/tailnet-operator/test/internal/netproof"
 )
 
 const validBinding = `{"OuterCIDR":"10.89.0.0/24","NodeIP":"10.89.0.2","PodCIDR":"10.244.0.0/24","PodIP":"10.244.0.5"}`

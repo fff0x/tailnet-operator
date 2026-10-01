@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"this-is-fine.io/tailnet-operator/internal/headscale"
+	"tsunaro.io/tailnet-operator/internal/headscale"
 )
 
 // Hashes from the official release checksums.txt, reviewed with each matrix update.

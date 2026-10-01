@@ -1,4 +1,4 @@
-module this-is-fine.io/tailnet-operator
+module tsunaro.io/tailnet-operator
 
 go 1.26.6
 

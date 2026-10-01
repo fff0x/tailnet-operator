@@ -19,8 +19,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	"this-is-fine.io/tailnet-operator/internal/certificates"
-	"this-is-fine.io/tailnet-operator/test/internal/kindfixture"
+	"tsunaro.io/tailnet-operator/internal/certificates"
+	"tsunaro.io/tailnet-operator/test/internal/kindfixture"
 )
 
 const (

@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"this-is-fine.io/tailnet-operator/internal/certificates"
+	"tsunaro.io/tailnet-operator/internal/certificates"
 )
 
 type observation struct {

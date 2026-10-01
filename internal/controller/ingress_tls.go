@@ -10,9 +10,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/certificates"
-	"this-is-fine.io/tailnet-operator/internal/naming"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/certificates"
+	"tsunaro.io/tailnet-operator/internal/naming"
 )
 
 // ingressTLSPlan contains references only. Certificate/key bytes never enter workload metadata.

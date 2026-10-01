@@ -11,8 +11,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 )
 
 func TestPolicyReplayCounterBaseline(t *testing.T) {

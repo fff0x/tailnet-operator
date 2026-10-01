@@ -10,7 +10,7 @@ import (
 	"net/netip"
 	"os"
 
-	"this-is-fine.io/tailnet-operator/test/internal/netproof"
+	"tsunaro.io/tailnet-operator/test/internal/netproof"
 )
 
 var errBinding = errors.New("binding-rejected")
