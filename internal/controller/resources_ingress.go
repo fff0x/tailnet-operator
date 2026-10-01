@@ -34,20 +34,48 @@ func ingressObjLabels(crName string) map[string]string {
 // backend (full cluster-DNS name so it resolves regardless of the pod's search path). Its mtime
 // changing is what makes the agent rebind.
 func exposesConfigMap(in *tnv1.TailnetIngress, ns string) (*corev1.ConfigMap, error) {
+	// Without a resolved TLS source, HTTP must not fall back to plaintext L4.
+	return ingressExposesConfigMap(in, ns, ingressTLSPlan{})
+}
+
+func ingressExposesConfigMap(in *tnv1.TailnetIngress, ns string, plan ingressTLSPlan) (*corev1.ConfigMap, error) {
 	out := make([]agentTarget, 0, len(in.Spec.Exposes))
-	for _, e := range in.Spec.Exposes {
+	exposes := in.Spec.Exposes
+	if !safeIngressExposes(exposes) {
+		// An ambiguous or admission-bypassed configuration withdraws listeners.
+		exposes = nil
+	}
+	for _, e := range exposes {
+		if e.Mode == "http" && (ns != in.Namespace || !projectIngressTLS(in, plan)) {
+			continue
+		}
 		bns := e.Backend.Namespace
 		if bns == "" {
 			bns = ns
 		}
-		out = append(out, agentTarget{
+		target := agentTarget{
 			Name:       e.Name,
 			Address:    fmt.Sprintf("%s.%s.svc.cluster.local", e.Backend.Service, bns),
 			Port:       e.Backend.Port,
 			ListenPort: e.Port,
-		})
+		}
+		if e.Mode == "http" {
+			target.Mode, target.DNSName = "http", in.Status.DNSName
+			target.CertFile, target.KeyFile = ingressTLSMount+"/tls.crt", ingressTLSMount+"/tls.key"
+			target.ConfigID = ingressHTTPConfigID(in, target, plan)
+		}
+		out = append(out, target)
 	}
-	b, err := json.Marshal(out)
+	var config any = out
+	if ingressHTTPProtocol(in) {
+		// Old agents reject an object at startup instead of ignoring HTTP mode and
+		// forwarding plaintext. The Pod template also changes to retire old listeners.
+		config = struct {
+			Version int           `json:"version"`
+			Targets []agentTarget `json:"targets"`
+		}{Version: 1, Targets: out}
+	}
+	b, err := json.Marshal(config)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +154,7 @@ func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			Selector: &metav1.LabelSelector{MatchLabels: ingressSelectorLabels(in.Name)},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: ingressObjLabels(in.Name)},
+				ObjectMeta: metav1.ObjectMeta{Labels: ingressObjLabels(in.Name), Annotations: ingressProtocolAnnotations(in)},
 				Spec: corev1.PodSpec{
 					SecurityContext:              podSec,
 					AutomountServiceAccountToken: &automount,

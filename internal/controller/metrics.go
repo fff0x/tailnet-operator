@@ -59,3 +59,15 @@ func updateObservedStatus(ctx context.Context, c client.Client, m *operatormetri
 	m.Observe(obj)
 	return nil
 }
+
+// Observe the server-returned snapshot only after a successful status patch.
+// Callers use an optimistic-lock patch when later child writes depend on it.
+func patchObservedStatus(ctx context.Context, c client.Client, m *operatormetrics.Metrics, obj client.Object, patch client.Patch) error {
+	unlock := lockObservedStatus(obj)
+	defer unlock()
+	if err := c.Status().Patch(ctx, obj, patch); err != nil {
+		return err
+	}
+	m.Observe(obj)
+	return nil
+}

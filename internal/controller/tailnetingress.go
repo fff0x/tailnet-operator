@@ -13,10 +13,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -34,7 +36,10 @@ import (
 type TailnetIngressReconciler struct {
 	Metrics *operatormetrics.Metrics
 	client.Client
-	Scheme                *runtime.Scheme
+	Scheme *runtime.Scheme
+	// Optional cert-manager uses an uncached dynamic client, never an informer.
+	Certificates          dynamic.Interface
+	SecretReader          client.Reader
 	OperatorNamespace     string
 	OperatorImage         string
 	AgentImagePullSecrets []string
@@ -55,6 +60,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.Get(ctx, types.NamespacedName{Name: in.Spec.TailnetRef.Name}, &tn); err != nil {
 		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, "NoTailnet",
 			fmt.Sprintf("Tailnet %q not found", in.Spec.TailnetRef.Name))
+		invalidateIngressTLSObservation(&in)
 		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
@@ -66,6 +72,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, "NoAPIKey",
 			"waiting for the Tailnet working API key")
+		invalidateIngressTLSObservation(&in)
 		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
@@ -129,6 +136,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		setCond(&in.Status.Conditions, in.Generation, "TagKnown", metav1.ConditionFalse, reason, msg)
 		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, "TagUnknown",
 			"tag not in policy")
+		invalidateIngressTLSObservation(&in)
 		in.Status.ObservedGeneration = in.Generation
 		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -144,6 +152,8 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		in.Status.AuthKeyExpiresAt = &et
 	}
 
+	tlsState := r.prepareIngressTLS(ctx, &in, &tn, time.Now())
+
 	image := in.Spec.Image
 	if image == "" {
 		image = tn.Spec.Proxy.Image
@@ -151,7 +161,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if image == "" {
 		image = r.OperatorImage
 	}
-	if err := r.applyChildren(ctx, &in, &tn, ns, image); err != nil {
+	if err := r.applyChildren(ctx, &in, &tn, ns, image, tlsState); err != nil {
 		return r.fail(ctx, &in, "Apply", err)
 	}
 
@@ -161,8 +171,8 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	r.associateNode(ctx, &in, hs, nodes, tag, hostname)
 
-	probes, probeErr := r.scrapeExposeProbes(ctx, ns, in.Name)
-	r.computeExposeStatus(&in, probes, probeErr)
+	probes, probeErr := r.scrapeIngressProbes(ctx, ns, in.Name)
+	r.computeIngressStatus(&in, tlsState, probes, probeErr, time.Now())
 
 	in.Status.ObservedGeneration = in.Generation
 	if err := updateObservedStatus(ctx, r.Client, r.Metrics, &in); err != nil {
@@ -177,6 +187,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 }
 
 func (r *TailnetIngressReconciler) fail(ctx context.Context, in *tnv1.TailnetIngress, reason string, err error) (ctrl.Result, error) {
+	invalidateIngressTLSObservation(in)
 	setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, reason, err.Error())
 	_ = updateObservedStatus(ctx, r.Client, r.Metrics, in)
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -237,12 +248,16 @@ func (r *TailnetIngressReconciler) ensureAuthKey(ctx context.Context, in *tnv1.T
 	return &exp, nil
 }
 
-func (r *TailnetIngressReconciler) applyChildren(ctx context.Context, in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string) error {
-	cm, err := exposesConfigMap(in, ns)
+func (r *TailnetIngressReconciler) applyChildren(ctx context.Context, in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string, tlsState ingressTLSState) error {
+	servingPlan := tlsState.plan
+	if tlsState.reason != "" {
+		servingPlan = ingressTLSPlan{} // no HTTP listener before its source is valid
+	}
+	cm, err := ingressExposesConfigMap(in, ns, servingPlan)
 	if err != nil {
 		return err
 	}
-	dep := ingressAgentDeployment(in, tn, ns, image, r.AgentImagePullSecrets)
+	dep := ingressAgentDeploymentTLS(in, tn, ns, image, r.AgentImagePullSecrets, tlsState.plan)
 	np := ingressNetworkPolicy(in, ns, r.OperatorNamespace)
 	for _, obj := range []client.Object{cm, dep, np} {
 		if err := controllerutil.SetControllerReference(in, obj, r.Scheme); err != nil {
@@ -274,6 +289,7 @@ func (r *TailnetIngressReconciler) associateNode(ctx context.Context, in *tnv1.T
 		}
 	}
 	if online == nil {
+		in.Status.NodeID, in.Status.TailnetIPs = "", nil
 		setCond(&in.Status.Conditions, in.Generation, "Registered", metav1.ConditionFalse, "NotRegistered",
 			"no online node with this tag and hostname yet")
 		return
@@ -351,7 +367,7 @@ func (r *TailnetIngressReconciler) agentPodIP(ctx context.Context, ns, name stri
 		return ""
 	}
 	for _, p := range pods.Items {
-		if p.Status.Phase == corev1.PodRunning && p.Status.PodIP != "" {
+		if p.DeletionTimestamp == nil && p.Status.Phase == corev1.PodRunning && p.Status.PodIP != "" {
 			return p.Status.PodIP
 		}
 	}
@@ -366,5 +382,25 @@ func (r *TailnetIngressReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ConfigMap{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&networkingv1.NetworkPolicy{}).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+			var requests []ctrl.Request
+			for _, key := range r.ingressesForTLSSecret(ctx, obj) {
+				requests = append(requests, ctrl.Request{NamespacedName: key})
+			}
+			return requests
+		})).
+		Watches(&tnv1.Tailnet{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+			var list tnv1.TailnetIngressList
+			if err := r.List(ctx, &list); err != nil {
+				return nil
+			}
+			var requests []ctrl.Request
+			for _, in := range list.Items {
+				if in.Spec.TailnetRef.Name == obj.GetName() {
+					requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&in)})
+				}
+			}
+			return requests
+		}), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }

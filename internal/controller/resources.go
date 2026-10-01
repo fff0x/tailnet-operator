@@ -48,6 +48,11 @@ type agentTarget struct {
 	Address    string `json:"address"`
 	Port       int32  `json:"port"`
 	ListenPort int32  `json:"listenPort"`
+	Mode       string `json:"mode,omitempty"`
+	DNSName    string `json:"dnsName,omitempty"`
+	CertFile   string `json:"certFile,omitempty"`
+	KeyFile    string `json:"keyFile,omitempty"`
+	ConfigID   string `json:"configID,omitempty"`
 }
 
 // targetsConfigMap holds the agent's target list. Its mtime changing is what makes the agent rebind.

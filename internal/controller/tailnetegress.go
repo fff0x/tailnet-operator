@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -537,25 +535,6 @@ func (r *TailnetEgressReconciler) agentPodIP(ctx context.Context, ns, name strin
 		}
 	}
 	return ""
-}
-
-func scrapeJSON(ctx context.Context, ip, path string, out any) error {
-	url := fmt.Sprintf("http://%s:%d/%s", ip, agentHealthPort, path)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	c := &http.Client{Timeout: 5 * time.Second}
-	resp, err := c.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("scrape %s: %s", url, resp.Status)
-	}
-	return json.Unmarshal(b, out)
 }
 
 // SetupWithManager registers the TailnetEgress controller and its owned children.
