@@ -232,6 +232,198 @@ func TestAdmission(t *testing.T) {
 		}
 	})
 
+	t.Run("http-tls-api", func(t *testing.T) {
+		// These cases validate only the API contract, not HTTP/TLS runtime support.
+		newIngress := func() *unstructured.Unstructured {
+			return &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "tailnet.this-is-fine.io/v1alpha1", "kind": "TailnetIngress",
+				"metadata": map[string]any{"name": "http-api", "namespace": "validation"},
+				"spec": map[string]any{
+					"tailnetRef": map[string]any{"name": "default-tls"},
+					"allowFrom":  []any{"group:team"},
+					"exposes": []any{map[string]any{"name": "app", "mode": "http", "port": int64(443),
+						"backend": map[string]any{"service": "app", "port": int64(8080)}}},
+				},
+			}}
+		}
+		expose := func(obj *unstructured.Unstructured) map[string]any {
+			return obj.Object["spec"].(map[string]any)["exposes"].([]any)[0].(map[string]any)
+		}
+		admit := func(t *testing.T, obj *unstructured.Unstructured) {
+			t.Helper()
+			prepare(t, obj)
+			if err := c.Create(ctx, obj, client.DryRunAll); err != nil {
+				t.Fatalf("API shape rejected: %v", err)
+			}
+		}
+		reject := func(t *testing.T, obj *unstructured.Unstructured, message string) {
+			t.Helper()
+			prepare(t, obj)
+			err := c.Create(ctx, obj, client.DryRunAll)
+			if !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), message) {
+				t.Fatalf("want Invalid containing %q, got %v", message, err)
+			}
+		}
+		checkIssuer := func(t *testing.T, obj *unstructured.Unstructured, kind string, path ...string) {
+			t.Helper()
+			ref, found, err := unstructured.NestedMap(obj.Object, path...)
+			if err != nil || !found || ref["kind"] != kind || ref["group"] != "cert-manager.io" || ref["name"] != "ca.example" {
+				t.Fatalf("issuer defaulting: ref=%v found=%v err=%v", ref, found, err)
+			}
+		}
+
+		for _, mode := range []string{"omitted", "l4", "http"} {
+			t.Run("mode/"+mode, func(t *testing.T) {
+				obj := newIngress()
+				want := mode
+				if mode == "omitted" {
+					delete(expose(obj), "mode")
+					want = "l4"
+				} else {
+					expose(obj)["mode"] = mode
+				}
+				admit(t, obj) // HTTP without any local source must be accepted.
+				if expose(obj)["mode"] != want {
+					t.Fatalf("mode=%v, want %s", expose(obj)["mode"], want)
+				}
+			})
+		}
+		for _, tt := range []struct {
+			name string
+			tls  map[string]any
+		}{
+			{"empty-inherits-tailnet-default", map[string]any{}},
+			{"explicit-secret", map[string]any{"secretName": "app.tls"}},
+			{"issuer-defaults", map[string]any{"issuerRef": map[string]any{"name": "ca.example"}}},
+			{"issuer", map[string]any{"issuerRef": map[string]any{"name": "ca.example", "kind": "Issuer", "group": "cert-manager.io"}}},
+			{"cluster-issuer", map[string]any{"issuerRef": map[string]any{"name": "ca.example", "kind": "ClusterIssuer"}}},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				obj := newIngress()
+				obj.Object["spec"].(map[string]any)["tls"] = tt.tls
+				admit(t, obj)
+				if ref, ok := tt.tls["issuerRef"].(map[string]any); ok {
+					kind := "Issuer"
+					if ref["kind"] == "ClusterIssuer" {
+						kind = "ClusterIssuer"
+					}
+					checkIssuer(t, obj, kind, "spec", "tls", "issuerRef")
+				}
+			})
+		}
+		t.Run("mixed-l4-http", func(t *testing.T) {
+			obj := newIngress()
+			spec := obj.Object["spec"].(map[string]any)
+			spec["tls"] = map[string]any{}
+			spec["exposes"] = append(spec["exposes"].([]any), map[string]any{
+				"name": "db", "port": int64(5432), "backend": map[string]any{"service": "db", "port": int64(5432)},
+			})
+			admit(t, obj)
+		})
+		for _, kind := range []string{"omitted", "Issuer", "ClusterIssuer"} {
+			t.Run("tailnet-default/"+kind, func(t *testing.T) {
+				obj := templates["tailnet"].DeepCopy()
+				ref := map[string]any{"name": "ca.example"}
+				want := kind
+				if kind == "omitted" {
+					want = "Issuer"
+				} else {
+					ref["kind"] = kind
+				}
+				obj.Object["spec"].(map[string]any)["defaults"] = map[string]any{"tls": map[string]any{"issuerRef": ref}}
+				admit(t, obj)
+				checkIssuer(t, obj, want, "spec", "defaults", "tls", "issuerRef")
+			})
+		}
+		for _, defaults := range []map[string]any{{}, {"tls": map[string]any{}}} {
+			obj := templates["tailnet"].DeepCopy()
+			obj.Object["spec"].(map[string]any)["defaults"] = defaults
+			admit(t, obj)
+		}
+		for _, tt := range []struct {
+			name    string
+			mutate  func(*unstructured.Unstructured)
+			message string
+		}{
+			{"bad-mode", func(o *unstructured.Unstructured) { expose(o)["mode"] = "tcp" }, "Unsupported value"},
+			{"empty-mode", func(o *unstructured.Unstructured) { expose(o)["mode"] = "" }, "Unsupported value"},
+			{"http-port", func(o *unstructured.Unstructured) { expose(o)["port"] = int64(80) }, "HTTP exposes must listen on port 443"},
+			{"multiple-http", func(o *unstructured.Unstructured) {
+				spec := o.Object["spec"].(map[string]any)
+				second := newIngress()
+				expose(second)["name"] = "another"
+				spec["exposes"] = append(spec["exposes"].([]any), expose(second))
+			}, "at most one HTTP expose is allowed"},
+			{"mutually-exclusive", func(o *unstructured.Unstructured) {
+				o.Object["spec"].(map[string]any)["tls"] = map[string]any{"secretName": "app-tls", "issuerRef": map[string]any{"name": "ca"}}
+			}, "tls.secretName and tls.issuerRef are mutually exclusive"},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				obj := newIngress()
+				tt.mutate(obj)
+				reject(t, obj, tt.message)
+			})
+		}
+		for _, mode := range []string{"omitted", "l4"} {
+			for _, tls := range []map[string]any{{}, {"secretName": "app-tls"}, {"issuerRef": map[string]any{"name": "ca"}}} {
+				obj := newIngress()
+				if mode == "omitted" {
+					delete(expose(obj), "mode")
+				} else {
+					expose(obj)["mode"] = mode
+				}
+				obj.Object["spec"].(map[string]any)["tls"] = tls
+				reject(t, obj, "tls requires an HTTP expose")
+			}
+		}
+
+		// The same reference schema must validate both local and Tailnet-default issuers.
+		for _, target := range []string{"secret", "issuer", "default-issuer"} {
+			t.Run("names/"+target, func(t *testing.T) {
+				withName := func(name any, include bool) *unstructured.Unstructured {
+					obj := newIngress()
+					ref := map[string]any{}
+					if include {
+						ref["name"] = name
+					}
+					switch target {
+					case "secret":
+						obj.Object["spec"].(map[string]any)["tls"] = map[string]any{"secretName": name}
+					case "issuer":
+						obj.Object["spec"].(map[string]any)["tls"] = map[string]any{"issuerRef": ref}
+					case "default-issuer":
+						obj = templates["tailnet"].DeepCopy()
+						obj.Object["spec"].(map[string]any)["defaults"] = map[string]any{"tls": map[string]any{"issuerRef": ref}}
+					}
+					return obj
+				}
+				for _, name := range []string{"a", "0-ca", "ca.example", strings.Repeat("a", 253)} {
+					admit(t, withName(name, true))
+				}
+				for _, name := range []string{"", "CA", "ca/name", "ca_name", "-ca", "ca-", "ca..example", ".ca", "ca.", strings.Repeat("a", 254)} {
+					reject(t, withName(name, true), "")
+				}
+				if target == "secret" {
+					return
+				}
+				reject(t, withName(nil, false), "Required value")
+				for _, field := range []string{"group", "kind"} {
+					for _, value := range []string{"", "unsupported", "issuer"} {
+						obj := withName("ca", true)
+						path := []string{"spec", "tls", "issuerRef", field}
+						if target == "default-issuer" {
+							path = []string{"spec", "defaults", "tls", "issuerRef", field}
+						}
+						if err := unstructured.SetNestedField(obj.Object, value, path...); err != nil {
+							t.Fatal(err)
+						}
+						reject(t, obj, "Unsupported value")
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("service-name-boundaries", func(t *testing.T) {
 		for _, name := range []string{"a", "db1", "a-0", strings.Repeat("a", 63)} {
 			t.Run(name, func(t *testing.T) {

@@ -95,6 +95,43 @@ spec:
                 description: Lifetime of the reusable ephemeral pre-auth keys handed
                   to agents. Rotated at half-life.
                 type: string
+              defaults:
+                description: Defaults inherited by ingress resources that do not select
+                  their own TLS source.
+                properties:
+                  tls:
+                    description: |-
+                      TLSDefaults supplies an issuer for HTTP ingresses without an explicit TLS source.
+                      Secrets are namespace-local and cannot be selected as a Tailnet-wide default.
+                    properties:
+                      issuerRef:
+                        description: |-
+                          TLSIssuerReference identifies a cert-manager issuer without requiring its API dependency.
+                          Issuer references resolve in the ingress namespace; ClusterIssuer references are cluster-scoped.
+                        properties:
+                          group:
+                            default: cert-manager.io
+                            description: Only cert-manager.io issuers are supported.
+                            enum:
+                            - cert-manager.io
+                            type: string
+                          kind:
+                            default: Issuer
+                            enum:
+                            - Issuer
+                            - ClusterIssuer
+                            type: string
+                          name:
+                            description: Name of the issuer.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    type: object
+                type: object
               dns:
                 description: DNS records rendered from egress aliases and ingress
                   names. Off when empty.
