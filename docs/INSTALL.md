@@ -122,7 +122,7 @@ Key validation uses the API-key listing endpoint, so an initially empty policy d
 The authenticated health endpoint reports `databaseConnectivity`; a missing endpoint gives no database-health verdict.
 
 Split-DNS hints use the literal suffix after the last placeholder-containing label in `dns.ingressNameTemplate`.
-For example, `{name}-{namespace}.hydra.tif.internal` requires the split zone `hydra.tif.internal`.
+For example, `{name}-{namespace}.prod-1.tailnet.example.com` requires the split zone `prod-1.tailnet.example.com`.
 An empty template produces no hint. New manifests require `{name}` and a literal zone with at least two labels.
 The operator cannot verify DNS delegation or infer the gateway IP yet.
 Preflight does not change Headscale configuration. DryRun still publishes the rendered policy in file mode.
@@ -131,7 +131,8 @@ Preflight does not change Headscale configuration. DryRun still publishes the re
 
 ### Helm installation
 
-**Release preparation:** this checkout prepares chart `0.3.1` and image `v0.3.1`; it does not prove publication.
+**Release preparation:** this checkout prepares chart `0.4.0` and image `v0.4.0`; it does not prove publication.
+Existing installations must read the [API-group migration warning](#80-v040-api-group-migration) before upgrading.
 First, release and deploy a broker with `mixed-helm-v1`, `image-result-v1` and the pinned audit tools.
 Configure its immutable `CI_BUILDER_IMAGE` identity.
 The prepared consumer CI rejects missing capabilities or audit prerequisites before publication.
@@ -144,7 +145,7 @@ After the release is available, configure the placeholders and run these three c
 
 ```sh
 helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
-  --version 0.3.1 --namespace tailnet-system --create-namespace
+  --version 0.4.0 --namespace tailnet-system --create-namespace
 
 kubectl apply -f - <<'EOF'
 apiVersion: tsunaro.io/v1alpha1
@@ -495,6 +496,9 @@ kubectl -n tailnet-system exec -i deploy/headscale -c headscale -- headscale pol
 
 ## 8. Upgrade
 
+The in-place steps below apply only within the same API group.
+For a pre-v0.4.0 installation, read [§8.0](#80-v040-api-group-migration) first.
+
 **Validate existing CRs before upgrading the CRDs.** The stricter schema requires Kubernetes ≥ 1.31,
 non-empty ingress `allowFrom`, DNS-label CR names of at most 40 characters, unique target/expose names
 and expose ports, at most 50 targets/exposes, and aliases of at most 63 characters.
@@ -513,6 +517,70 @@ Do not install stricter CRDs until existing objects pass that check; it does not
    `DNS=CannotVerify` is a manual configuration hint, not proof that DNS is broken or working.
 4. `kubectl get tailnetegress,tailnetingress -A` — everything back to `READY=True`.
    Verify an actual egress connection and ingress connection after the rollout.
+
+### 8.0. v0.4.0 API-group migration
+
+**Upgrade blocker:** the API-group/child-ownership migration has not been rehearsed.
+Do not treat this as an ordinary image bump or let Flux prune the old CRDs in a single replacement commit.
+Fresh-install tests do not establish upgrade safety.
+
+The API group changes from `tailnet.this-is-fine.io` to `tsunaro.io` without conversion.
+Recreated CRs have new UIDs even when their names and namespaces stay unchanged.
+Existing child owner references still point at the old CRs.
+Deleting an old CRD deletes its CRs and can garbage-collect their children, including generated Secrets and Services.
+The chart name, image repository and binary names do not change.
+
+Before a rollout, prepare and rehearse a cluster-specific handover that meets these requirements:
+
+1. Protect old CRDs and dependent resources from GitOps pruning. Preserve desired CR manifests,
+   resource identities, Service IPs, policy state and recoverable credentials in secure storage.
+   Do not put Secret exports in logs or Git.
+2. Stop every old operator replica before starting a new one. The Lease changes from
+   `tailnet-operator.this-is-fine.io` to `tailnet-operator.tsunaro.io`; these are independent locks.
+   A rolling update cannot prevent concurrent old/new policy and key writers.
+3. Inventory child owner references and old-domain labels/annotations. Plan explicit ownership and
+   metadata transfer for preserved children, or deliberate recreation where downtime and identity changes are acceptable.
+   Recreating CRs alone does not safely adopt all children or translate key-expiry metadata.
+   Migrate role labels together with ownership: cleanup distinguishes DNS and rendered-policy ConfigMaps using `tsunaro.io/role`.
+   A preserved working Secret with only the old expiry annotation triggers bootstrap, even if its working key is still valid.
+   Verify the case where bootstrap has expired; do not assume preservation succeeds because the Secret name is unchanged.
+4. Install the new CRDs and validate all recreated CR manifests against them.
+   Complete the reviewed child handover before the new operator reconciles them.
+   Keep each migrated Tailnet's policy in `DryRun` while rebuilding the full CR inventory.
+   The new operator collects only new-group CRs; early `Apply` can replace the live policy with an incomplete fleet render.
+   Review the complete rendered-policy diff before restoring `Apply`.
+   Prove working/preauth-key behavior and retain secure recovery credentials.
+5. Verify policy convergence, all CR conditions, DNS answers, Service IPs and actual egress/ingress connections.
+   Record agent node identities and any intentional replacements. Do not promise a fixed downtime bound.
+6. Remove old-group CRs and CRDs only after every retained child's owner reference has been accounted for.
+   Keep CRD pruning disabled until this check is complete. Use fully qualified resource names while both groups exist.
+
+A tested rollback must restore compatible CRs, ownership, metadata and images without overlapping operators.
+An image downgrade or Git revert alone cannot undo this migration. Retain the shared ingress gateway until
+application migration has separate acceptance. The detailed handover and its rehearsal remain release prerequisites.
+
+#### Metadata-transfer primitive (development only)
+
+`internal/migration` contains an explicit per-child handover primitive, not a live migration command.
+It is not called by the controllers and does not loosen their ownership guards.
+It requires existing old/new CRs with matching names, namespaces and specs; an enabled destination policy must be `DryRun`.
+Permitted spec differences are the Tailnet policy transition to `DryRun` and admission adding an explicit ingress `mode: l4`.
+Changing an L4 expose to HTTP is a separate migration, not part of this handover.
+
+The primitive transfers the exact controller owner reference and known top-level metadata together.
+It translates key expiry and ConfigMap role metadata. Legacy prefix annotations are removed, not copied:
+older versions could store a full token there. The working-key controller reconstructs the canonical prefix from Secret data.
+Conflicting metadata, unknown legacy keys, deleting resources and legacy pod-template keys require manual review.
+
+Planning is read-only. Server-side dry-run validates a patch without persisting it.
+Application tests the child's UID and resourceVersion, checks parent snapshots and verifies the returned post-state.
+A retry with the same in-memory plan accepts only its exact post-state, apart from resourceVersion and managedFields.
+Plans cannot be serialized for crash recovery. API failures stop the transfer without printing response bodies or credentials.
+
+This primitive does not discover the fleet, create CRs, delete resources, change specs or contact Headscale.
+It does not fence parent deletion or concurrent writers. Successful per-object patches cannot prove a safe fleet migration.
+A complete inventory, durable partial-run recovery, garbage-collection/rollback rehearsal and real connectivity checks remain required.
+Do not use the library as a shortcut around the stop-first procedure above.
 
 ### Helm and Flux CRD upgrades
 
@@ -537,7 +605,7 @@ Version notes:
 
 | Version | Notes |
 | --- | --- |
-| v0.4.0 (unreleased) | **Breaking:** API group `tailnet.this-is-fine.io` → `tsunaro.io` (CRDs, RBAC, every CR, annotation keys `tsunaro.io/<key>`, leader Lease `tailnet-operator.tsunaro.io`). No conversion: apply the new CRDs + RBAC + image, re-create the CRs under the new group, then delete the old CRDs — children are owned by the CR and are rebuilt, agents re-register (1–2 min). With Flux: one commit that swaps CRD files, RBAC, image and CRs; prune removes the old CRDs. The chart name, image repository and binary names are unchanged. |
+| v0.4.0 (unreleased) | Agent HTTP/TLS termination, Helm chart, leader election, monitoring and security gates; see [CHANGELOG](../CHANGELOG.md). **Breaking:** API group `tailnet.this-is-fine.io` → `tsunaro.io`, metadata keys and leader Lease change. No conversion or coordinated child-adoption migration. Requires a rehearsed stop-first ownership/credential migration; do not use a single Flux swap-and-prune commit. See [§8.0](#80-v040-api-group-migration). Chart name, image repository and binary names are unchanged. |
 | v0.3.0 | Headscale capability preflight (`HeadscaleCompatible`, `PolicyMode`, `SplitDNS`), `COMPAT`/`DNS` columns and optional `headscale.version` hint. Proven file mode blocks policy writes and route-approval replay; empty-database bootstrap remains possible. **Breaking admission changes:** Kubernetes ≥1.31, required `spec`/non-empty ingress `allowFrom`, stricter names/addresses/templates, unique target/expose names and expose ports, bounded lists and lifetimes. Validate existing CRs against the new schema before upgrading; see [all validation rules](USAGE.md#13-validation). |
 | v0.2.0 | **Breaking:** API group `tailnet.fr0st.dev` → `tailnet.this-is-fine.io` (CRDs, RBAC, every CR). No conversion: apply new CRDs + RBAC + image and re-create the CRs under the new group, then delete the old CRDs — children (agents, keys, Services, hosts ConfigMap) are owned by the CR and are rebuilt, agents re-register (1–2 min). With Flux: one commit that swaps CRD files, RBAC, image and CRs; prune removes the old CRDs; tenant CRs follow in a second commit. Also: `ProbeFailed` reason, `status.tag` (TAG column), ingress DNS names publish IPv4 only, MagicDNS name restored to the hostname after a duplicate, transient `ApplyFailed` logged at info, status-only updates no longer re-trigger reconciles. |
 | v0.2.1 | Missed `autoApprovers` approvals are replayed after every successful policy write/InSync check (routes inside a rendered approver prefix, router tag listed there; events `RoutesApproved`) — no manual `approve-routes` needed. Rejected/failed policy writes are retried with backoff (15 s doubling to 5 min) instead of a fixed 5 min — a base test whose `src` is momentarily unresolvable (node re-registering) heals in seconds. `tailnet_policy_apply_errors_total` therefore counts more increments per outage: raise `TailnetPolicyApplyErrors` to `>= 6` per 30 min (a permanent failure gets there in ~8 min, a hiccup under 4 min stays at ≤ 5). |

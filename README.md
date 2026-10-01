@@ -43,8 +43,10 @@ Do not replace production gateway paths based on source tests alone.
 ## Quickstart
 
 Installation (Helm chart, Headscale key, CoreDNS; `kubectl apply -k deploy` alternative) is in
-[docs/INSTALL.md](docs/INSTALL.md). Chart `0.3.1` is prepared but not yet published; see its
-[values and release prerequisites](charts/tailnet-operator/README.md). With that in place, three manifests:
+[docs/INSTALL.md](docs/INSTALL.md). Chart `0.4.0` is prepared but not yet published; see its
+[values and release prerequisites](charts/tailnet-operator/README.md).
+Existing installations must first review the [breaking API-group migration](docs/INSTALL.md#80-v040-api-group-migration).
+See [CHANGELOG.md](CHANGELOG.md) for the unreleased changes. With that in place, three manifests:
 
 ```yaml
 apiVersion: tsunaro.io/v1alpha1

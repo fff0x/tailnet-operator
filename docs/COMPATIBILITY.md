@@ -144,7 +144,8 @@ Owned clusters, image tags and private working directories were removed after th
 
 Counter samples cover the surviving and replacement pods, not the deleted pod's final interval.
 The test does not establish external-write fencing or exactly-once policy writes.
-HTTP ingress, agent data-plane traffic and nightly-job execution remain unverified.
+The installation/failover runs did not verify HTTP ingress or agent data-plane traffic.
+A later HTTP-specific fixture provides the separate evidence below. Nightly-job execution remains unverified.
 Local success does not satisfy CI-on-main, three-successful-nights or week-long soak gates.
 The recorded combined observability snapshot passed host race tests, both envtest versions and real promtool checks.
 It also passed a fresh native amd64 rootless TEST container and isolated kind installation/failover.
@@ -176,3 +177,46 @@ The successful TEST experiment used normal test networking and makes no network-
 
 The audit and native-pipeline mock suites cover both platforms, failure ordering and cleanup without publication.
 These are not registry-image, signed-attestation, native-arm64 or broker-main acceptance results.
+
+### Later HTTP ingress acceptance
+
+The isolated HTTP fixture subsequently passed its full default selection.
+It covered real agent/peer HTTPS, Headscale HTTPS, integrated `TailnetIngress`, Pod startup isolation checks and fixture CA projection.
+The integrated ingress test passed eight HTTPS body checks through the tailnet and real cert-manager reissuance.
+The certificate revision advanced, the leaf changed to a one-hour certificate, and the agent container remained unchanged.
+Cleanup and preservation checks passed. This selection is not the complete Tier-2 scenario matrix.
+
+A separate fresh native-amd64 TEST run passed with the HTTP source included.
+The live-export admission row and seven unsupported Headscale 0.28 functionality rows were explicit skips;
+promtool was absent. Neither run establishes broker-main execution or native-arm64 acceptance.
+These recorded runs predate the Tsunaro API-group rename and do not validate a renamed release artifact or upgrade.
+
+Still required: integrated egress reachability/isolation, ingress L4 allowed/denied peers, the remaining HTTP
+protocol/ACL/failure cases and restart-no-flap coverage.
+API-group/ownership migration rehearsal, nightly execution and production soak also remain open.
+Do not delete an existing gateway based on the HTTP happy-path result alone.
+
+### API-group metadata-transfer tests
+
+The per-child primitive in `internal/migration` has passed unit/race tests and isolated Kubernetes 1.31 admission tests.
+`TestMigration` runs both API groups in a disposable API server using synthetic legacy-group schemas.
+Those schemas reproduce the old ingress's missing `mode` field, but are not a complete historical-release CRD snapshot.
+
+The API-server tests verify:
+
+- Server-side dry-run leaves persisted objects unchanged.
+- Transfer preserves child UIDs, Secret bytes, ConfigMap data, allocated Service IPs, workload specs, pod templates and generation.
+- Ownership, key-expiry annotations and ConfigMap role labels change together; unsafe legacy prefix annotations are removed.
+- Retrying the same in-memory plan performs no write when the exact post-state is already present.
+- Stale resourceVersions, recreated children, changed parents and changed post-states stop the transfer.
+- A real intervening write between GET and PATCH makes the JSONPatch preconditions reject the transfer.
+- The original `tailnet-operator` SSA manager can subsequently apply equivalent Secret/Deployment state without forcing ownership.
+
+Controller regressions reproduce failed key minting with legacy annotations, then reuse transferred working and preauth keys without API calls.
+The working-key case includes an expired bootstrap credential. These lifecycle tests use a fake Kubernetes client and a rejecting HTTP server.
+They are not a real Headscale migration result.
+
+Envtest runs no garbage collector, Deployment controller or kubelet. These tests do not establish CRD-deletion safety,
+agent node-identity continuity, network connectivity, crash recovery or production rollback.
+The primitive is not wired into controller reconciliation and has no live CLI.
+Full-fleet inventory and a stopped-writer/prune-safe migration rehearsal remain release blockers.

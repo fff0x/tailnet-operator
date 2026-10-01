@@ -2,11 +2,13 @@
 
 Tsunaro — userspace TailnetEgress and TailnetIngress with an external Headscale server.
 
-![Version: 0.3.1](https://img.shields.io/badge/Version-0.3.1-informational?style=flat-square)  ![AppVersion: v0.3.1](https://img.shields.io/badge/AppVersion-v0.3.1-informational?style=flat-square)
+![Version: 0.4.0](https://img.shields.io/badge/Version-0.4.0-informational?style=flat-square)  ![AppVersion: v0.4.0](https://img.shields.io/badge/AppVersion-v0.4.0-informational?style=flat-square)
 
 ## Status and installation
 
-Chart 0.3.1 and image v0.3.1 are release preparation, not a publication claim.
+Chart 0.4.0 and image v0.4.0 are release preparation, not a publication claim.
+The API group, metadata keys and leader-election Lease change in this release.
+Read the [v0.4.0 migration warning](../../docs/INSTALL.md#80-v040-api-group-migration) before upgrading an existing installation.
 Verify both artifacts in your chosen registry before installation.
 Install only one operator release per cluster. Replicas within that release share one leader-election Lease;
 releases in different namespaces do not share a lock and can race key rotation and policy writes.
@@ -17,7 +19,7 @@ helm install tailnet-operator ./charts/tailnet-operator \
   --namespace tailnet-system --create-namespace
 # Once the upgraded broker and the chart release are published:
 helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
-  --version 0.3.1 --namespace tailnet-system --create-namespace
+  --version 0.4.0 --namespace tailnet-system --create-namespace
 ```
 
 `namespace` defaults to the release namespace. A different override namespace must already exist;
@@ -177,8 +179,8 @@ Never delete CRDs as a migration or rollback shortcut.
   failure rejects acceptance but cannot roll back artifacts. The chart alone does not install that CI gate,
   and existing releases are not claimed to carry its evidence. See `docs/SECURITY.md` in the source tree.
 - Chart destination: `Taskfile.yaml` variable `OCI_CHART_PATH` plus Chart.name.
-  Mixed branch builds publish `0.3.1-dev.g<sha>` with appVersion set to the commit SHA, plus SHA/latest aliases.
-  The annotated release publishes plain Chart.version (`0.3.1`), **not** `v0.3.1`; it must match the Git tag without `v`.
+  Mixed branch builds publish `0.4.0-dev.g<sha>` with appVersion set to the commit SHA, plus SHA/latest aliases.
+  The annotated release publishes plain Chart.version (`0.4.0`), **not** `v0.4.0`; it must match the Git tag without `v`.
   Stable versions reject existing tags or uncertain registry lookups; sign/verify the digest before moving aliases.
   Client-side checks are not atomic: serialize publishers and enforce registry-side version protection.
 - Image/chart publication is not a transaction. Inspect partial failures before recovery; never overwrite an existing release.
