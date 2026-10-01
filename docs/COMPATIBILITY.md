@@ -204,6 +204,7 @@ Those schemas reproduce the old ingress's missing `mode` field, but are not a co
 
 The API-server tests verify:
 
+- Discovery-based inventory finds an unlabeled unsupported direct dependent and rejects the whole plan without changing parents or Secrets.
 - Server-side dry-run leaves persisted objects unchanged.
 - Transfer preserves child UIDs, Secret bytes, ConfigMap data, allocated Service IPs, workload specs, pod templates and generation.
 - Ownership, key-expiry annotations and ConfigMap role labels change together; unsafe legacy prefix annotations are removed.
@@ -219,4 +220,6 @@ They are not a real Headscale migration result.
 Envtest runs no garbage collector, Deployment controller or kubelet. These tests do not establish CRD-deletion safety,
 agent node-identity continuity, network connectivity, crash recovery or production rollback.
 The primitive is not wired into controller reconciliation and has no live CLI.
-Full-fleet inventory and a stopped-writer/prune-safe migration rehearsal remain release blockers.
+The read-only inventory planner is also tested for discovery/list failures, pagination and parent/catalog drift.
+It is not an atomic fleet snapshot or a partial-run recovery mechanism, and does not check unowned name collisions.
+Those collision checks and a stopped-writer/prune-safe migration rehearsal remain release blockers.
