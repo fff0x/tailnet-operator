@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -60,6 +61,12 @@ func New(cfg *rest.Config, opts Options) (ctrl.Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create manager: %w", err)
 	}
+	// This constructor makes no cert-manager API request. Missing CRDs never block
+	// manager startup or external-Secret/L4 operation; issuer workflows check lazily.
+	certificateClient, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create optional certificate client: %w", err)
+	}
 	metrics, err := operatormetrics.Register(runtimemetrics.Registry)
 	if err != nil {
 		return nil, fmt.Errorf("register operator metrics: %w", err)
@@ -77,6 +84,7 @@ func New(cfg *rest.Config, opts Options) (ctrl.Manager, error) {
 		}).SetupWithManager},
 		{"TailnetIngress", (&controller.TailnetIngressReconciler{
 			Metrics: metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
+			Certificates: certificateClient, SecretReader: mgr.GetAPIReader(),
 			OperatorImage: opts.Image, AgentImagePullSecrets: append([]string(nil), opts.AgentImagePullSecrets...),
 		}).SetupWithManager},
 		{"TailnetDNS", (&controller.TailnetDNSReconciler{

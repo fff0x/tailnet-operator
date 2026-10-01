@@ -167,7 +167,7 @@ func (m *Metrics) delete(id identity) {
 
 func conditionType(s string) string {
 	switch s {
-	case "Ready", "ApiKeyValid", "ApiReachable", "PolicyMode", "HeadscaleCompatible", "SplitDNS", "PolicyRendered", "PolicyApplied", "TagKnown", "Registered", "ServiceConflict", "RoutesGranted", "TargetsReachable", "BackendsReachable", "PolicyGranted":
+	case "Ready", "ApiKeyValid", "ApiReachable", "PolicyMode", "HeadscaleCompatible", "SplitDNS", "PolicyRendered", "PolicyApplied", "TagKnown", "Registered", "ServiceConflict", "RoutesGranted", "TargetsReachable", "BackendsReachable", "PolicyGranted", "TLSReady", "TLSCleanup":
 		return s
 	default:
 		return "Other"
@@ -175,7 +175,12 @@ func conditionType(s string) string {
 }
 func reason(s string) string {
 	switch s {
-	case "Error", "Unreachable", "Unhealthy", "Reachable", "Rejected", "Valid", "CannotVerify", "Database", "File", "ProbeFailed", "Incompatible", "Compatible", "NoTailnet", "NoAPIKey", "InvalidTag", "InvalidHostname", "InvalidDNSName", "PolicyUnreadable", "Unknown", "PolicyPending", "TagUnknown", "Known", "AuthKey", "Apply", "ListNodes", "Conflict", "NotRegistered", "Registered", "AllGranted", "RoutesMissing", "AllReachable", "NotReady", "Ready", "PolicyDenied", "Granted", "BaseMissing", "BaseInvalid", "PolicyEmpty", "Rendered", "DryRun", "PolicyModeFile", "InSync", "PolicyRejected", "ApplyFailed", "Applied", "Present", "NotAdvertised", "NotApproved", "NoGrant":
+	case "Error", "Unreachable", "Unhealthy", "Reachable", "Rejected", "Valid", "CannotVerify", "Database", "File", "ProbeFailed", "Incompatible", "Compatible", "NoTailnet", "NoAPIKey", "InvalidTag", "InvalidHostname", "InvalidDNSName", "PolicyUnreadable", "Unknown", "PolicyPending", "TagUnknown", "Known", "AuthKey", "Apply", "ListNodes", "Conflict", "NotRegistered", "Registered", "AllGranted", "RoutesMissing", "AllReachable", "NotReady", "Ready", "PolicyDenied", "Granted", "BaseMissing", "BaseInvalid", "PolicyEmpty", "Rendered", "DryRun", "PolicyModeFile", "InSync", "PolicyRejected", "ApplyFailed", "Applied", "Present", "NotAdvertised", "NotApproved", "NoGrant",
+		"TLSReady", "TLSConfigurationMissing", "TLSConfigurationInvalid", "TLSInvalidDNSName",
+		"TLSSecretMissing", "TLSSecretInvalid", "TLSSecretConflict", "TLSSecretForbidden", "TLSSecretUnavailable",
+		"TLSCertificateInvalid", "TLSCertificateNotYetValid", "TLSCertificateExpired", "TLSCertificatePending",
+		"TLSCertificateUnavailable", "TLSCertificateForbidden", "TLSCertificateConflict", "CertManagerMissing",
+		"TLSProbePending", "TLSProbeFailed", "TLSProbeStale", "TLSConfigMismatch", "TLSCertificateMismatch":
 		return s
 	default:
 		return "Other"
