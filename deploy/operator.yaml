@@ -13,7 +13,8 @@ metadata:
   namespace: "tailnet-system"
 ---
 # Source: tailnet-operator/templates/rbac.yaml
-# Read CR specs and write only their status; never mutate CR specs.
+# Read CR specs and write status; never mutate CR specs.
+# Finalizers-update authorization permits existing blocking owner references.
 # TailnetIngress lives in any tenant namespace. TailnetEgress stays in the Role.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -32,6 +33,11 @@ rules:
   - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnetingresses/status]
     verbs: [get, update, patch]
+  # OwnerReferencesPermissionEnforcement checks this authorization, including
+  # when a child is created. Preserve foreground-GC behavior without CR spec writes.
+  - apiGroups: ["tailnet.this-is-fine.io"]
+    resources: [tailnets/finalizers, tailnetingresses/finalizers]
+    verbs: [update]
 ---
 # Source: tailnet-operator/templates/rbac.yaml
 # Tenant ingress children require cluster-wide workload access, including Secrets.
@@ -44,6 +50,11 @@ rules:
   - apiGroups: [""]
     resources: [secrets, configmaps]
     verbs: [get, list, watch, create, update, patch, delete]
+  # Optional issuer workflow uses direct namespaced requests, not an informer.
+  # No Issuer, ClusterIssuer, CertificateRequest or CRD-object access is required.
+  - apiGroups: ["cert-manager.io"]
+    resources: [certificates]
+    verbs: [get, create, patch, delete]
   # Scraped for /targets to report backend reachability.
   - apiGroups: [""]
     resources: [pods]
@@ -103,6 +114,9 @@ rules:
   - apiGroups: ["tailnet.this-is-fine.io"]
     resources: [tailnetegresses/status]
     verbs: [get, update, patch]
+  - apiGroups: ["tailnet.this-is-fine.io"]
+    resources: [tailnetegresses/finalizers]
+    verbs: [update]
   # Services are namespace-only. The other workload rules are explicit here for
   # egress, but already granted globally by -workloads (including these Secrets).
   - apiGroups: [""]
