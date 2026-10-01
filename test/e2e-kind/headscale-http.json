@@ -1,0 +1,36 @@
+{
+  "server_url": "https://fixture-headscale.tailnet-system.svc:8443",
+  "listen_addr": "0.0.0.0:8443",
+  "metrics_listen_addr": "127.0.0.1:9090",
+  "grpc_listen_addr": "127.0.0.1:50443",
+  "grpc_allow_insecure": false,
+  "tls_cert_path": "/headscale-tls/tls.crt",
+  "tls_key_path": "/headscale-tls/tls.key",
+  "tls_letsencrypt_hostname": "",
+  "noise": {"private_key_path": "/state/noise.key"},
+  "prefixes": {"v4": "100.64.0.0/10"},
+  "database": {"type": "sqlite", "sqlite": {"path": "/state/db.sqlite"}},
+  "unix_socket": "/state/headscale.sock",
+  "unix_socket_permission": "0600",
+  "policy": {"mode": "database"},
+  "derp": {
+    "server": {
+      "enabled": true,
+      "region_id": 999,
+      "region_code": "fixture",
+      "region_name": "Isolated fixture",
+      "verify_clients": true,
+      "stun_listen_addr": "0.0.0.0:3478",
+      "private_key_path": "/state/derp.key",
+      "automatically_add_embedded_derp_region": true,
+      "ipv4": "",
+      "ipv6": ""
+    },
+    "urls": [], "paths": [], "auto_update_enabled": false
+  },
+  "dns": {"magic_dns": true, "base_domain": "fixture.test", "override_local_dns": false, "nameservers": {"global": [], "split": {}}},
+  "disable_check_updates": true,
+  "logtail": {"enabled": false},
+  "node": {"routes": {"ha": {"probe_interval": "0s"}}},
+  "log": {"level": "warn", "format": "json"}
+}

@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -155,6 +156,11 @@ func (f *fixture) child(t *testing.T, input string, binary string, args ...strin
 // All callers select the already validated owned kubeconfig and context explicitly.
 func (f *fixture) command(ctx context.Context, input, binary string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
+	cleanup, err := configureCommandLifecycle(cmd)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + f.work, "TMPDIR=" + f.work, "LANG=C.UTF-8", "TS_NO_LOGS_NO_SUPPORT=1"}
 	for _, key := range []string{"HELM_CONFIG_HOME", "HELM_CACHE_HOME", "HELM_DATA_HOME", "HELM_PLUGINS"} {
 		cmd.Env = append(cmd.Env, key+"="+filepath.Join(f.work, key))
@@ -162,8 +168,39 @@ func (f *fixture) command(ctx context.Context, input, binary string, args ...str
 	cmd.Stdin = strings.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	err = cmd.Run()
+	nodeObserverFailure := binary == filepath.Join(f.work, "node-observation")
+	if err != nil && (nodeObserverFailure || (binary == "kubectl" && slices.Contains(args, "/netgate"))) {
+		prefix := "netgate-failure-*.private.log"
+		if nodeObserverFailure {
+			prefix = "node-observer-failure-*.private.log"
+		}
+		root := os.Getenv("E2E_KIND_NET_EVIDENCE")
+		if info, e := os.Lstat(root); e == nil && filepath.IsAbs(root) && info.IsDir() && info.Mode()&os.ModeSymlink == 0 && info.Mode().Perm()&0077 == 0 {
+			if file, e := os.CreateTemp(root, prefix); e == nil {
+				raw := stderr.Bytes()
+				if len(raw) > 16384 {
+					raw = raw[len(raw)-16384:]
+				}
+				_, _ = file.Write(raw)
+				_ = file.Close()
+			}
+		}
+	}
 	if err != nil && binary == "helm" {
+		// Keep bounded raw diagnostics only in the owned runner's private evidence.
+		// Public errors below still contain fixed categories, never parser input.
+		root := os.Getenv("E2E_KIND_NET_EVIDENCE")
+		if info, e := os.Lstat(root); e == nil && filepath.IsAbs(root) && info.IsDir() && info.Mode()&os.ModeSymlink == 0 && info.Mode().Perm()&0077 == 0 {
+			if file, e := os.CreateTemp(root, "helm-failure-*.private.log"); e == nil {
+				raw := stderr.Bytes()
+				if len(raw) > 65536 {
+					raw = raw[len(raw)-65536:]
+				}
+				_, _ = file.Write(raw)
+				_ = file.Close()
+			}
+		}
 		// Never return Helm's raw diagnostics: only fixed categories from stderr.
 		for _, category := range []string{"Kubernetes cluster unreachable", "no matches for kind", "already exists", "cannot re-use a name", "schema", "permission denied", "forbidden", "timed out", "failed to create", "failed to download", "unable to build kubernetes objects", "Internal error", "connection refused", "file name too long"} {
 			if bytes.Contains(stderr.Bytes(), []byte(category)) {
