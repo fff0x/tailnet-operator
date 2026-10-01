@@ -15,6 +15,8 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/yaml"
@@ -167,6 +169,48 @@ func TestMigration(t *testing.T) {
 			t.Fatal(message) // Deliberately do not render a diff containing Secret material.
 		}
 	}
+
+	t.Run("discovery-inventory", func(t *testing.T) {
+		old, next := parents(t, "inventory")
+		child := secret(t, old, "inventory")
+		discover, err := discovery.NewDiscoveryClientForConfig(cfg)
+		if err != nil {
+			t.Fatal("create isolated discovery client failed")
+		}
+		api, err := dynamic.NewForConfig(cfg)
+		if err != nil {
+			t.Fatal("create isolated dynamic client failed")
+		}
+		inventory, err := migration.PlanInventory(ctx, discover, api, "inventory")
+		if err != nil {
+			t.Fatalf("read-only inventory: %v", err)
+		}
+		pairs, children, resources := inventory.Counts()
+		if pairs != 1 || children != 1 || resources < 7 {
+			t.Fatal("inventory omitted parents, child or discovered resource types")
+		}
+		equal(t, get(t, old), old, "inventory changed legacy parent")
+		equal(t, get(t, next), next, "inventory changed destination parent")
+		equal(t, get(t, child), child, "inventory changed Secret")
+
+		// No operator label: ownership alone must expose this unsupported dependency.
+		pod := migrationObject("v1", "Pod", "unexpected", "inventory", map[string]any{
+			"containers": []any{map[string]any{"name": "unused", "image": "example.invalid/unused:synthetic"}},
+		})
+		migrationOwn(pod, old)
+		pod = create(t, pod)
+		inventory, err = migration.PlanInventory(ctx, discover, api, "inventory")
+		if inventory != nil || !errors.Is(err, migration.ErrInvalid) {
+			t.Fatal("unsupported direct dependent was omitted from discovery inventory")
+		}
+		equal(t, get(t, child), child, "rejected inventory changed Secret")
+		if err := c.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil {
+			t.Fatal("remove synthetic unsupported child failed")
+		}
+		if _, err := migration.PlanInventory(ctx, discover, api, "inventory"); err != nil {
+			t.Fatalf("inventory after removing unsupported dependency: %v", err)
+		}
+	})
 
 	t.Run("metadata-only-handover", func(t *testing.T) {
 		old, next := parents(t, "preservation")

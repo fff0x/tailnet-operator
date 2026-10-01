@@ -559,9 +559,9 @@ A tested rollback must restore compatible CRs, ownership, metadata and images wi
 An image downgrade or Git revert alone cannot undo this migration. Retain the shared ingress gateway until
 application migration has separate acceptance. The detailed handover and its rehearsal remain release prerequisites.
 
-#### Metadata-transfer primitive (development only)
+#### Inventory and metadata-transfer primitives (development only)
 
-`internal/migration` contains an explicit per-child handover primitive, not a live migration command.
+`internal/migration` contains a read-only inventory planner and an explicit per-child handover primitive, not a live migration command.
 It is not called by the controllers and does not loosen their ownership guards.
 It requires existing old/new CRs with matching names, namespaces and specs; an enabled destination policy must be `DryRun`.
 Permitted spec differences are the Tailnet policy transition to `DryRun` and admission adding an explicit ingress `mode: l4`.
@@ -577,9 +577,16 @@ Application tests the child's UID and resourceVersion, checks parent snapshots a
 A retry with the same in-memory plan accepts only its exact post-state, apart from resourceVersion and managedFields.
 Plans cannot be serialized for crash recovery. API failures stop the transfer without printing response bodies or credentials.
 
-This primitive does not discover the fleet, create CRs, delete resources, change specs or contact Headscale.
-It does not fence parent deletion or concurrent writers. Successful per-object patches cannot prove a safe fleet migration.
-A complete inventory, durable partial-run recovery, garbage-collection/rollback rehearsal and real connectivity checks remain required.
+`PlanInventory` discovers and lists every advertised listable top-level resource type across namespaces, without label selectors.
+It requires exact old/new CR pairs, including CRs without children, and rejects unsupported or ambiguous direct dependencies.
+Partial discovery, denied or incomplete lists, already-transferred children and changed parent/catalog snapshots stop the entire plan.
+Tailnet children and egress CRs must belong to the explicitly supplied operator namespace.
+The scan requires broad read permissions and reads Secret data into memory; it returns only an opaque plan with redacted formatting and counts.
+It does not report unowned name collisions or provide a cluster-wide atomic snapshot. Writers and pruning must already be stopped.
+
+Neither primitive creates CRs, deletes resources, changes specs or contacts Headscale.
+They do not fence parent deletion or concurrent writers. Successful per-object patches cannot prove a safe fleet migration.
+Unowned-resource collision checks, durable partial-run recovery, garbage-collection/rollback rehearsal and real connectivity checks remain required.
 Do not use the library as a shortcut around the stop-first procedure above.
 
 ### Helm and Flux CRD upgrades

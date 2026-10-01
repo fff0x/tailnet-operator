@@ -22,7 +22,8 @@ signed artifacts, broker-CI acceptance or production migration safety.
   not client trust or remote reachability.
 - Isolated API-server/Headscale tests, local kind installation/failover tests and an isolated HTTP ingress/renewal fixture.
 - Internal per-child API-group metadata-transfer primitive with ownership, expiry and role translation,
-  optimistic concurrency checks and isolated API-server regression tests. This is not a live migration command
+  optimistic concurrency checks and isolated API-server regression tests. A read-only discovery inventory rejects
+  unmatched parents, unsupported direct dependencies and incomplete scans. These are not a live migration command
   or automatic runtime adoption; full-fleet migration acceptance remains required.
 - Native CI test gates and post-publication image verification, vulnerability scanning,
   SPDX SBOM and provenance attestations. These require the upgraded broker and audit tools;

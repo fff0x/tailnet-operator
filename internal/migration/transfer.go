@@ -55,53 +55,12 @@ type operation struct {
 // tailnet is the destination Tailnet, including for transfers owned by ingress/egress CRs.
 // Planning performs no I/O and does not establish fleet completeness or writer quiescence.
 func PlanTransfer(child, oldParent, newParent, tailnet *unstructured.Unstructured) (*Transfer, error) {
-	if !live(oldParent) || !live(newParent) || !live(child) || !live(tailnet) {
+	if !live(child) || validateParents(oldParent, newParent, tailnet) != nil {
 		return nil, ErrInvalid
 	}
 	kind := oldParent.GetKind()
-	if oldParent.GetAPIVersion() != LegacyAPIVersion || newParent.GetAPIVersion() != APIVersion ||
-		newParent.GetKind() != kind || oldParent.GetName() != newParent.GetName() ||
-		oldParent.GetNamespace() != newParent.GetNamespace() || oldParent.GetUID() == newParent.GetUID() {
-		return nil, ErrInvalid
-	}
-	if kind != "Tailnet" && kind != "TailnetEgress" && kind != "TailnetIngress" {
-		return nil, ErrInvalid
-	}
-	if (kind == "Tailnet") != (newParent.GetNamespace() == "") || child.GetNamespace() == "" ||
-		(kind != "Tailnet" && child.GetNamespace() != newParent.GetNamespace()) {
-		return nil, ErrInvalid
-	}
-	if tailnet.GetAPIVersion() != APIVersion || tailnet.GetKind() != "Tailnet" || tailnet.GetNamespace() != "" || !dryRun(tailnet) {
-		return nil, ErrInvalid
-	}
-	if kind == "Tailnet" {
-		if !reflect.DeepEqual(tailnet.Object, newParent.Object) {
-			return nil, ErrInvalid
-		}
-	} else {
-		ref, _, _ := unstructured.NestedString(newParent.Object, "spec", "tailnetRef", "name")
-		if ref == "" || ref != tailnet.GetName() {
-			return nil, ErrInvalid
-		}
-	}
-	oldSpec, oldOK, oldErr := unstructured.NestedMap(oldParent.Object, "spec")
-	newSpec, newOK, newErr := unstructured.NestedMap(newParent.Object, "spec")
-	if !oldOK || !newOK || oldErr != nil || newErr != nil {
-		return nil, ErrInvalid
-	}
-	if kind == "Tailnet" {
-		// Missing/disabled policy must still match; only an enabled policy's mode may change.
-		if base, _, _ := unstructured.NestedString(oldSpec, "policy", "baseConfigMap"); base != "" {
-			if err := unstructured.SetNestedField(oldSpec, "DryRun", "policy", "mode"); err != nil {
-				return nil, ErrInvalid
-			}
-		}
-	}
-	if kind == "TailnetIngress" {
-		normalizeL4(oldSpec)
-		normalizeL4(newSpec)
-	}
-	if !reflect.DeepEqual(oldSpec, newSpec) || !supported(child, kind) || nestedLegacyMetadata(child) {
+	if child.GetNamespace() == "" || (kind != "Tailnet" && child.GetNamespace() != newParent.GetNamespace()) ||
+		!supported(child, kind) || nestedLegacyMetadata(child) {
 		return nil, ErrInvalid
 	}
 	owners := child.GetOwnerReferences()
@@ -234,6 +193,56 @@ func ApplyTransfer(ctx context.Context, c client.Client, transfer *Transfer, dry
 	}
 	if !sameContent(current, transfer.after) {
 		return ErrStale
+	}
+	return nil
+}
+
+func validateParents(oldParent, newParent, tailnet *unstructured.Unstructured) error {
+	if !live(oldParent) || !live(newParent) || !live(tailnet) {
+		return ErrInvalid
+	}
+	kind := oldParent.GetKind()
+	if oldParent.GetAPIVersion() != LegacyAPIVersion || newParent.GetAPIVersion() != APIVersion ||
+		newParent.GetKind() != kind || oldParent.GetName() != newParent.GetName() ||
+		oldParent.GetNamespace() != newParent.GetNamespace() || oldParent.GetUID() == newParent.GetUID() {
+		return ErrInvalid
+	}
+	if kind != "Tailnet" && kind != "TailnetEgress" && kind != "TailnetIngress" {
+		return ErrInvalid
+	}
+	if (kind == "Tailnet") != (newParent.GetNamespace() == "") ||
+		tailnet.GetAPIVersion() != APIVersion || tailnet.GetKind() != "Tailnet" || tailnet.GetNamespace() != "" || !dryRun(tailnet) {
+		return ErrInvalid
+	}
+	if kind == "Tailnet" {
+		if !reflect.DeepEqual(tailnet.Object, newParent.Object) {
+			return ErrInvalid
+		}
+	} else {
+		ref, _, _ := unstructured.NestedString(newParent.Object, "spec", "tailnetRef", "name")
+		if ref == "" || ref != tailnet.GetName() {
+			return ErrInvalid
+		}
+	}
+	oldSpec, oldOK, oldErr := unstructured.NestedMap(oldParent.Object, "spec")
+	newSpec, newOK, newErr := unstructured.NestedMap(newParent.Object, "spec")
+	if !oldOK || !newOK || oldErr != nil || newErr != nil {
+		return ErrInvalid
+	}
+	if kind == "Tailnet" {
+		// Missing/disabled policy must still match; only an enabled policy's mode may change.
+		if base, _, _ := unstructured.NestedString(oldSpec, "policy", "baseConfigMap"); base != "" {
+			if err := unstructured.SetNestedField(oldSpec, "DryRun", "policy", "mode"); err != nil {
+				return ErrInvalid
+			}
+		}
+	}
+	if kind == "TailnetIngress" {
+		normalizeL4(oldSpec)
+		normalizeL4(newSpec)
+	}
+	if !reflect.DeepEqual(oldSpec, newSpec) {
+		return ErrInvalid
 	}
 	return nil
 }
