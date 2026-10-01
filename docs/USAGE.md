@@ -37,7 +37,7 @@ domain `tailnet.example.internal`, tenant namespaces `billing-dev` / `billing`, 
 subnet router.*
 
 ```yaml
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: TailnetEgress
 metadata:
   name: billing-dev            # = tenant name by convention; one CR per tenant namespace
@@ -151,7 +151,7 @@ kubectl -n tailnet-system get svc -l app.kubernetes.io/instance=billing-dev
 port-forward.*
 
 ```yaml
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: TailnetIngress
 metadata:
   name: shop
@@ -226,7 +226,7 @@ The client must send `status.dnsName` as both SNI and Host; Host may include `:4
 Configure `Tailnet.spec.dns.ingressNameTemplate` and the site's DNS path before using this mode.
 
 ```yaml
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: TailnetIngress
 metadata: { name: shop, namespace: shop-dev }
 spec:

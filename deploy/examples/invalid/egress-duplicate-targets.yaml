@@ -1,6 +1,6 @@
 # ExpectedError: target names must be unique
 ---
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: TailnetEgress
 metadata:
   name: invalid

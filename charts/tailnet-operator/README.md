@@ -1,6 +1,6 @@
 # tailnet-operator
 
-Userspace TailnetEgress and TailnetIngress with an external Headscale server.
+Tsunaro — userspace TailnetEgress and TailnetIngress with an external Headscale server.
 
 ![Version: 0.3.1](https://img.shields.io/badge/Version-0.3.1-informational?style=flat-square)  ![AppVersion: v0.3.1](https://img.shields.io/badge/AppVersion-v0.3.1-informational?style=flat-square)
 
@@ -99,7 +99,7 @@ Do not downgrade to an older operator while HTTP CRs remain active.
 ## Leader election and availability
 
 Defaults are `replicas: 1` and `leaderElection.enabled: true` (`--leader-elect=true`).
-All five controllers run only on the elected replica. The Lease is named `tailnet-operator.this-is-fine.io`
+All five controllers run only on the elected replica. The Lease is named `tailnet-operator.tsunaro.io`
 in the operator namespace, independent of the release name. Election uses 15s lease duration,
 10s renew deadline and 2s retry period. Namespaced Lease RBAC is enabled with election.
 

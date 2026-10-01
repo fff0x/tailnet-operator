@@ -1,6 +1,6 @@
 # ExpectedError: name must be a DNS label of at most 40 characters
 ---
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: TailnetIngress
 metadata:
   name: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

@@ -1,4 +1,4 @@
-# tailnet-operator
+# Tsunaro — tailnet-operator
 
 [![CI](https://img.shields.io/endpoint?url=https%3A%2F%2Fci.this-is-fine.io%2Fbadge%2Ftailnet-operator.json)](https://ci.this-is-fine.io/)
 
@@ -47,7 +47,7 @@ Installation (Helm chart, Headscale key, CoreDNS; `kubectl apply -k deploy` alte
 [values and release prerequisites](charts/tailnet-operator/README.md). With that in place, three manifests:
 
 ```yaml
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: Tailnet
 metadata:
   name: corp
@@ -65,7 +65,7 @@ spec:
     routeApprovers: [tag:fabric]
     ingressSourceAllowlist: ["group:*"]
 ---
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: TailnetEgress
 metadata:
   name: billing-dev
@@ -77,7 +77,7 @@ spec:
     - { name: db-1,     address: 10.0.10.20, port: 1521 }
     - { name: api-corp, address: 10.0.30.10, port: 443, aliases: [api.corp.example] }
 ---
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: TailnetIngress
 metadata:
   name: shop
@@ -92,13 +92,13 @@ spec:
 ```sh
 kubectl get tailnet,tailnetegress,tailnetingress -A
 # NAME                             SERVER                   APIKEY   EXPIRES                COMPAT       POLICY    DNS            AGE
-# tailnet.tailnet.this-is-fine.io/corp   https://ts.example.com   True     2026-10-28T12:00:00Z   Compatible   Applied   CannotVerify   3d
+# tailnet.tsunaro.io/corp   https://ts.example.com   True     2026-10-28T12:00:00Z   Compatible   Applied   CannotVerify   3d
 #
 # NAMESPACE        NAME                                          TAG                      HOSTNAME             READY   AGE
-# tailnet-system   tailnetegress.tailnet.this-is-fine.io/billing-dev   tag:egress-billing-dev   egress-billing-dev   True    2m
+# tailnet-system   tailnetegress.tsunaro.io/billing-dev   tag:egress-billing-dev   egress-billing-dev   True    2m
 #
 # NAMESPACE   NAME                                    TAG                HOSTNAME       DNS                                             READY   AGE
-# shop-dev    tailnetingress.tailnet.this-is-fine.io/shop   tag:ingress-shop   ingress-shop   shop-shop-dev.prod-1.tailnet.example.internal   True    2m
+# shop-dev    tailnetingress.tsunaro.io/shop   tag:ingress-shop   ingress-shop   shop-shop-dev.prod-1.tailnet.example.internal   True    2m
 ```
 
 A pod in `billing-dev` dials `db-1.tailnet-system.svc:1521` or `https://api.corp.example`; a tailnet
