@@ -108,9 +108,10 @@ func main() {
 
 // running is one active listener and the cancel for its in-flight dials.
 type running struct {
-	t      target
-	ln     net.Listener
-	cancel context.CancelFunc
+	t          target
+	ln         net.Listener
+	cancel     context.CancelFunc
+	generation uint64
 }
 
 // stop closes the listener synchronously. A rename keeps the listen port (ports.Assign hands the
@@ -129,6 +130,9 @@ type forwarder struct {
 	mu      sync.Mutex
 	run     map[string]running
 	metrics *agentMetrics
+	// desired includes failed binds: absence from run must not make HTTP ready.
+	desired        []target
+	nextGeneration uint64
 	// changed gets a non-blocking signal whenever a listener was started; the prober drains it.
 	// nil (tests) is fine: the send falls through to default.
 	changed chan struct{}
@@ -153,10 +157,23 @@ func (f *forwarder) reload(ctx context.Context, path string) (pending int, err e
 	if err != nil {
 		return 0, err
 	}
+	for _, t := range desired {
+		if t.Mode == "http" && f.mode != "ingress" {
+			return 0, fmt.Errorf("HTTP targets require ingress mode")
+		}
+	}
 	start, stop := diffTargets(f.current(), desired)
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.desired = desired
+	// Removals and failed binds also invalidate readiness immediately.
+	defer func() {
+		select {
+		case f.changed <- struct{}{}:
+		default:
+		}
+	}()
 	for _, name := range stop {
 		if r, ok := f.run[name]; ok {
 			r.stop()
@@ -174,7 +191,8 @@ func (f *forwarder) reload(ctx context.Context, path string) (pending int, err e
 			log.Printf("target %s: listen :%d failed: %v", t.Name, t.ListenPort, err)
 			continue
 		}
-		f.run[t.Name] = running{t: t, ln: ln, cancel: lcancel}
+		f.nextGeneration++
+		f.run[t.Name] = running{t: t, ln: ln, cancel: lcancel, generation: f.nextGeneration}
 		log.Printf("target %s: :%d -> %s:%d", t.Name, t.ListenPort, t.Address, t.Port)
 		select {
 		case f.changed <- struct{}{}:
@@ -188,6 +206,12 @@ func (f *forwarder) reload(ctx context.Context, path string) (pending int, err e
 // port; ingress binds the same port on the tailnet (tsnet netstack) so peers dial it by node name.
 // The caller owns the returned listener and closes it via running.stop.
 func (f *forwarder) listen(ctx context.Context, t target) (net.Listener, error) {
+	if err := t.validateHTTP(); err != nil {
+		return nil, err
+	}
+	if t.Mode == "http" && f.mode != "ingress" {
+		return nil, fmt.Errorf("HTTP targets require ingress mode")
+	}
 	var ln net.Listener
 	var err error
 	if f.mode == "ingress" {
@@ -202,6 +226,15 @@ func (f *forwarder) listen(ctx context.Context, t target) (net.Listener, error) 
 	dial := metrics.wrapDial(f.dial)
 	if f.metrics != nil {
 		ln = &measuredListener{Listener: ln, metrics: metrics}
+	}
+	if t.Mode == "http" {
+		// TLS wraps this exact tsnet listener, never a listener in the pod network.
+		h, err := serveHTTPIngress(ctx, ln, t, dial)
+		if err != nil {
+			ln.Close()
+			return nil, err
+		}
+		return h, nil
 	}
 	go func() {
 		for {
