@@ -35,6 +35,11 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
   `Tailnet.spec.policy` the operator only *reads* the policy and reports what is missing; with it, the
   operator renders your base policy plus the CR-derived entries and writes the result to Headscale.
 
+Agent-side TLS termination is an **unreleased source feature**, separate from the L4 behavior above.
+Its local readiness checks do not prove remote tailnet reachability or client CA trust.
+See [HTTP source configuration and acceptance limits](docs/USAGE.md#61-agent-tls-termination-unreleased).
+Do not replace production gateway paths based on source tests alone.
+
 ## Quickstart
 
 Installation (Helm chart, Headscale key, CoreDNS; `kubectl apply -k deploy` alternative) is in
