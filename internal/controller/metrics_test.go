@@ -20,9 +20,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/headscale"
-	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/headscale"
+	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 )
 
 func gatheredValue(t *testing.T, reg *prometheus.Registry, name string) (float64, int) {

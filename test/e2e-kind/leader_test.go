@@ -21,11 +21,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/policy"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/policy"
 )
 
-const electionLease = "tailnet-operator.this-is-fine.io"
+const electionLease = "tailnet-operator.tsunaro.io"
 
 // Counter series are lazy: an unelected replica has no fixture series yet.
 // Missing is not a scrape failure; presence is required on the elected replica.

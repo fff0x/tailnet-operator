@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
+	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 )
 
 type observedStatusKey struct {

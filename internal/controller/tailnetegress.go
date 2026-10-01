@@ -20,13 +20,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/headscale"
-	"this-is-fine.io/tailnet-operator/internal/keys"
-	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
-	"this-is-fine.io/tailnet-operator/internal/naming"
-	"this-is-fine.io/tailnet-operator/internal/ports"
-	"this-is-fine.io/tailnet-operator/internal/routes"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/headscale"
+	"tsunaro.io/tailnet-operator/internal/keys"
+	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
+	"tsunaro.io/tailnet-operator/internal/naming"
+	"tsunaro.io/tailnet-operator/internal/ports"
+	"tsunaro.io/tailnet-operator/internal/routes"
 )
 
 // TailnetEgressReconciler turns one CR into an egress identity: a tag, a pre-auth key, an agent pod

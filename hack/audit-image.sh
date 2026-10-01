@@ -207,7 +207,7 @@ for arch in amd64 arm64; do
   # versions must still be present for each executable.
   jq -e '
     def text: type == "string" and length > 0;
-    def main: .Name == "this-is-fine.io/tailnet-operator";
+    def main: .Name == "tsunaro.io/tailnet-operator";
     .Results as $results | all("tailnet-agent", "tailnet-operator"; . as $binary |
       [$results[] | select(.Class == "lang-pkgs" and .Type == "gobinary" and
         (.Target | ltrimstr("/")) == $binary)] |
@@ -274,7 +274,7 @@ stage=provenance
 jq -n --arg source rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX --arg commit "$commit" --arg release "$release" \
   --arg builder "$CI_BUILDER_IMAGE" --arg crane "$crane_version" --slurpfile scans summaries.json '{
   buildDefinition: {
-    buildType: "https://this-is-fine.io/tailnet-operator/buildtypes/radicle-bundle/v1",
+    buildType: "https://tsunaro.io/tailnet-operator/buildtypes/radicle-bundle/v1",
     externalParameters: {source:$source,commit:$commit,releaseTag:$release},
     resolvedDependencies: [{uri:$source,digest:{gitCommit:$commit}}]
   },

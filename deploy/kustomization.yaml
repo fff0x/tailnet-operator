@@ -6,7 +6,7 @@ kind: Kustomization
 # Optional monitoring and NetworkPolicy resources are configured through Helm values.
 # Keep examples separate: this bundle never creates Tailnet CRs or credentials.
 resources:
-  - crds/tailnet.this-is-fine.io_tailnets.yaml
-  - crds/tailnet.this-is-fine.io_tailnetegresses.yaml
-  - crds/tailnet.this-is-fine.io_tailnetingresses.yaml
+  - crds/tsunaro.io_tailnets.yaml
+  - crds/tsunaro.io_tailnetegresses.yaml
+  - crds/tsunaro.io_tailnetingresses.yaml
   - operator.yaml

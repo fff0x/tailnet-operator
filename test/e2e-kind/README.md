@@ -38,7 +38,7 @@ The CLI independently reads the live policy over Headscale's Unix socket.
 API credentials are neither command arguments nor diagnostic output.
 
 `TestLeaderFailover` independently uses the same installer, then scales the operator Deployment to two replicas.
-It waits for two ready Pods and the `tailnet-operator.this-is-fine.io` Lease in `tailnet-system`.
+It waits for two ready Pods and the `tailnet-operator.tsunaro.io` Lease in `tailnet-system`.
 The complete `pod-name_UUID` holder identity must map to an observed Pod; prefixes and guessed identities are rejected.
 Both Pods are sampled through explicit, bounded Kubernetes Pod-proxy `/metrics` requests, not a load-balanced Service.
 The test normally deletes the leader, then immediately changes the base ACL destination to `192.0.2.2:443`.

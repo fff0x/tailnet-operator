@@ -22,9 +22,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/certificates"
-	"this-is-fine.io/tailnet-operator/test/internal/kindfixture"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/certificates"
+	"tsunaro.io/tailnet-operator/test/internal/kindfixture"
 )
 
 // The renderer deliberately rejects empty ACL/grant bases. This inert

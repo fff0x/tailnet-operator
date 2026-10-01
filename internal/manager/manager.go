@@ -20,13 +20,13 @@ import (
 	runtimemetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/controller"
-	operatormetrics "this-is-fine.io/tailnet-operator/internal/metrics"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/controller"
+	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 )
 
 // LeaderElectionID is shared by every replica, independent of Helm release names.
-const LeaderElectionID = "tailnet-operator.this-is-fine.io"
+const LeaderElectionID = "tailnet-operator.tsunaro.io"
 
 // Options contains runtime inputs, not environment lookups. Use "0" to disable test listeners.
 // The zero value disables election so isolated integration tests must opt in explicitly.

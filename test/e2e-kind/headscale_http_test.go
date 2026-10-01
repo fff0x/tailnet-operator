@@ -20,7 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"this-is-fine.io/tailnet-operator/test/internal/kindfixture"
+	"tsunaro.io/tailnet-operator/test/internal/kindfixture"
 )
 
 //go:embed headscale-http.json

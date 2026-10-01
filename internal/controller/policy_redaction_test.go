@@ -16,7 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
 func TestPolicyStatusRedactsDecoderInputs(t *testing.T) {

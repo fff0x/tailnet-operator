@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"this-is-fine.io/tailnet-operator/test/internal/netproof"
+	"tsunaro.io/tailnet-operator/test/internal/netproof"
 )
 
 // No defaults, environment fallbacks, or command execution. This gate runs

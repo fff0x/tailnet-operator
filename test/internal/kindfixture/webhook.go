@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-const OwnerLabel = "fixture.tailnet.this-is-fine.io/owner"
+const OwnerLabel = "fixture.tsunaro.io/owner"
 
 var ErrWebhook = errors.New("kind fixture: public CA or webhook configuration rejected")
 
@@ -41,7 +41,7 @@ func AgentCAWebhook(ns *corev1.Namespace, name string, ca []byte, now time.Time)
 	seconds, port := int32(3), int32(443)
 	path := "/mutate-agent"
 	return &admissionregv1.MutatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{OwnerLabel: string(ns.UID)}}, Webhooks: []admissionregv1.MutatingWebhook{{
-		Name: "agent-ca.fixture.tailnet.this-is-fine.io", AdmissionReviewVersions: []string{"v1"}, FailurePolicy: &fail, MatchPolicy: &exact, SideEffects: &none, ReinvocationPolicy: &never, TimeoutSeconds: &seconds,
+		Name: "agent-ca.fixture.tsunaro.io", AdmissionReviewVersions: []string{"v1"}, FailurePolicy: &fail, MatchPolicy: &exact, SideEffects: &none, ReinvocationPolicy: &never, TimeoutSeconds: &seconds,
 		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns.Name, OwnerLabel: string(ns.UID)}},
 		ObjectSelector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "tailnet-ingress", "app.kubernetes.io/managed-by": "tailnet-operator"}},
 		Rules:             []admissionregv1.RuleWithOperations{{Operations: []admissionregv1.OperationType{admissionregv1.Create}, Rule: admissionregv1.Rule{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"pods"}, Scope: &scope}}},

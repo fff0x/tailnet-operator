@@ -7,7 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
 func tlsResourceIngress() *tnv1.TailnetIngress {
@@ -58,7 +58,7 @@ func TestIngressTLSResources(t *testing.T) {
 	}
 	dep := ingressAgentDeploymentTLS(in, tn, in.Namespace, "operator:test", nil, plan)
 	pod := dep.Spec.Template.Spec
-	if dep.Spec.Template.Annotations["tailnet.this-is-fine.io/agent-config-protocol"] != "http-v1" || dep.Spec.Strategy.Type != "Recreate" {
+	if dep.Spec.Template.Annotations["tsunaro.io/agent-config-protocol"] != "http-v1" || dep.Spec.Strategy.Type != "Recreate" {
 		t.Fatal("HTTP protocol transition must retire legacy listeners")
 	}
 	plain := in.DeepCopy()

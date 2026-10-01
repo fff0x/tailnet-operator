@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"this-is-fine.io/tailnet-operator/internal/headscale"
+	"tsunaro.io/tailnet-operator/internal/headscale"
 )
 
 // approvals must approve exactly the advertised routes covered by an approver prefix that names one

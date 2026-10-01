@@ -19,7 +19,7 @@ import (
 
 	"golang.org/x/net/http2"
 
-	"this-is-fine.io/tailnet-operator/internal/certificates"
+	"tsunaro.io/tailnet-operator/internal/certificates"
 )
 
 func (t target) validateHTTP() error {

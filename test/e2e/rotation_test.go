@@ -13,8 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/headscale"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/headscale"
 )
 
 func getSecret(t *testing.T, ctx context.Context, name string) *corev1.Secret {
@@ -39,7 +39,7 @@ func TestKeyRotation(t *testing.T) {
 			old := getSecret(t, ctx, name+"-apikey")
 			oldKey := string(old.Data["apiKey"])
 			oldPrefix := headscale.PrefixOf(oldKey)
-			if oldKey != "" && old.Annotations["tailnet.this-is-fine.io/prefix"] == oldKey {
+			if oldKey != "" && old.Annotations["tsunaro.io/prefix"] == oldKey {
 				t.Fatal("working-key prefix annotation contains the complete API token")
 			}
 			if oldKey == "" || oldKey == hs.key {
@@ -48,7 +48,7 @@ func TestKeyRotation(t *testing.T) {
 			// Reproduce metadata written by older operators, then prove repair does not wait
 			// for rotation or alter the working credential. The normal Secret watch wakes it.
 			beforeRepair := old.DeepCopy()
-			old.Annotations["tailnet.this-is-fine.io/prefix"] = oldKey
+			old.Annotations["tsunaro.io/prefix"] = oldKey
 			if err := kube.Patch(ctx, old, client.MergeFrom(beforeRepair)); err != nil {
 				t.Fatal("could not prepare legacy prefix metadata")
 			}
@@ -57,7 +57,7 @@ func TestKeyRotation(t *testing.T) {
 				if string(repaired.Data["apiKey"]) != oldKey {
 					t.Fatal("metadata repair unexpectedly rotated the key")
 				}
-				return repaired.Annotations["tailnet.this-is-fine.io/prefix"] == oldPrefix
+				return repaired.Annotations["tsunaro.io/prefix"] == oldPrefix
 			})
 			oldClient := headscale.New(hs.url, oldKey)
 			if _, err := oldClient.ListAPIKeys(ctx); err != nil {
@@ -83,7 +83,7 @@ func TestKeyRotation(t *testing.T) {
 			})
 			newKey := string(replacement.Data["apiKey"])
 			newPrefix := headscale.PrefixOf(newKey)
-			if newKey == hs.key || newPrefix == oldPrefix || replacement.Annotations["tailnet.this-is-fine.io/prefix"] != newPrefix {
+			if newKey == hs.key || newPrefix == oldPrefix || replacement.Annotations["tsunaro.io/prefix"] != newPrefix {
 				t.Fatal("replacement key or prefix is inconsistent")
 			}
 			newClient := headscale.New(hs.url, newKey)
@@ -108,7 +108,7 @@ func TestKeyRotation(t *testing.T) {
 			}
 			waitCondition(t, ctx, name, "ApiKeyValid", metav1.ConditionTrue, "Valid")
 			waitCondition(t, ctx, name, "HeadscaleCompatible", metav1.ConditionTrue, "Compatible")
-			expires, err := time.Parse(time.RFC3339, replacement.Annotations["tailnet.this-is-fine.io/expires-at"])
+			expires, err := time.Parse(time.RFC3339, replacement.Annotations["tsunaro.io/expires-at"])
 			if err != nil || expires.Before(started.Add(4*time.Hour-time.Second)) || expires.After(time.Now().Add(4*time.Hour)) {
 				t.Fatal("replacement expiry does not follow the configured lifetime")
 			}

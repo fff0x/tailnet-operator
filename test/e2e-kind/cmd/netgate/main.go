@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-	"this-is-fine.io/tailnet-operator/test/internal/netproof"
+	"tsunaro.io/tailnet-operator/test/internal/netproof"
 )
 
 const (

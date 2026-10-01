@@ -46,11 +46,11 @@ The bindings table identifies the subjects receiving each role's rules.
 
 | Role | Role namespace | Effective namespace(s) | API groups | Resources | Verbs | Resource names | Non-resource URLs |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tailnet.this-is-fine.io` | `tailnetingresses/finalizers`, `tailnets/finalizers` | `update` | all names | — |
-| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tailnet.this-is-fine.io` | `tailnetingresses/status` | `get`, `patch`, `update` | all names | — |
-| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tailnet.this-is-fine.io` | `tailnetingresses` | `get`, `list`, `watch` | all names | — |
-| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tailnet.this-is-fine.io` | `tailnets/status` | `get`, `patch`, `update` | all names | — |
-| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tailnet.this-is-fine.io` | `tailnets` | `get`, `list`, `watch` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses/finalizers`, `tailnets/finalizers` | `update` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses/status` | `get`, `patch`, `update` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses` | `get`, `list`, `watch` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnets/status` | `get`, `patch`, `update` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnets` | `get`, `list`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `configmaps`, `secrets` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `events` | `create`, `patch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `pods` | `get`, `list`, `watch` | all names | — |
@@ -63,9 +63,9 @@ The bindings table identifies the subjects receiving each role's rules.
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `apps` | `deployments` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `coordination.k8s.io` | `leases` | `create`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `networking.k8s.io` | `networkpolicies` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
-| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tailnet.this-is-fine.io` | `tailnetegresses/finalizers` | `update` | all names | — |
-| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tailnet.this-is-fine.io` | `tailnetegresses/status` | `get`, `patch`, `update` | all names | — |
-| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tailnet.this-is-fine.io` | `tailnetegresses` | `get`, `list`, `watch` | all names | — |
+| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tsunaro.io` | `tailnetegresses/finalizers` | `update` | all names | — |
+| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tsunaro.io` | `tailnetegresses/status` | `get`, `patch`, `update` | all names | — |
+| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tsunaro.io` | `tailnetegresses` | `get`, `list`, `watch` | all names | — |
 
 ## Bindings
 

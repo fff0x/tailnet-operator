@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
-  name: tailnets.tailnet.this-is-fine.io
+  name: tailnets.tsunaro.io
 spec:
-  group: tailnet.this-is-fine.io
+  group: tsunaro.io
   names:
     kind: Tailnet
     listKind: TailnetList

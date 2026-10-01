@@ -21,21 +21,21 @@ kind: ClusterRole
 metadata:
   name: "tailnet-operator-crds"
 rules:
-  - apiGroups: ["tailnet.this-is-fine.io"]
+  - apiGroups: ["tsunaro.io"]
     resources: [tailnets]
     verbs: [get, list, watch]
-  - apiGroups: ["tailnet.this-is-fine.io"]
+  - apiGroups: ["tsunaro.io"]
     resources: [tailnets/status]
     verbs: [get, update, patch]
-  - apiGroups: ["tailnet.this-is-fine.io"]
+  - apiGroups: ["tsunaro.io"]
     resources: [tailnetingresses]
     verbs: [get, list, watch]
-  - apiGroups: ["tailnet.this-is-fine.io"]
+  - apiGroups: ["tsunaro.io"]
     resources: [tailnetingresses/status]
     verbs: [get, update, patch]
   # OwnerReferencesPermissionEnforcement checks this authorization, including
   # when a child is created. Preserve foreground-GC behavior without CR spec writes.
-  - apiGroups: ["tailnet.this-is-fine.io"]
+  - apiGroups: ["tsunaro.io"]
     resources: [tailnets/finalizers, tailnetingresses/finalizers]
     verbs: [update]
 ---
@@ -108,13 +108,13 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: [leases]
     verbs: [get, list, watch, create, update, patch]
-  - apiGroups: ["tailnet.this-is-fine.io"]
+  - apiGroups: ["tsunaro.io"]
     resources: [tailnetegresses]
     verbs: [get, list, watch]
-  - apiGroups: ["tailnet.this-is-fine.io"]
+  - apiGroups: ["tsunaro.io"]
     resources: [tailnetegresses/status]
     verbs: [get, update, patch]
-  - apiGroups: ["tailnet.this-is-fine.io"]
+  - apiGroups: ["tsunaro.io"]
     resources: [tailnetegresses/finalizers]
     verbs: [update]
   # Services are namespace-only. The other workload rules are explicit here for

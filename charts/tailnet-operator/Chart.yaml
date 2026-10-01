@@ -1,6 +1,6 @@
 apiVersion: v2
 name: tailnet-operator
-description: Userspace TailnetEgress and TailnetIngress with an external Headscale server.
+description: Tsunaro — userspace TailnetEgress and TailnetIngress with an external Headscale server.
 type: application
 version: 0.3.1
 appVersion: v0.3.1

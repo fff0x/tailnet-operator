@@ -35,8 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controllog "sigs.k8s.io/controller-runtime/pkg/log"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/internal/policy"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/policy"
 )
 
 const namespace = "tailnet-system"
@@ -316,7 +316,7 @@ func installFixture(t *testing.T) *fixture {
 	f.child(t, string(values), "helm", "install", "tailnet-operator", filepath.Join(root, "charts", "tailnet-operator"),
 		"--kubeconfig", f.config, "--kube-context", f.context, "--namespace", namespace, "--create-namespace", "--wait", "--timeout", "120s", "--values", "-")
 	for _, name := range []string{"tailnets", "tailnetegresses", "tailnetingresses"} {
-		f.kubectl(t, "", "wait", "--for=condition=Established", "--timeout=30s", "crd/"+name+".tailnet.this-is-fine.io")
+		f.kubectl(t, "", "wait", "--for=condition=Established", "--timeout=30s", "crd/"+name+".tsunaro.io")
 	}
 	var deployment appsv1.Deployment
 	if err := f.kube.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: "tailnet-operator"}, &deployment); err != nil || deployment.Status.ReadyReplicas != 1 || deployment.Status.ObservedGeneration != deployment.Generation {

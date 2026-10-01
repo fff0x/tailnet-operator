@@ -5,7 +5,7 @@ package e2ekind
 import (
 	"testing"
 
-	"this-is-fine.io/tailnet-operator/internal/policy"
+	"tsunaro.io/tailnet-operator/internal/policy"
 )
 
 func TestHTTPFixtureBasePolicyRendersBeforeIngress(t *testing.T) {

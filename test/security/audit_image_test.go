@@ -705,7 +705,7 @@ func auditMockTool(tool string, args []string) int {
 			return 0
 		}
 		packages := func() []any {
-			main := map[string]any{"Name": "this-is-fine.io/tailnet-operator"}
+			main := map[string]any{"Name": "tsunaro.io/tailnet-operator"}
 			if scenario == "main-empty-version" {
 				main["Version"] = ""
 			} else if scenario == "versioned-packages" {

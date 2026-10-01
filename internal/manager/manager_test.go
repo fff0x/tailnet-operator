@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
 func TestRuntimeOptions(t *testing.T) {
@@ -27,7 +27,7 @@ func TestRuntimeOptions(t *testing.T) {
 			tt.opts.HealthProbeBindAddress = "0"
 			scheme := runtime.NewScheme()
 			got := runtimeOptions(tt.opts, scheme)
-			if got.LeaderElection != tt.want || got.LeaderElectionID != "tailnet-operator.this-is-fine.io" || got.LeaderElectionNamespace != tt.opts.Namespace || got.LeaderElectionResourceLock != "leases" {
+			if got.LeaderElection != tt.want || got.LeaderElectionID != "tailnet-operator.tsunaro.io" || got.LeaderElectionNamespace != tt.opts.Namespace || got.LeaderElectionResourceLock != "leases" {
 				t.Fatal("unexpected leader-election configuration")
 			}
 			if got.LeaderElectionReleaseOnCancel {

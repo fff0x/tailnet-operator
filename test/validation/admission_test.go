@@ -22,8 +22,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/yaml"
 
-	tnv1 "this-is-fine.io/tailnet-operator/api/v1alpha1"
-	"this-is-fine.io/tailnet-operator/test/internal/isolation"
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/test/internal/isolation"
 )
 
 // TestAdmission runs a disposable API server, never the user's current kube-context. It validates
@@ -236,7 +236,7 @@ func TestAdmission(t *testing.T) {
 		// These cases validate only the API contract, not HTTP/TLS runtime support.
 		newIngress := func() *unstructured.Unstructured {
 			return &unstructured.Unstructured{Object: map[string]any{
-				"apiVersion": "tailnet.this-is-fine.io/v1alpha1", "kind": "TailnetIngress",
+				"apiVersion": "tsunaro.io/v1alpha1", "kind": "TailnetIngress",
 				"metadata": map[string]any{"name": "http-api", "namespace": "validation"},
 				"spec": map[string]any{
 					"tailnetRef": map[string]any{"name": "default-tls"},
@@ -530,7 +530,7 @@ func TestAdmission(t *testing.T) {
 	// All CR operations are dry-runs except the storage roundtrip tests, which clean up their CRs.
 	for _, kind := range []string{"TailnetList", "TailnetEgressList", "TailnetIngressList"} {
 		list := &unstructured.UnstructuredList{}
-		list.SetAPIVersion("tailnet.this-is-fine.io/v1alpha1")
+		list.SetAPIVersion("tsunaro.io/v1alpha1")
 		list.SetKind(kind)
 		if err := c.List(ctx, list); err != nil || len(list.Items) != 0 {
 			t.Errorf("dry-run invariant: kind=%s persisted=%d err=%v", kind, len(list.Items), err)
