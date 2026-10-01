@@ -182,8 +182,64 @@ From a laptop in `group:shop`: `psql -h shop-shop-dev.prod-1.tailnet.example.int
 
 *The shop frontend should be `https://shop-shop-dev.prod-1.tailnet.example.internal` for tailnet users.*
 
-TLS terminates at the shared gateway (it holds `*.prod-1.tailnet.example.internal`); the ingress gives
-the app its own tailnet identity and name:
+Two shapes: let the **agent terminate TLS** (one CR, a certificate, no gateway) or keep TLS at a
+**shared gateway** and use the ingress only for the per-app tailnet identity.
+
+### 6.1. Ingress: terminate TLS on the agent
+
+```yaml
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetIngress
+metadata: { name: shop, namespace: shop-dev }
+spec:
+  tailnetRef: { name: corp }
+  allowFrom: [group:shop]
+  tls:
+    issuerRef: { name: apps-ca, kind: Issuer }        # cert-manager; or secretName: shop-cert
+  exposes:
+    - name: web
+      mode: http
+      port: 443
+      backend: { service: shop-frontend, port: 8080 }
+```
+
+One `mode: http` expose per ingress, always on port 443; other exposes stay L4. The agent presents
+the certificate for `status.dnsName`, requires that name as SNI and Host, and forwards plain HTTP to
+the backend. `Tailnet.spec.dns.ingressNameTemplate` must be set.
+
+The certificate source is, in order of precedence: `spec.tls.secretName` (a `kubernetes.io/tls`
+Secret in the ingress namespace whose leaf covers `status.dnsName`, wildcard SAN allowed),
+`spec.tls.issuerRef` (`Issuer` or `ClusterIssuer`, group `cert-manager.io`; the operator creates
+the Certificate `<ingress>-tls` in the ingress namespace), or `Tailnet.spec.defaults.tls.issuerRef`.
+`secretName` and `issuerRef` are mutually exclusive; an invalid explicit source does not fall back
+to the default. The operator never adopts a foreign Certificate or overwrites an existing Secret.
+
+```sh
+kubectl -n shop-dev get tailnetingress shop -o jsonpath='{.status.tlsSecretName} {.status.tlsNotAfter}{"\n"}'
+curl -sI https://shop-shop-dev.prod-1.tailnet.example.internal | head -1      # from a tailnet device
+# HTTP/2 200
+```
+
+| Condition | Meaning | Fix |
+| --- | --- | --- |
+| `TLSReady=False/TLSSecretMissing`, `TLSSecretInvalid` | Secret absent, not `kubernetes.io/tls`, or key pair invalid | create or fix the Secret |
+| `TLSReady=False/TLSCertificatePending` | cert-manager has not issued yet | `kubectl -n shop-dev describe certificate shop-tls` |
+| `TLSReady=False/TLSCertificateMismatch`, `TLSInvalidDNSName` | leaf does not cover `status.dnsName` | fix the SANs or the ingress name template |
+| `TLSReady=False/TLSCertificateExpired`, `TLSCertificateNotYetValid` | validity interval | renew |
+| `TLSReady=False/TLSConfigMismatch`, `TLSProbeStale` | agent serves another configuration or has not reported within 30 s | wait one probe interval (≤ 20 s); check the agent pod |
+| `TLSReady=False/TLSCertificateConflict`, `TLSSecretConflict` | a foreign Certificate/Secret owns the target name | rename or remove the foreign object |
+
+`TLSReady` is a local proof: the agent completes an in-memory handshake with the served certificate
+and reaches the backend over TCP; `Ready` additionally requires registration. Certificate rotation
+is picked up within a minute without restarting the pod or dropping existing connections. A missing
+or invalid source withdraws the HTTP listener instead of serving plaintext. Switching an expose
+between `l4` and `http` changes the pod template and recreates the agent pod, which briefly
+interrupts the CR's other exposes; do not downgrade the operator below v0.4.0 while HTTP CRs exist.
+
+### 6.2. Ingress: HTTPS through a shared gateway
+
+TLS terminates at the gateway (it holds `*.prod-1.tailnet.example.internal`); the ingress gives the
+app its own tailnet identity and name:
 
 ```yaml
 kind: TailnetIngress
@@ -206,115 +262,8 @@ spec:
     - backendRefs: [{ name: shop-frontend, port: 8080 }]
 ```
 
-```sh
-curl -sI https://shop-shop-dev.prod-1.tailnet.example.internal | head -1      # from a tailnet device
-# HTTP/2 200
-```
-
-`allowFrom` needs `autogroup:*` in the admin allowlist for this to be generated; otherwise the admin
-adds the grant to the base policy.
-
-### 6.1. Agent TLS termination (unreleased)
-
-This source feature is not yet a released or operationally accepted deployment path.
-The preceding shared-gateway example remains L4 pass-through and keeps its existing behavior.
-Agent termination removes the gateway from this HTTP hop, not from site DNS or other traffic paths.
-
-An HTTP expose terminates TLS on the agent's tailnet listener, then forwards plain HTTP to a fixed backend.
-Only one HTTP expose is allowed per ingress, on port 443. Other exposes can remain L4.
-The client must send `status.dnsName` as both SNI and Host; Host may include `:443`.
-Configure `Tailnet.spec.dns.ingressNameTemplate` and the site's DNS path before using this mode.
-
-```yaml
-apiVersion: tsunaro.io/v1alpha1
-kind: TailnetIngress
-metadata: { name: shop, namespace: shop-dev }
-spec:
-  tailnetRef: { name: corp }
-  allowFrom: [group:shop]
-  tls: { secretName: shop-cert }
-  exposes:
-    - name: web
-      mode: http
-      port: 443
-      backend: { service: shop-frontend, port: 8080 }
-```
-
-`shop-cert` must be a `kubernetes.io/tls` Secret in `shop-dev`, with `tls.crt` and `tls.key`.
-Its valid server leaf must cover the exact `status.dnsName`; a matching wildcard SAN is allowed.
-The operator rejects CA leaves, unsupported critical extensions, invalid pairs and invalid validity intervals.
-A backend namespace override changes only the backend location, never the Secret or Issuer namespace.
-The backend must speak plain HTTP, even if its configured port is 443.
-
-TLS source precedence is:
-
-1. Explicit `spec.tls.secretName` in the ingress namespace.
-2. Explicit `spec.tls.issuerRef` on the ingress.
-3. `Tailnet.spec.defaults.tls.issuerRef`.
-
-An invalid explicit source never falls back to a default.
-`secretName` and `issuerRef` are mutually exclusive. L4-only ingresses cannot select or inherit TLS.
-For cert-manager issuance, replace the Secret selection with:
-
-```yaml
-  tls:
-    issuerRef: { name: apps-ca, kind: Issuer, group: cert-manager.io }
-```
-
-`Issuer` is namespace-local; `ClusterIssuer` is also supported. The only supported group is `cert-manager.io`.
-The operator creates `<ingress>-tls` as a Certificate and selects the same Secret name in the ingress namespace.
-The Certificate requests the rendered DNS name, and readiness requires its current generation to be Ready.
-External Secrets do not require cert-manager. A missing Certificate API does not block manager startup or L4 operation.
-
-The operator does not adopt foreign Certificates or overwrite an existing Secret during its creation-time collision check.
-That check is not atomic across objects; concurrent namespace writers remain a trust boundary.
-The controller records its managed source before creating a Certificate, so a failed final status write does not lose cleanup tracking.
-Rejected source changes retain that tracking for a later valid transition.
-Certificate patches and deletes use UID and resourceVersion guards. No Issuer or external Secret is deleted.
-`TLSCleanup` retains failed cleanup attempts across source changes until absence is confirmed.
-Selecting the generated Secret explicitly retains its existing Certificate instead of deleting active material.
-Chart RBAC grants Certificate get/create/patch/delete; it does not grant Issuer, CertificateRequest or CRD-object access.
-Managed CR finalizers-update grants authorize existing blocking owner references under OwnerReferencesPermissionEnforcement; they do not permit CR spec writes.
-The operator's existing broad Secret permissions still do not provide tenant isolation.
-
-**Readiness is a local component check, not a remote connectivity test.**
-
-The agent checks the bound server lifecycle, a real in-memory TLS handshake and the backend TCP connection.
-The handshake uses the serving TLS configuration and independently verifies the selected public leaf and DNS name.
-It does not open another network listener. It does not test tsnet Accept, DNS, ACLs, DERP or a remote route.
-The controller matches the agent's configuration identity and presented certificate digest to the current CR and Secret.
-`TLSReady` and `status.exposes[].tlsReady` report this local proof; `Ready` also requires registration and reachable backends.
-A local proof does not establish that an application trusts the certificate's issuer.
-
-HTTP probes run at most 20s apart under normal operation; proof older than 30s is invalidated by the agent.
-Disabling probes leaves HTTP unready. L4-only Pod readiness retains its existing Running-state check.
-A missing or invalid source withdraws the HTTP target rather than substituting a plaintext listener.
-The CR can remain unready while its Pod serves other L4 targets. Pod readiness alone is not HTTP acceptance.
-
-The Secret projection is read-only and contains only the certificate and private key, without `subPath` mounts.
-Certificate rotation does not change the target configuration or restart the listener or Pod.
-The serving cache lasts at most 1 minute; health checks reread the current projection and invalidate old proofs.
-Expiry is checked on every use, including cached material. Kubernetes projection delivery adds its own propagation delay.
-Existing upgraded connections can survive ordinary rotation. Invalid source withdrawal can close them.
-Do not rely on these checks for immediate session revocation.
-
-HTTP uses a versioned target document that old agents reject at startup rather than silently interpret as L4.
-Entering or leaving this protocol changes the Pod template and uses `Recreate` to retire previous listeners.
-This can interrupt other exposes on that Pod. The transition is not atomic; wait for the old Pod to terminate.
-An old overridden agent image cannot serve this document, including its L4 entries. Use a compatible image.
-Do not downgrade the operator while HTTP CRs remain active: older controllers do not understand this mode.
-First migrate each HTTP hop to a supported path and verify old Pod retirement and peer traffic.
-
-Before production adoption, test from an allowed, separate tailnet peer:
-
-- Resolve the published DNS name and verify TLS with the client's intended CA trust.
-- Check the expected application response, HTTP/2 and WebSocket behavior.
-- Rotate the certificate and confirm the peer sees the new leaf without a Pod restart.
-- Check expiry, missing material, wrong SNI/Host and denied-source behavior.
-- Retest existing L4 traffic and confirm removal stops the old listener.
-
-Do not use insecure certificate-verification flags for acceptance.
-A successful local handshake, online Headscale node or Running tsnet state cannot replace these peer checks.
+`allowFrom: [autogroup:member]` needs `autogroup:*` in the admin allowlist; otherwise the admin adds
+the grant to the base policy.
 
 ## 7. Policy: read what the operator generated
 
@@ -413,12 +362,10 @@ Ordinary half-life rotation uses the still-valid working key, not the bootstrap 
 
 ### Known CNI behavior: ICMP errors
 
-Kubernetes NetworkPolicy specifies TCP, UDP and SCTP behavior; [ICMP behavior is implementation-dependent](https://kubernetes.io/docs/concepts/services-networking/network-policies/#network-traffic-filtering).
-NFQUEUE-based policy implementations can discard node-generated ICMP errors associated with a shared, unconfirmed conntrack entry before userspace queue accounting.
-This can hide an unreachable-route response from a policy-selected agent and can also affect ICMP fragmentation-needed feedback.
-Do not infer successful connectivity from a timeout or assume that NetworkPolicy preserves path-MTU feedback.
-tsnet has its own MTU handling, but that does not guarantee ICMP delivery or replace validation on the deployed CNI.
-The Kind fixture's policy implementation is not a validation of Cilium behavior on production clusters.
+Kubernetes NetworkPolicy specifies TCP, UDP and SCTP; ICMP handling is up to the CNI, and some
+implementations drop node-generated ICMP errors (unreachable, fragmentation-needed) to
+policy-selected pods. A timeout on an agent is therefore not proof of reachability, and path-MTU
+discovery may not work; `Tailnet.spec.proxy.mtu` (default 1200) sidesteps the latter.
 
 ## 12. Operations: upgrade the operator
 
@@ -433,7 +380,7 @@ kubectl get tailnetegress,tailnetingress -A
 kubectl get tailnet corp          # COMPAT=Compatible; POLICY=Applied/InSync; DNS=CannotVerify (manual)
 ```
 
-Version-specific notes: [INSTALL §8](INSTALL.md#8-upgrade).
+Full procedure incl. CRD validation: [INSTALL §8](INSTALL.md#8-upgrade); breaking changes per version: [CHANGELOG](../CHANGELOG.md).
 
 ## 13. Validation
 
@@ -461,183 +408,115 @@ Kubernetes **1.31 or later** is required. The API server validates these rules b
 | Tailnet `policy.ingressSourceAllowlist` | Each entry begins with `group:`, `tag:` or `autogroup:` plus a non-empty suffix, or is an email-shaped pattern; at most 253 characters; bare `*` is rejected |
 | Tailnet `headscale.ref` | Reserved; only empty is accepted |
 
-The list limits bound CEL's duplicate checks. Validation does not prove that a backend Service,
-Headscale group or DNS delegation exists. Rendered ingress DNS names are also validated at reconcile
-time because their length depends on the ingress name and namespace. Each rendered label must fit
-63 characters, even when it combines `{name}` and `{namespace}`. When policy generation is off,
-`allowFrom` does not itself create a Headscale grant.
+Admission checks shape, not existence: a backend Service, Headscale group or DNS delegation may
+still be missing. Rendered ingress DNS names are validated at reconcile time (`InvalidDNSName`)
+because each label — including `{name}-{namespace}` — must fit 63 characters.
 
-### Test without changing a cluster
-
-Use upstream [controller-tools envtest binaries](https://github.com/kubernetes-sigs/controller-tools/releases)
-for Kubernetes 1.31 or later. Set `KUBEBUILDER_ASSETS` to the directory containing `kube-apiserver`,
-`etcd` and `kubectl`, then run:
+### Test without a cluster
 
 ```sh
-export KUBEBUILDER_ASSETS=/path/to/envtest/binaries
+export KUBEBUILDER_ASSETS=/path/to/envtest/binaries      # kube-apiserver, etcd, kubectl for Kubernetes >= 1.31
 task test-validation
 ```
 
-This starts a disposable local API server with the generated CRDs. It checks valid examples,
-boundaries and every file in `deploy/examples/invalid/`, including the shell checker below.
-It ignores the current kube-context and asserts that no test CR was persisted. The ordinary
-`task test` does not start envtest; admission tests require this explicit task.
-
-Before a CRD upgrade, also test a fresh export of the existing CRs:
+This starts a disposable API server with the generated CRDs and checks the valid examples, the
+boundaries and every file in `deploy/examples/invalid/`. Before a CRD upgrade, add a fresh export of
+the live CRs — each spec is submitted as a new object, so legacy fields cannot slip through ratcheting:
 
 ```sh
-live=$(mktemp)
-kubectl get tailnet,tailnetegress,tailnetingress -A -o json > "$live"
-LIVE_CR_FILE="$live" task test-validation
-rm -f -- "$live"
+live=$(mktemp); kubectl get tailnet,tailnetegress,tailnetingress -A -o json > "$live"
+LIVE_CR_FILE="$live" task test-validation; rm -f -- "$live"
 ```
 
-The export is read-only. The test submits each spec as a fresh dry-run object to the **local** API
-server, so unchanged legacy fields cannot bypass validation through ratcheting.
-
-### Check an installed schema
-
-After installing the new CRDs in a test cluster, run:
-
-```sh
-task validate-examples -- --context <test-context> --namespace <existing-namespace>
-```
-
-`hack/validate-examples.sh` uses server-side dry-run **create**, not apply/merge with an existing CR.
-Every negative fixture must fail with its `ExpectedError` header. Missing CRDs, authentication,
-RBAC and connection errors do not count as successful validation tests. Do not apply the invalid
-examples without dry-run.
+Against an installed schema in a test cluster, `task validate-examples -- --context <ctx> --namespace <ns>`
+runs the same negative fixtures as server-side dry-run creates.
 
 ## 14. Monitoring and alert runbooks
 
-The expanded metrics, bundled rules and dashboard are **unreleased source features**.
-Static checks do not establish live scraping, Grafana import or alert delivery.
-
-Monitoring is opt-in. Install the Prometheus Operator and Grafana Operator CRDs first.
-Select the monitor objects in your Prometheus configuration, then enable:
+Monitoring is opt-in. Install the Prometheus Operator (and, for the dashboard, Grafana Operator v5)
+CRDs first, then enable what you need:
 
 ```yaml
 monitoring:
-  serviceMonitor:
-    enabled: true
-  podMonitor:
-    enabled: true
-  rules:
-    enabled: true
-  dashboard:
-    enabled: true
-    kind: GrafanaDashboard
-    datasourceName: Prometheus
+  serviceMonitor: { enabled: true }          # operator metrics, TCP 8080
+  podMonitor: { enabled: true }              # agent /metrics, TCP 9080
+  rules: { enabled: true }                   # the 13 alerts below
+  dashboard: { enabled: true, kind: GrafanaDashboard, datasourceName: Prometheus }
 ```
 
-The default Grafana selector is `grafana.internal/instance: grafana`.
-Change the selector and datasource name to match your installation.
-Sidecar installations can use `kind: ConfigMap`; configure datasource input substitution separately.
-Nonempty `monitoring.rules.groups` and `monitoring.dashboard.json` replace the bundled content without merging.
-
-Operator metrics use TCP/8080; agents expose `/metrics` on TCP/9080 alongside health endpoints.
-A PodMonitor does **not** grant network access. Agent NetworkPolicies permit the operator namespace;
-an external monitoring namespace needs a site-owned ingress rule for TCP/9080.
-Operator isolation also requires explicit `networkPolicy.metricsPeers`.
-Do not expose these endpoints publicly. Verify discovery, scrape health and network access before enabling notifications.
+The default Grafana selector is `grafana.internal/instance: grafana`; `kind: ConfigMap` serves
+sidecar setups. Non-empty `rules.groups` or `dashboard.json` replace the bundled content.
+A PodMonitor grants no network access: agent NetworkPolicies allow TCP 9080 from the operator
+namespace only, so a scraper elsewhere needs its own additive policy; with operator isolation on,
+list it in `networkPolicy.metricsPeers`.
 
 ### Metric interpretation
 
-- `tailnet_resource_ready` exists only for a current-generation Ready condition. Tailnet has no synthetic Ready metric.
-- `tailnet_resource_condition` marks active reasons with 1 and previous reasons with 0.
-  Its value does not mean condition status True; inspect the type and reason.
-- Target/expose metrics describe persisted, current-generation observations. Missing data is not proof of health.
-- `tailnet_policy_pending` is 1 only for Apply mode with a nonempty rendered hash different from the applied hash.
-  An unchanged InSync policy remains healthy regardless of its application timestamp's age.
-- `tailnet_node_online` follows a successful Headscale list matching the resource's tag and hostname.
-  Zero means no online match; absence means no current observation. This is not a data-plane probe.
-- `tailnet_node_last_seen_seconds` is a **Unix timestamp**, not elapsed seconds. Unknown timestamps are omitted.
-  Compute age with `time() - tailnet_node_last_seen_seconds`.
-- Headscale request labels contain bounded method/path templates and numeric status codes.
-  Code 0 means no HTTP response. HTTP success does not prove successful response decoding.
-- Route replay counts successfully added routes, not requests. One batch can increment it multiple times.
-- Agent active connections count accepted TCP connections, including TLS handshakes.
-  Bytes are counted during reads/writes, including encrypted bytes in TLS pass-through traffic.
-  Agent TLS termination remains an unreleased source feature; encrypted handshake bytes are included.
-  In-memory TLS component probes do not count as accepted tailnet connections.
-  Dial histograms include failed dials and backend probes.
-  Removed listeners clear their series.
-- Agent labels contain configured target/expose names. Namespace/pod identity comes from scrape metadata;
-  peers and IP addresses are never labels.
-- `tailnetegress_routes_missing` and `tailnetingress_backends_unreachable` remain compatible through v0.4.x.
-  Prefer per-target/per-expose families. The other five legacy families remain supported.
+- `tailnet_resource_ready` exists only for the current-generation `Ready` condition; `Tailnet` has none.
+- `tailnet_resource_condition` is 1 for the active reason and 0 for previously seen reasons — read type and reason, not the value as a boolean.
+- `tailnet_policy_pending` is 1 only in `Apply` mode while `renderedHash != appliedHash`; an old `appliedAt` alone is healthy.
+- `tailnet_node_online` reflects the last successful Headscale node list; `tailnet_node_last_seen_seconds` is a Unix timestamp (`time() - …` for the age).
+- Headscale request labels are bounded method/path templates and status codes; code 0 means no HTTP response.
+- `tailnet_route_approvals_replayed_total` counts routes, so one batch can add several.
+- Agent families (`tailnet_agent_connections_active`, `_bytes_total`, `_dial_duration_seconds`) carry target/expose names, never peers or IPs; bytes include TLS bytes.
+- `tailnetegress_routes_missing` and `tailnetingress_backends_unreachable` stay through v0.4.x; prefer `tailnet_egress_target_state` and `tailnet_ingress_expose_reachable`.
 
 ### Monitoring: operator down
 
-`TailnetOperatorDown` means no discovered endpoint is healthy for five minutes.
-Check pods, Service endpoints, ServiceMonitor selection and scraper permissions before assuming the controller has stopped.
-A metrics outage does not prove a forwarding outage: existing agents may still serve traffic.
+`TailnetOperatorDown`: no healthy operator endpoint for 5 min. Check pods, Service endpoints and
+ServiceMonitor selection. Agents keep forwarding while the operator is down.
 
 ### Monitoring: reconcile errors
 
-`TailnetReconcileErrors` indicates more than 0.1 controller-runtime errors per second, sustained for ten minutes.
-Read resource conditions and bounded operator logs. Check API availability, RBAC and resource conflicts.
-Keep credentials and raw diagnostic bodies out of shared reports.
+`TailnetReconcileErrors`: more than 0.1 controller-runtime errors/s for 10 min. Read the CR conditions
+and the operator log; usual causes are API availability, RBAC and resource conflicts.
 
 ### Monitoring: Headscale API
 
-`TailnetHeadscaleAPIErrors` detects more than five percent HTTP 5xx responses over ten minutes, sustained for ten minutes.
-Check Headscale readiness, database connectivity and preflight conditions.
-Transport failures use code 0, not HTTP 5xx; inspect them separately.
-Do not rotate working credentials merely because a server or database is unavailable.
+`TailnetHeadscaleAPIErrors`: more than 5 % HTTP 5xx over 10 min. Check Headscale readiness and its
+database. Transport failures are code 0, not 5xx. Do not rotate keys because a server is down.
 
 ### Monitoring: resource not ready
 
-`TailnetResourceNotReady` includes the active Ready reason after ten minutes.
-Use the diagnosis tables above to distinguish policy, registration, routing and backend failures.
-Tailnet has no Ready condition; inspect its capability, key and policy conditions separately.
+`TailnetResourceNotReady`: a CR has been `Ready=False` for 10 min; the alert carries the active
+reason. Use the tables in §1, §5 and §6 to distinguish policy, registration, routing, TLS and backend
+failures.
 
 ### Monitoring: policy stale
 
-`TailnetPolicyStale` means a desired policy has remained unapplied for fifteen minutes.
-Compare hashes and inspect PolicyRendered, PolicyApplied and PolicyMode.
-Resolve rejection or connectivity failures. Do not force a write solely because AppliedAt is old.
-Intentional DryRun does not trigger this alert.
+`TailnetPolicyStale`: `tailnet_policy_pending == 1` for 15 min. Compare the hashes and read
+`PolicyRendered`, `PolicyApplied`, `PolicyMode`. `DryRun` does not trigger it.
 
 ### Monitoring: policy rejected
 
-`TailnetPolicyRejected` means Headscale rejected a rendered document for five minutes.
-Inspect the generated ConfigMap privately and validate assertions with administrator tooling.
-Correct the Git source rather than replacing the live policy manually.
-Rejection retains the previous live policy; check which access that policy still permits.
+`TailnetPolicyRejected`: Headscale refused the render for 5 min; the previous policy is still live.
+Inspect the rendered ConfigMap, fix the base in Git. Never replace the live policy by hand.
 
 ### Monitoring: policy apply errors
 
-`TailnetPolicyApplyErrors` detects at least six failed writes in thirty minutes.
-Distinguish rejection from transport/database failure using conditions and API metrics.
-The controller retries with backoff. Do not bypass validation or repeatedly restart it to force retries.
+`TailnetPolicyApplyErrors`: at least 6 failed writes in 30 min. Distinguish rejection from
+transport/database failure via the conditions and the API metrics; the controller retries with
+backoff on its own.
 
 ### Monitoring: policy generated drop
 
-`TailnetPolicyGeneratedDrop` detects a drop greater than half against the preceding ten-minute maximum.
-Compare Git changes, deletions and selectors with generated tags, grants and routes.
-Intended deletions can trigger it. Confirm intent before restoring removed access.
+`TailnetPolicyGeneratedDrop`: generated tags, grants or routes fell by more than half within 10 min.
+Compare with recent CR deletions and base changes; intended deletions trigger it too.
 
 ### Monitoring: route replays
 
-`TailnetApprovalReplays` detects more than three successfully added routes in an hour.
-Check Headscale restarts, advertised routes and approval persistence.
-It counts routes, so one legitimate batch can trigger it. Verify approvers before changing authorization.
+`TailnetApprovalReplays`: more than three routes re-approved within an hour. Check Headscale
+restarts and advertised routes; a legitimate batch after a router restart can trigger it.
 
 ### Monitoring: key expiry
 
-`TailnetAPIKeyExpiringSoon` uses a seven-day warning threshold by default.
-`TailnetEgressAuthKeyExpiringSoon` and `TailnetIngressAuthKeyExpiringSoon` use one day. Each condition must persist for five minutes.
-Configure `monitoring.rules.apiKeyExpiryWarningSeconds` and `authKeyExpiryWarningSeconds` for shorter lifetimes;
-keep thresholds below half the configured lifetime to avoid alerts during normal rotation.
-Check rotation, API availability and expiry metadata without printing Secret data.
-A working key can rotate after bootstrap expiry; bootstrap recovery still needs a valid administrator credential.
-Pre-auth key expiry does not itself terminate a registered node.
-If old metadata or logs exposed a token, metadata repair is insufficient: revoke or rotate that credential.
+`TailnetAPIKeyExpiringSoon` (7 days) and `Tailnet{Egress,Ingress}AuthKeyExpiringSoon` (1 day):
+a key is close to expiry and has not been rotated. Check `ApiKeyValid` and the agent Secrets; tune
+`monitoring.rules.apiKeyExpiryWarningSeconds` / `authKeyExpiryWarningSeconds` to below half the
+lifetime for short lifetimes. Bootstrap recovery needs a valid bootstrap key.
 
 ### Monitoring: node offline
 
-`TailnetNodeOffline` means a successful node-list observation has shown no online match for five minutes.
-Check the agent pod, registration and Headscale connectivity before changing policy.
-Offline nodes differ from unreachable backends or failed scrapes.
-Last-seen timestamps can be unavailable; never interpret their absence as an epoch-zero outage.
+`TailnetNodeOffline`: Headscale has listed the node as offline for 5 min. Check the agent pod,
+registration and control-server connectivity. Offline is not the same as a failed scrape or an
+unreachable backend.
