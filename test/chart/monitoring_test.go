@@ -137,7 +137,7 @@ func TestMonitoringExpiryThresholds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := render(t, "monitoring:\n  rules:\n    enabled: true\n"+tc.values)
 			spec := decode[struct {
-				Spec ruleSpec `json:\"spec\"`
+				Spec ruleSpec `json:"spec"`
 			}](t, m.one(t, "PrometheusRule")).Spec
 			want := map[string]string{
 				"TailnetAPIKeyExpiringSoon":         fmt.Sprintf("tailnet_apikey_expires_seconds < %d", tc.api),
