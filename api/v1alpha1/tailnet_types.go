@@ -107,6 +107,9 @@ type HeadscaleSpec struct {
 
 // TailnetSpec describes a control server and how the operator authenticates to it.
 type TailnetSpec struct {
+	// Defaults inherited by ingress resources that do not select their own TLS source.
+	// +optional
+	Defaults TailnetDefaults `json:"defaults,omitempty"`
 	// Login/control URL, becomes the agent's ControlURL (e.g. https://ts.example.com).
 	// +kubebuilder:validation:Pattern=`^https://`
 	// +kubebuilder:validation:MinLength=9

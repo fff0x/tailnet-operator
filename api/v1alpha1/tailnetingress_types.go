@@ -5,8 +5,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Backend is the in-cluster Service an Expose forwards to. Same namespace as the CR on purpose: a
-// tenant exposes exactly what lives in its own namespace, never a Service it does not own.
+// Backend is the in-cluster Service an Expose forwards to. Namespace defaults to the CR's
+// namespace; an explicit namespace can reference a shared gateway or another backend.
 type Backend struct {
 	// Service name; in the CR's own namespace unless Namespace is set.
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
@@ -25,7 +25,14 @@ type Backend struct {
 }
 
 // Expose publishes one in-cluster backend on the tailnet node, listening on Port.
+// +kubebuilder:validation:XValidation:rule="!has(self.mode) || self.mode != 'http' || self.port == 443",message="HTTP exposes must listen on port 443"
 type Expose struct {
+	// Listener mode. Omitted means L4 forwarding; HTTP requests TLS termination.
+	// +optional
+	// +kubebuilder:default=l4
+	// +kubebuilder:validation:Enum=l4;http
+	// +kubebuilder:validation:MaxLength=4
+	Mode string `json:"mode,omitempty"`
 	// DNS label; identifies the expose in status and in the agent config.
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// +kubebuilder:validation:MaxLength=63
@@ -37,9 +44,9 @@ type Expose struct {
 	Backend Backend `json:"backend"`
 }
 
-// TailnetIngressSpec exposes in-cluster L4 services on the tailnet as one tsnet node. It is the
-// mirror of TailnetEgress: instead of dialling out over the tailnet, the node listens on the tailnet
-// and forwards inbound connections to in-cluster backends.
+// TailnetIngressSpec exposes in-cluster services through one tsnet node. L4 forwards TCP;
+// HTTP mode terminates TLS and proxies plain HTTP to the selected backend.
+// +kubebuilder:validation:XValidation:rule="!has(self.tls) || self.exposes.exists(e, has(e.mode) && e.mode == 'http')",message="tls requires an HTTP expose"
 type TailnetIngressSpec struct {
 	TailnetRef TailnetRef `json:"tailnetRef"`
 	// Explicit tailnet tag. Empty → rendered from the Tailnet's ingressTagTemplate. The tag is the
@@ -53,7 +60,11 @@ type TailnetIngressSpec struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +kubebuilder:validation:XValidation:rule="self.all(e, self.exists_one(other, other.port == e.port))",message="expose ports must be unique"
 	// +kubebuilder:validation:XValidation:rule="self.all(e, self.exists_one(other, other.name == e.name))",message="expose names must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.filter(e, has(e.mode) && e.mode == 'http').size() <= 1",message="at most one HTTP expose is allowed"
 	Exposes []Expose `json:"exposes"`
+	// TLS source for the HTTP expose. An omitted or empty source may use Tailnet defaults.
+	// +optional
+	TLS *IngressTLS `json:"tls,omitempty"`
 	// Peers allowed to reach this node (policy grant src), e.g. ["group:team-a"]. Only used when
 	// the Tailnet generates policy; every entry must match Tailnet.spec.policy.ingressSourceAllowlist,
 	// otherwise the CR gets PolicyDenied and no grant is written.
@@ -77,6 +88,10 @@ type ExposeStatus struct {
 	Backend string `json:"backend"`
 	// True once the agent last dialled the backend successfully.
 	Reachable bool `json:"reachable"`
+	// Local TLS component readiness for an HTTP expose; omitted for L4.
+	// This does not establish remote tailnet reachability or client CA trust.
+	// +optional
+	TLSReady *bool `json:"tlsReady,omitempty"`
 	// Empty when reachable; "Unreachable" otherwise.
 	// +optional
 	Reason string `json:"reason,omitempty"`
@@ -104,7 +119,13 @@ type TailnetIngressStatus struct {
 	AuthKeyExpiresAt *metav1.Time `json:"authKeyExpiresAt,omitempty"`
 	// +optional
 	Exposes []ExposeStatus `json:"exposes,omitempty"`
-	// Conditions: TagKnown, Registered, BackendsReachable, Ready.
+	// Name of the effective TLS Secret in the ingress namespace; never certificate or key content.
+	// +optional
+	TLSSecretName string `json:"tlsSecretName,omitempty"`
+	// Expiry of the serving TLS certificate.
+	// +optional
+	TLSNotAfter *metav1.Time `json:"tlsNotAfter,omitempty"`
+	// Conditions: TagKnown, Registered, BackendsReachable, TLSReady, Ready.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
