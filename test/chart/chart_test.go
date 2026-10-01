@@ -312,7 +312,7 @@ func TestDefaultRender(t *testing.T) {
 
 // Pin the pre-split permission set, not merely a list of expected grants. This
 // rejects both widening and accidental narrowing, even if rules are regrouped.
-func TestRBACPrivilegesPreserved(t *testing.T) {
+func TestRBACPrivilegesExact(t *testing.T) {
 	read := "get list watch"
 	status := "get update patch"
 	write := "get list watch create update patch delete"
@@ -330,7 +330,8 @@ func TestRBACPrivilegesPreserved(t *testing.T) {
 			local := append([]grant{}, workloads...)
 			local = append(local, grant{"", "services", write},
 				grant{"tailnet.this-is-fine.io", "tailnetegresses", read},
-				grant{"tailnet.this-is-fine.io", "tailnetegresses/status", status})
+				grant{"tailnet.this-is-fine.io", "tailnetegresses/status", status},
+				grant{"tailnet.this-is-fine.io", "tailnetegresses/finalizers", "update"})
 			if election {
 				local = append(local, grant{"coordination.k8s.io", "leases", "get list watch create update patch"})
 			}
@@ -338,9 +339,11 @@ func TestRBACPrivilegesPreserved(t *testing.T) {
 				"ClusterRole/tailnet-operator-crds": {
 					{"tailnet.this-is-fine.io", "tailnets tailnetingresses", read},
 					{"tailnet.this-is-fine.io", "tailnets/status tailnetingresses/status", status},
+					{"tailnet.this-is-fine.io", "tailnets/finalizers tailnetingresses/finalizers", "update"},
 				},
-				"ClusterRole/tailnet-operator-workloads": workloads,
-				"Role/tailnet-operator":                  local,
+				"ClusterRole/tailnet-operator-workloads": append(append([]grant{}, workloads...),
+					grant{"cert-manager.io", "certificates", "get create patch delete"}),
+				"Role/tailnet-operator": local,
 			}
 			roles, bindings := map[string]bool{}, map[string]bool{}
 			for _, obj := range m {

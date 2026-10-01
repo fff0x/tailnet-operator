@@ -7,14 +7,22 @@ namespace `tailnet-system`. It does not query a cluster or include grants from o
 
 ## Scope and limitations
 
-- `tailnet-operator-crds` reads Tailnet and TailnetIngress specs and writes only their status subresources.
+- `tailnet-operator-crds` reads Tailnet and TailnetIngress specs and writes their status subresources.
   It grants no CR spec writes and no CustomResourceDefinition-object reads.
 - `tailnet-operator-workloads` manages tenant ingress children across all namespaces.
   Secrets, ConfigMaps, Deployments, NetworkPolicies and Events remain broadly accessible;
-  Pods are read-only. Splitting roles changes no effective permissions and provides no tenant isolation.
+  Pods are read-only. The role split itself does not reduce permissions or provide tenant isolation.
+- The HTTP issuer workflow adds Certificate get/create/patch/delete in all namespaces.
+  The controller uses namespace-local requests without an informer. No Issuer, ClusterIssuer,
+  CertificateRequest or CustomResourceDefinition-object access is granted.
 - The namespaced Role keeps TailnetEgress reads/status writes, Services and leader-election Leases in the operator namespace.
   The egress cache remains namespace-scoped. No cluster-wide egress or Service access is granted.
-- The Role repeats workload permissions, including working Secret access, for the egress path.
+- Finalizers-update authorization for each managed CR permits existing blocking owner references when
+  OwnerReferencesPermissionEnforcement is enabled. Tailnet/TailnetIngress grants are cluster-wide;
+  TailnetEgress remains operator-namespaced. No create/update/patch/delete grant on CR specs is added.
+  This is an intentional permission addition, not a role-splitting-only change.
+- The Role repeats the original workload permissions, including working Secret access, for the egress path.
+  It does not repeat the additional Certificate grant.
   The workload ClusterRole already grants those permissions globally; the Role does not narrow them.
 - Lease verbs remain get, list, watch, create, update and patch. Disabling leader election removes that rule.
 - Default permissions contain no wildcards, non-resource URLs or resource-name restrictions.
@@ -38,6 +46,7 @@ The bindings table identifies the subjects receiving each role's rules.
 
 | Role | Role namespace | Effective namespace(s) | API groups | Resources | Verbs | Resource names | Non-resource URLs |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tailnet.this-is-fine.io` | `tailnetingresses/finalizers`, `tailnets/finalizers` | `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tailnet.this-is-fine.io` | `tailnetingresses/status` | `get`, `patch`, `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tailnet.this-is-fine.io` | `tailnetingresses` | `get`, `list`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tailnet.this-is-fine.io` | `tailnets/status` | `get`, `patch`, `update` | all names | — |
@@ -46,6 +55,7 @@ The bindings table identifies the subjects receiving each role's rules.
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `events` | `create`, `patch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `pods` | `get`, `list`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `apps` | `deployments` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
+| `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `cert-manager.io` | `certificates` | `create`, `delete`, `get`, `patch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `networking.k8s.io` | `networkpolicies` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `configmaps`, `secrets`, `services` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `events` | `create`, `patch` | all names | — |
@@ -53,6 +63,7 @@ The bindings table identifies the subjects receiving each role's rules.
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `apps` | `deployments` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `coordination.k8s.io` | `leases` | `create`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `networking.k8s.io` | `networkpolicies` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
+| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tailnet.this-is-fine.io` | `tailnetegresses/finalizers` | `update` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tailnet.this-is-fine.io` | `tailnetegresses/status` | `get`, `patch`, `update` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tailnet.this-is-fine.io` | `tailnetegresses` | `get`, `list`, `watch` | all names | — |
 
