@@ -1,0 +1,13 @@
+# Only source-built static fixture binaries; never an operator or tsnet image.
+FROM scratch
+COPY --chmod=0755 netprobe /netprobe
+COPY --chmod=0755 hold /hold
+COPY --chmod=0755 fixture /fixture
+COPY --chmod=0755 projection /projection
+COPY --chmod=0755 netgate /netgate
+COPY --chmod=0755 controlprobe /controlprobe
+COPY --chmod=0755 headscale /headscale
+COPY --chmod=0755 httppeer /httppeer
+USER 65532:65532
+ENTRYPOINT ["/hold"]
+CMD ["--fixture=p1.8-layered-isolation"]

@@ -1,0 +1,37 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "owned-netproof",
+    "namespace": "default",
+    "labels": {"netproof-owner": "@CLUSTER@"}
+  },
+  "spec": {
+    "automountServiceAccountToken": false,
+    "restartPolicy": "Never",
+    "terminationGracePeriodSeconds": 1,
+    "enableServiceLinks": false,
+    "securityContext": {
+      "runAsNonRoot": true,
+      "runAsUser": 65532,
+      "runAsGroup": 65532,
+      "seccompProfile": {"type": "RuntimeDefault"}
+    },
+    "containers": [{
+      "name": "holder",
+      "image": "@IMAGE@",
+      "imagePullPolicy": "Never",
+      "command": ["/hold"],
+      "args": ["--fixture=p1.8-layered-isolation"],
+      "securityContext": {
+        "allowPrivilegeEscalation": false,
+        "readOnlyRootFilesystem": true,
+        "capabilities": {"drop": ["ALL"]}
+      },
+      "resources": {
+        "requests": {"cpu": "10m", "memory": "8Mi"},
+        "limits": {"cpu": "100m", "memory": "32Mi"}
+      }
+    }]
+  }
+}
