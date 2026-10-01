@@ -6,7 +6,7 @@
 # from allowFrom (every entry must match the admin's ingressSourceAllowlist, else PolicyDenied);
 # without it an admin declares tag and grant by hand and the operator only reports what is missing.
 # A tailnet peer then dials e.g. ingress-shop:5432 (node MagicDNS name + the expose port).
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: TailnetIngress
 metadata:
   name: shop

@@ -147,7 +147,7 @@ helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator 
   --version 0.3.1 --namespace tailnet-system --create-namespace
 
 kubectl apply -f - <<'EOF'
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: Tailnet
 metadata:
   name: corp
@@ -177,7 +177,7 @@ kubectl describe tailnet corp
 The `POLICY` column stays empty until [§7](#7-operator-owned-policy).
 Run **one operator installation per cluster**, with all replicas in the same operator namespace.
 The chart defaults to leader election and rolling updates; `replicas > 1` requires election and adds a PDB.
-The shared Lease is `tailnet-operator.this-is-fine.io`; changing namespace creates a different election domain.
+The shared Lease is `tailnet-operator.tsunaro.io`; changing namespace creates a different election domain.
 Election does not fence in-flight external writes. Isolated failover passed; production handover and soak acceptance remain open.
 With election disabled, only one replica and `Recreate` are allowed.
 
@@ -233,7 +233,7 @@ A Git revert alone does not reverse Helm ownership or CRD schema changes; never 
 3. Apply the CR **in the operator namespace** (egress CRs are admin resources):
 
 ```yaml
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: TailnetEgress
 metadata:
   name: billing-dev
@@ -342,7 +342,7 @@ the last file stays valid — the data path never depends on it.
 A `TailnetIngress` is a plain-TCP node on the tailnet. For TCP services nothing else is needed:
 
 ```yaml
-apiVersion: tailnet.this-is-fine.io/v1alpha1
+apiVersion: tsunaro.io/v1alpha1
 kind: TailnetIngress
 metadata:
   name: shop
@@ -537,6 +537,7 @@ Version notes:
 
 | Version | Notes |
 | --- | --- |
+| v0.4.0 (unreleased) | **Breaking:** API group `tailnet.this-is-fine.io` → `tsunaro.io` (CRDs, RBAC, every CR, annotation keys `tsunaro.io/<key>`, leader Lease `tailnet-operator.tsunaro.io`). No conversion: apply the new CRDs + RBAC + image, re-create the CRs under the new group, then delete the old CRDs — children are owned by the CR and are rebuilt, agents re-register (1–2 min). With Flux: one commit that swaps CRD files, RBAC, image and CRs; prune removes the old CRDs. The chart name, image repository and binary names are unchanged. |
 | v0.3.0 | Headscale capability preflight (`HeadscaleCompatible`, `PolicyMode`, `SplitDNS`), `COMPAT`/`DNS` columns and optional `headscale.version` hint. Proven file mode blocks policy writes and route-approval replay; empty-database bootstrap remains possible. **Breaking admission changes:** Kubernetes ≥1.31, required `spec`/non-empty ingress `allowFrom`, stricter names/addresses/templates, unique target/expose names and expose ports, bounded lists and lifetimes. Validate existing CRs against the new schema before upgrading; see [all validation rules](USAGE.md#13-validation). |
 | v0.2.0 | **Breaking:** API group `tailnet.fr0st.dev` → `tailnet.this-is-fine.io` (CRDs, RBAC, every CR). No conversion: apply new CRDs + RBAC + image and re-create the CRs under the new group, then delete the old CRDs — children (agents, keys, Services, hosts ConfigMap) are owned by the CR and are rebuilt, agents re-register (1–2 min). With Flux: one commit that swaps CRD files, RBAC, image and CRs; prune removes the old CRDs; tenant CRs follow in a second commit. Also: `ProbeFailed` reason, `status.tag` (TAG column), ingress DNS names publish IPv4 only, MagicDNS name restored to the hostname after a duplicate, transient `ApplyFailed` logged at info, status-only updates no longer re-trigger reconciles. |
 | v0.2.1 | Missed `autoApprovers` approvals are replayed after every successful policy write/InSync check (routes inside a rendered approver prefix, router tag listed there; events `RoutesApproved`) — no manual `approve-routes` needed. Rejected/failed policy writes are retried with backoff (15 s doubling to 5 min) instead of a fixed 5 min — a base test whose `src` is momentarily unresolvable (node re-registering) heals in seconds. `tailnet_policy_apply_errors_total` therefore counts more increments per outage: raise `TailnetPolicyApplyErrors` to `>= 6` per 30 min (a permanent failure gets there in ~8 min, a hiccup under 4 min stays at ≤ 5). |
