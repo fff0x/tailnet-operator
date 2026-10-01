@@ -214,6 +214,108 @@ curl -sI https://shop-shop-dev.prod-1.tailnet.example.internal | head -1      # 
 `allowFrom` needs `autogroup:*` in the admin allowlist for this to be generated; otherwise the admin
 adds the grant to the base policy.
 
+### 6.1. Agent TLS termination (unreleased)
+
+This source feature is not yet a released or operationally accepted deployment path.
+The preceding shared-gateway example remains L4 pass-through and keeps its existing behavior.
+Agent termination removes the gateway from this HTTP hop, not from site DNS or other traffic paths.
+
+An HTTP expose terminates TLS on the agent's tailnet listener, then forwards plain HTTP to a fixed backend.
+Only one HTTP expose is allowed per ingress, on port 443. Other exposes can remain L4.
+The client must send `status.dnsName` as both SNI and Host; Host may include `:443`.
+Configure `Tailnet.spec.dns.ingressNameTemplate` and the site's DNS path before using this mode.
+
+```yaml
+apiVersion: tailnet.this-is-fine.io/v1alpha1
+kind: TailnetIngress
+metadata: { name: shop, namespace: shop-dev }
+spec:
+  tailnetRef: { name: corp }
+  allowFrom: [group:shop]
+  tls: { secretName: shop-cert }
+  exposes:
+    - name: web
+      mode: http
+      port: 443
+      backend: { service: shop-frontend, port: 8080 }
+```
+
+`shop-cert` must be a `kubernetes.io/tls` Secret in `shop-dev`, with `tls.crt` and `tls.key`.
+Its valid server leaf must cover the exact `status.dnsName`; a matching wildcard SAN is allowed.
+The operator rejects CA leaves, unsupported critical extensions, invalid pairs and invalid validity intervals.
+A backend namespace override changes only the backend location, never the Secret or Issuer namespace.
+The backend must speak plain HTTP, even if its configured port is 443.
+
+TLS source precedence is:
+
+1. Explicit `spec.tls.secretName` in the ingress namespace.
+2. Explicit `spec.tls.issuerRef` on the ingress.
+3. `Tailnet.spec.defaults.tls.issuerRef`.
+
+An invalid explicit source never falls back to a default.
+`secretName` and `issuerRef` are mutually exclusive. L4-only ingresses cannot select or inherit TLS.
+For cert-manager issuance, replace the Secret selection with:
+
+```yaml
+  tls:
+    issuerRef: { name: apps-ca, kind: Issuer, group: cert-manager.io }
+```
+
+`Issuer` is namespace-local; `ClusterIssuer` is also supported. The only supported group is `cert-manager.io`.
+The operator creates `<ingress>-tls` as a Certificate and selects the same Secret name in the ingress namespace.
+The Certificate requests the rendered DNS name, and readiness requires its current generation to be Ready.
+External Secrets do not require cert-manager. A missing Certificate API does not block manager startup or L4 operation.
+
+The operator does not adopt foreign Certificates or overwrite an existing Secret during its creation-time collision check.
+That check is not atomic across objects; concurrent namespace writers remain a trust boundary.
+The controller records its managed source before creating a Certificate, so a failed final status write does not lose cleanup tracking.
+Rejected source changes retain that tracking for a later valid transition.
+Certificate patches and deletes use UID and resourceVersion guards. No Issuer or external Secret is deleted.
+`TLSCleanup` retains failed cleanup attempts across source changes until absence is confirmed.
+Selecting the generated Secret explicitly retains its existing Certificate instead of deleting active material.
+Chart RBAC grants Certificate get/create/patch/delete; it does not grant Issuer, CertificateRequest or CRD-object access.
+Managed CR finalizers-update grants authorize existing blocking owner references under OwnerReferencesPermissionEnforcement; they do not permit CR spec writes.
+The operator's existing broad Secret permissions still do not provide tenant isolation.
+
+**Readiness is a local component check, not a remote connectivity test.**
+
+The agent checks the bound server lifecycle, a real in-memory TLS handshake and the backend TCP connection.
+The handshake uses the serving TLS configuration and independently verifies the selected public leaf and DNS name.
+It does not open another network listener. It does not test tsnet Accept, DNS, ACLs, DERP or a remote route.
+The controller matches the agent's configuration identity and presented certificate digest to the current CR and Secret.
+`TLSReady` and `status.exposes[].tlsReady` report this local proof; `Ready` also requires registration and reachable backends.
+A local proof does not establish that an application trusts the certificate's issuer.
+
+HTTP probes run at most 20s apart under normal operation; proof older than 30s is invalidated by the agent.
+Disabling probes leaves HTTP unready. L4-only Pod readiness retains its existing Running-state check.
+A missing or invalid source withdraws the HTTP target rather than substituting a plaintext listener.
+The CR can remain unready while its Pod serves other L4 targets. Pod readiness alone is not HTTP acceptance.
+
+The Secret projection is read-only and contains only the certificate and private key, without `subPath` mounts.
+Certificate rotation does not change the target configuration or restart the listener or Pod.
+The serving cache lasts at most 1 minute; health checks reread the current projection and invalidate old proofs.
+Expiry is checked on every use, including cached material. Kubernetes projection delivery adds its own propagation delay.
+Existing upgraded connections can survive ordinary rotation. Invalid source withdrawal can close them.
+Do not rely on these checks for immediate session revocation.
+
+HTTP uses a versioned target document that old agents reject at startup rather than silently interpret as L4.
+Entering or leaving this protocol changes the Pod template and uses `Recreate` to retire previous listeners.
+This can interrupt other exposes on that Pod. The transition is not atomic; wait for the old Pod to terminate.
+An old overridden agent image cannot serve this document, including its L4 entries. Use a compatible image.
+Do not downgrade the operator while HTTP CRs remain active: older controllers do not understand this mode.
+First migrate each HTTP hop to a supported path and verify old Pod retirement and peer traffic.
+
+Before production adoption, test from an allowed, separate tailnet peer:
+
+- Resolve the published DNS name and verify TLS with the client's intended CA trust.
+- Check the expected application response, HTTP/2 and WebSocket behavior.
+- Rotate the certificate and confirm the peer sees the new leaf without a Pod restart.
+- Check expiry, missing material, wrong SNI/Host and denied-source behavior.
+- Retest existing L4 traffic and confirm removal stops the old listener.
+
+Do not use insecure certificate-verification flags for acceptance.
+A successful local handshake, online Headscale node or Running tsnet state cannot replace these peer checks.
+
 ## 7. Policy: read what the operator generated
 
 *Before trusting Apply mode, or when a grant seems missing.*
@@ -309,6 +411,15 @@ Ordinary half-life rotation uses the still-valid working key, not the bootstrap 
 | What did the policy render? | `kubectl get tailnet corp -o jsonpath='{.status.policy}'`, ConfigMap `headscale-policy-rendered` | hashes equal, `PolicyApplied=True` |
 | Who is on the tailnet? | `kubectl -n tailnet-system exec deploy/headscale -- headscale nodes list` | egress/ingress nodes online with their tags |
 
+### Known CNI behavior: ICMP errors
+
+Kubernetes NetworkPolicy specifies TCP, UDP and SCTP behavior; [ICMP behavior is implementation-dependent](https://kubernetes.io/docs/concepts/services-networking/network-policies/#network-traffic-filtering).
+NFQUEUE-based policy implementations can discard node-generated ICMP errors associated with a shared, unconfirmed conntrack entry before userspace queue accounting.
+This can hide an unreachable-route response from a policy-selected agent and can also affect ICMP fragmentation-needed feedback.
+Do not infer successful connectivity from a timeout or assume that NetworkPolicy preserves path-MTU feedback.
+tsnet has its own MTU handling, but that does not guarantee ICMP delivery or replace validation on the deployed CNI.
+The Kind fixture's policy implementation is not a validation of Cilium behavior on production clusters.
+
 ## 12. Operations: upgrade the operator
 
 1. Apply the new CRDs, then the Deployment (image + `OPERATOR_IMAGE`).
@@ -339,6 +450,9 @@ Kubernetes **1.31 or later** is required. The API server validates these rules b
 | Ingress `allowFrom` | Required, at least one non-empty entry; the Tailnet's source allowlist still controls authorization |
 | Ingress `exposes` | 1–50 entries; unique names and listener ports; names are DNS labels of at most 63 characters |
 | Backend `service` / optional `namespace` | DNS labels of at most 63 characters |
+| Ingress expose `mode` | Omitted or `l4` preserves TCP forwarding; `http` requires port 443 and at most one HTTP expose |
+| Ingress `tls` | HTTP only; optional Secret name or Issuer reference, never both; an omitted source may inherit the Tailnet issuer default |
+| TLS issuer reference | Name is a DNS subdomain of at most 253 characters; kind defaults to `Issuer`, also permits `ClusterIssuer`; group defaults to and must equal `cert-manager.io` |
 | Target, listener and backend ports | 1–65535 |
 | Tailnet `server` | HTTPS scheme and a non-empty remainder; `apiUrl` may still use an internal HTTP endpoint |
 | Tailnet `apiKeyLifetime` | Valid duration ≥1h, at most 32 characters; omitted defaults to 720h |
@@ -444,7 +558,9 @@ Do not expose these endpoints publicly. Verify discovery, scrape health and netw
 - Route replay counts successfully added routes, not requests. One batch can increment it multiple times.
 - Agent active connections count accepted TCP connections, including TLS handshakes.
   Bytes are counted during reads/writes, including encrypted bytes in TLS pass-through traffic.
-  HTTP ingress is not yet supported. Dial histograms include failed dials and probes.
+  Agent TLS termination remains an unreleased source feature; encrypted handshake bytes are included.
+  In-memory TLS component probes do not count as accepted tailnet connections.
+  Dial histograms include failed dials and backend probes.
   Removed listeners clear their series.
 - Agent labels contain configured target/expose names. Namespace/pod identity comes from scrape metadata;
   peers and IP addresses are never labels.

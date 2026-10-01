@@ -71,17 +71,30 @@ The not-ready alert joins readiness and its active reason within each exporter b
 Overlapping replica observations can show multiple failing reasons; a stale Ready=1 observation cannot hide a failure.
 The dashboard documents which namespace/tailnet/kind filters apply to each family. Agent namespace/pod identity comes
 from scrape metadata; egress pod namespace can differ from the CR namespace. TCP byte counts cover accepted connections,
-including encrypted bytes in TLS pass-through traffic. HTTP ingress is not yet supported. Dial latency includes health probes. No IPs, user identities, credentials or hashes
-are metric labels. `tailnet_node_online` is 1 for a matching online node and 0 when a successful Headscale node listing
+including encrypted bytes in TLS pass-through traffic. Agent TLS termination remains an unreleased source feature.
+In-memory TLS component probes do not count as accepted tailnet connections. Dial latency includes backend health probes.
+No IPs, user identities, credentials or hashes are metric labels. `tailnet_node_online` is 1 for a matching online node and 0 when a successful Headscale node listing
 finds none online. An absent series means no current observation, not an offline node.
 `TailnetNodeOffline` requires an observed zero for 5 minutes. `tailnet_node_last_seen_seconds` is the selected Headscale
 node's Unix timestamp; it is absent when unknown. The dashboard displays its age in seconds, not the raw timestamp.
-Both families use resource kind/namespace/name, without a tailnet label. Gateway and TLS telemetry remain explicit placeholders.
+Both families use resource kind/namespace/name, without a tailnet label. Dedicated gateway and TLS dashboard panels remain explicit placeholders.
 
 This is source-prepared monitoring, not a live-tested or Grafana-exported dashboard. `hack/dashboard-lint.sh` uses only jq
 to validate JSON and every nested panel description, including rows. Local chart tests use real promtool when installed
 to parse alert/dashboard queries and evaluate rule fixtures. Kubeconform skips missing monitoring/Grafana schemas;
 render tests do not prove CRD admission, scrape discovery, NetworkPolicy reachability or successful Grafana import.
+
+## HTTP TLS termination (unreleased)
+
+Agent termination uses an HTTP expose on port 443 and a namespace-local TLS Secret or cert-manager issuer reference.
+The optional issuer workflow grants Certificate get/create/patch/delete, without Issuer, CertificateRequest or CRD-object access.
+Managed CR finalizers-update grants authorize existing blocking owner references when OwnerReferencesPermissionEnforcement is enabled.
+TailnetEgress authorization stays operator-namespaced; Tailnet/TailnetIngress authorization is cluster-wide. These grants do not permit CR spec writes.
+Missing cert-manager CRDs do not block startup or external-Secret/L4 operation.
+Local TLS readiness does not prove remote tailnet reachability or client CA trust.
+Peer traffic, certificate rotation and real deployment acceptance remain required.
+See [HTTP usage and transition limits](../../docs/USAGE.md#61-agent-tls-termination-unreleased) before enabling this source feature.
+Do not downgrade to an older operator while HTTP CRs remain active.
 
 ## Leader election and availability
 

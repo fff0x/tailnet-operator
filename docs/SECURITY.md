@@ -67,6 +67,9 @@ Kubernetes RBAC cannot restrict `create` with `resourceNames`; the authorization
 The chart separates CR and workload ClusterRoles while keeping egress CR and Service permissions in the operator namespace.
 Working Secret permissions also appear in the namespaced Role, but the workload ClusterRole already grants broader Secret access.
 Do not interpret this split as reduced effective privilege or tenant isolation.
+The unreleased issuer workflow adds Certificate get/create/patch/delete, without Issuer, CertificateRequest or CRD-object access.
+Managed CR finalizers-update authorization permits existing blocking owner references when `OwnerReferencesPermissionEnforcement` is enabled.
+Tailnet/TailnetIngress authorization is cluster-wide; TailnetEgress stays operator-namespaced. No CR spec-write grant is added.
 Run `task rbac-check` to compare the default rendering with the [permission reference](reference/rbac.md).
 Review an intended permission change before `task rbac-gen` updates that reference.
 Audit installed bindings and CR write grants separately before enabling tenant access.
@@ -77,6 +80,9 @@ Generated agent policies restrict inbound access; they do not establish a comple
 Userspace tsnet needs control/DERP connectivity and outbound UDP. CNI Service-DNAT and DNS behavior require local verification.
 Agent status and metrics share TCP 9080. A scraper outside the operator namespace needs an explicit site-owned allowance.
 Do not expose `/status`, `/targets` or `/metrics` publicly.
+Controller `/targets` and `/status` requests use literal Pod IPs, without ambient proxies or redirects.
+They have a 5-second timeout, 64 KiB header limit and 1 MiB decoded-body limit; failures return bounded diagnostics.
+These limits do not authenticate an agent or remove the namespace-writer trust boundary.
 
 Leader election limits normal concurrent reconciliation. It is **not external-write fencing** against pauses,
 network partitions or in-flight requests. Do not overlap electing and non-electing operators during migration.
