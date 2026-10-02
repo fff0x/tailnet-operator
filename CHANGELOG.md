@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-02
+
 ### Added
 
 - Verified HTTP-ingress backend TLS through `exposes[].backend.tls`: explicit SNI/verification name
