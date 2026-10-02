@@ -139,6 +139,15 @@ Use your secret manager instead of `--from-literal` in production. From a source
 the OCI URL with `./charts/tailnet-operator` and set `image.repository`/`image.tag` to your build.
 Helm 3 and 4 are supported; the default chart needs no Prometheus or Grafana CRDs.
 
+To inspect or vendor the chart, pull it and verify its signature first (see
+[SECURITY.md](SECURITY.md) for the key and the Radicle release record):
+
+```sh
+helm pull oci://oci.this-is-fine.io/charts/tailnet-operator --version 0.5.0
+cosign verify --key deploy/cosign.pub --insecure-ignore-tlog \
+  oci.this-is-fine.io/charts/tailnet-operator:0.5.0
+```
+
 ```sh
 kubectl -n tailnet-system rollout status deploy/tailnet-operator
 kubectl get tailnet corp
