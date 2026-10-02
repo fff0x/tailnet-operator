@@ -76,6 +76,24 @@ to deploy, not a tag:
 cosign verify --key deploy/cosign.pub --insecure-ignore-tlog docker.io/ff0x/tailnet-operator@sha256:<digest>
 cosign verify-attestation --key deploy/cosign.pub --insecure-ignore-tlog --type spdxjson \
   docker.io/ff0x/tailnet-operator@sha256:<digest>
+cosign verify --key deploy/cosign.pub --insecure-ignore-tlog \
+  oci.this-is-fine.io/charts/tailnet-operator:<version>
 ```
 
 The production image is built from `scratch` and contains only the two static binaries.
+
+### Radicle release record
+
+Each `vX.Y.Z` tag also has a Radicle release (collaborative object `dev.radicle.artifact`), created
+and signed by a repository delegate and listed under *Releases* in Radicle Explorer. It registers
+`deploy/cosign.pub` as an artifact (BLAKE3 CID) and carries the signed image and chart digests as
+metadata (`image`, `chart`, `verify`), so the key, the release commit and the published digests are
+bound together independently of the registry:
+
+```sh
+rad clone rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX && cd tailnet-operator
+rad-artifact show v0.5.0 --pretty          # creator must be a delegate; shows image/chart digests
+test "$(rad-artifact cid deploy/cosign.pub)" = "<cid from show>"
+```
+
+Then run the `verify` command from the metadata against the digest you deploy.
