@@ -327,4 +327,144 @@ func TestIngressHTTP(t *testing.T) {
 	x.save("agent-final.json", &agent)
 	x.save("result.json", map[string]any{"realChartAndReconciler": true, "realCertManagerIssuance": true, "webhookAdmittedAgentGateExecuted": true, "initialHTTP": beforeResults, "rotatedHTTP": afterResults, "sameAgentAcrossRotation": true, "aclNegativeTested": false, "webSocketsTested": false, "l4Tested": false})
 	t.Log("gate: real chart/reconciler/cert-manager, generated agent gate, peer HTTP1+HTTP2 and actual issued-certificate rotation without agent restart")
+	t.Run("BackendTLS", func(t *testing.T) {
+		testIngressBackendTLS(t, x, ingress, &agent, rotatedLeaf.hash, servingCA)
+	})
+}
+
+// Reuse the fixture's existing HTTPS Headscale endpoint; no additional backend binary, listener
+// or fixture mode is needed. Its /accept response is 404, which proves HTTP traversed the verified
+// upstream instead of being mistaken for a proxy-generated 502. The original strict plain-HTTP
+// and forwarding-header checks above remain unchanged.
+func testIngressBackendTLS(t *testing.T, x *httpPeerFixture, ingress *tnv1.TailnetIngress, agent *corev1.Pod, leaf string, otherCA []byte) {
+	f := x.f
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "backend-trust", Namespace: namespace}, Data: map[string]string{"ca.crt": string(x.ca.PublicPEM())}}
+	if f.kube.Create(t.Context(), ca) != nil {
+		t.Fatal("backend CA create failed")
+	}
+	base := ingress.DeepCopy()
+	e := &ingress.Spec.Exposes[0]
+	e.Backend = tnv1.Backend{Service: "fixture-headscale", Port: 8443, TLS: &tnv1.BackendTLS{
+		ServerName:     "fixture-headscale.tailnet-system.svc",
+		CAConfigMapRef: tnv1.CAConfigMapRef{Name: ca.Name, Key: "ca.crt"},
+	}}
+	request, headers := "10s", "5s"
+	e.Timeouts = &tnv1.HTTPTimeouts{Request: &request, BackendRequest: &headers}
+	if f.kube.Patch(t.Context(), ingress, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})) != nil {
+		t.Fatal("backend TLS configuration rejected")
+	}
+	oldUID := agent.UID
+	var dep appsv1.Deployment
+	eventually(t, "v2 protocol recreates the agent under its real startup gate", func() bool {
+		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), &dep) != nil || dep.Spec.Template.Annotations["tsunaro.io/agent-config-protocol"] != "http-v2" {
+			return false
+		}
+		var pods corev1.PodList
+		if f.kube.List(t.Context(), &pods, client.InNamespace(namespace), client.MatchingLabels{"app.kubernetes.io/name": "tailnet-ingress", "app.kubernetes.io/instance": ingress.Name}) != nil || len(pods.Items) != 1 {
+			return false
+		}
+		p := pods.Items[0]
+		if p.UID == oldUID || p.DeletionTimestamp != nil || len(p.Status.InitContainerStatuses) != 1 || p.Status.InitContainerStatuses[0].State.Running == nil {
+			return false
+		}
+		owner := metav1.GetControllerOf(&p)
+		if owner == nil || owner.Kind != "ReplicaSet" {
+			return false
+		}
+		var rs appsv1.ReplicaSet
+		if f.kube.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: owner.Name}, &rs) != nil || rs.UID != owner.UID {
+			return false
+		}
+		parent := metav1.GetControllerOf(&rs)
+		if parent == nil || parent.UID != dep.UID {
+			return false
+		}
+		*agent = p
+		return true
+	})
+	releaseFixturePod(t, f, agent)
+	ready := func(want bool) bool {
+		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), ingress) != nil || ingress.Status.ObservedGeneration != ingress.Generation || !meta.IsStatusConditionTrue(ingress.Status.Conditions, "TLSReady") {
+			return false
+		}
+		return meta.IsStatusConditionTrue(ingress.Status.Conditions, "BackendsReachable") == want && meta.IsStatusConditionTrue(ingress.Status.Conditions, "Ready") == want
+	}
+	peerStatus := func(status int) {
+		t.Helper()
+		for _, h2 := range []bool{false, true} {
+			eventually(t, "real peer receives expected verified-backend result", func() bool {
+				raw, _ := json.Marshal(map[string]any{"target": "http-agent.fixture.test", "http2": h2})
+				b, err := x.proxy(x.peer.Name, 9081, "probe", string(raw))
+				var got struct {
+					Status int    `json:"status"`
+					Major  int    `json:"httpMajor"`
+					Leaf   string `json:"leafSHA256"`
+				}
+				return err == nil && len(b) <= 4096 && json.Unmarshal(b, &got) == nil && got.Status == status && got.Leaf == leaf && ((!h2 && got.Major == 1) || (h2 && got.Major == 2))
+			})
+		}
+	}
+	patchCA := func(value string) {
+		t.Helper()
+		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ca), ca) != nil {
+			t.Fatal("backend CA lookup failed")
+		}
+		before := ca.DeepCopy()
+		ca.Data["ca.crt"] = value
+		if f.kube.Patch(t.Context(), ca, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})) != nil {
+			t.Fatal("backend CA update failed")
+		}
+	}
+	eventually(t, "verified upstream handshake ready", func() bool { return ready(true) })
+	peerStatus(404)
+	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(agent), agent) != nil || len(agent.Status.ContainerStatuses) != 1 {
+		t.Fatal("v2 agent status missing")
+	}
+	initialPod := agent.DeepCopy()
+	initialGeneration := dep.Generation
+	// A valid overlap changes the digest without changing the backend's served certificate.
+	patchCA(string(x.ca.PublicPEM()) + string(otherCA))
+	// First observe the new digest through /targets; Ready alone could be an old true status.
+	expectedHash := sha256.Sum256([]byte(ca.Data["ca.crt"]))
+	eventually(t, "kubelet projects the new backend CA digest", func() bool {
+		b, err := x.proxy(agent.Name, 9080, "targets", "")
+		var probes []struct {
+			Hash string `json:"backendCAHash"`
+		}
+		return err == nil && json.Unmarshal(b, &probes) == nil && len(probes) == 1 && probes[0].Hash == hex.EncodeToString(expectedHash[:])
+	})
+	eventually(t, "overlap trust ready", func() bool { return ready(true) })
+	peerStatus(404)
+	patchCA(string(otherCA))
+	eventually(t, "wrong CA rejects verified upstream despite reachable TCP", func() bool { return ready(false) })
+	peerStatus(502)
+	patchCA(string(x.ca.PublicPEM()))
+	eventually(t, "correct CA recovers after wrong-root rejection", func() bool { return ready(true) })
+	peerStatus(404)
+	patchCA("invalid certificate bundle")
+	eventually(t, "invalid CA makes the backend unready", func() bool { return ready(false) })
+	peerStatus(502)
+	patchCA(string(x.ca.PublicPEM()))
+	eventually(t, "correct CA recovers after invalid-bundle rejection", func() bool { return ready(true) })
+	peerStatus(404)
+	uid := ca.UID
+	if f.kube.Delete(t.Context(), ca, client.Preconditions{UID: &uid}) != nil {
+		t.Fatal("backend CA deletion failed")
+	}
+	eventually(t, "deleted backend CA is unavailable", func() bool { return ready(false) })
+	peerStatus(502)
+	ca = &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "backend-trust", Namespace: namespace}, Data: map[string]string{"ca.crt": string(x.ca.PublicPEM())}}
+	if f.kube.Create(t.Context(), ca) != nil {
+		t.Fatal("backend CA recovery failed")
+	}
+	eventually(t, "recreated CA restores verified upstream", func() bool { return ready(true) })
+	peerStatus(404)
+	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(agent), agent) != nil || agent.UID != initialPod.UID || len(agent.Status.ContainerStatuses) != 1 || agent.Status.ContainerStatuses[0].ContainerID != initialPod.Status.ContainerStatuses[0].ContainerID || agent.Status.ContainerStatuses[0].RestartCount != 0 {
+		t.Fatal("backend trust changes replaced or restarted the agent")
+	}
+	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(&dep), &dep) != nil || dep.Generation != initialGeneration {
+		t.Fatal("backend CA rotation changed the Pod template")
+	}
+	x.save("backend-tls-result.json", map[string]any{"verifiedUpstream": true, "peerHTTP1AndHTTP2": true, "protocolRecreate": true, "projectedCARotation": true, "wrongCARejected": true, "invalidCARejected": true, "deletedCARejected": true, "recoveredWithoutRestart": true})
+	t.Log("gate: v2 rollout, real peer HTTPS over verified upstream, projected CA change/rejection/deletion/recovery without agent restart; reused existing HTTPS fixture")
 }

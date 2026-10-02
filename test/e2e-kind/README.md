@@ -6,7 +6,7 @@ created. Neither touches an existing kube-context, Docker socket or host configu
 | Runner | Tests | Typical duration |
 | --- | --- | --- |
 | `hack/e2e-kind.sh` | `TestInstall`, `TestLeaderFailover` | 3–4 min |
-| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP` | 10–12 min; `--http-only` runs `TestIngressHTTP` alone |
+| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP` | About 17 min for `--http-only` with backend CA projection checks; the full suite takes longer |
 
 ```sh
 # kind must be v0.32.0 (its embedded node image is pinned in kind.yaml / kind-http.yaml)
@@ -98,6 +98,12 @@ startup check; self-signed/CA issuers only), the operator chart, a `Tailnet` and
 then a forced renewal (`duration: 1h`, `renewBefore: 20m`, `Issuing` intent) — the leaf changes, the
 Certificate revision advances, `TLSNotAfter` follows, and the agent Pod, container and Deployment
 generation stay unchanged.
+
+The backend-TLS phase switches that CR to the fixture's existing HTTPS Headscale Service.
+It checks the `http-v2` Pod replacement, real peer HTTP/1.1 and HTTP/2, a projected CA digest change,
+wrong/invalid/deleted CA rejection and recovery without another agent restart.
+The existing endpoint returns 404 for the peer's fixed path; a proxy-generated 502 is a failure,
+not successful upstream acceptance. No new fixture binary, listener or mode is introduced.
 
 Not covered here: NetworkPolicy semantics of production CNIs, DERP/STUN traffic, L4 coexistence with
 HTTP, ACL-negative cases, WebSockets, published images, arm64 execution, long-running operation.

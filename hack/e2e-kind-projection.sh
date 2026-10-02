@@ -396,5 +396,5 @@ system_uid=$(< "$out/cluster-uid.txt")
 # Compiled test binaries do not inherit `go test`'s package working directory.
 (cd "$fixture"; run "${bins[env]}" "E2E_KIND_WORK=$work" "E2E_KIND_CLUSTER=$cluster" "E2E_KIND_CONTEXT=$ctx" \
     "E2E_KIND_FIXTURE_IMAGE=$image" "E2E_KIND_AGENT_IMAGE=$agent_image" "E2E_KIND_SYSTEM_UID=$system_uid" "E2E_KIND_HTTP_NETWORK_GATE=passed" "E2E_KIND_NET_EVIDENCE=$out" \
-    "$work/projection.test" -test.run "$test_pattern" -test.count=1 -test.timeout=12m -test.v) > "$out/projection-test.log" 2>&1
+    "$work/projection.test" -test.run "$test_pattern" -test.count=1 -test.timeout=18m -test.v) > "$out/projection-test.log" 2>&1
 stage=projection-passed
