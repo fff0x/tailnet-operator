@@ -2,13 +2,13 @@
 
 Tsunaro — userspace TailnetEgress and TailnetIngress with an external Headscale server.
 
-![Version: 0.5.0](https://img.shields.io/badge/Version-0.5.0-informational?style=flat-square)  ![AppVersion: v0.5.0](https://img.shields.io/badge/AppVersion-v0.5.0-informational?style=flat-square)
+![Version: 0.5.1](https://img.shields.io/badge/Version-0.5.1-informational?style=flat-square)  ![AppVersion: v0.5.1](https://img.shields.io/badge/AppVersion-v0.5.1-informational?style=flat-square)
 
 ## Installation
 
 ```sh
 helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
-  --version 0.5.0 --namespace tailnet-system --create-namespace
+  --version 0.5.1 --namespace tailnet-system --create-namespace
 # or from a source checkout:
 helm install tailnet-operator ./charts/tailnet-operator --namespace tailnet-system --create-namespace
 ```
@@ -82,7 +82,7 @@ See [compatibility](../../docs/COMPATIBILITY.md#http-extension-compatibility-v05
 - `task deploy-gen` — regenerate `deploy/operator.yaml` from the default values.
 - `task rbac-check` / `task rbac-gen` — compare or update [the RBAC reference](../../docs/reference/rbac.md).
 - Chart destination: `OCI_CHART_PATH` in `Taskfile.yaml` plus `Chart.name`. Release tags publish the
-  plain `Chart.version` (`0.5.0`, without `v`); branch builds publish `-dev.g<sha>` pre-releases.
+  plain `Chart.version` (`0.5.1`, without `v`); branch builds publish `-dev.g<sha>` pre-releases.
 
 ## Values
 

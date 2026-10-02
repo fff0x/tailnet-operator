@@ -118,7 +118,7 @@ the rendered policy even in file mode.
 
 ```sh
 helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
-  --version 0.5.0 --namespace tailnet-system --create-namespace
+  --version 0.5.1 --namespace tailnet-system --create-namespace
 
 kubectl -n tailnet-system create secret generic headscale-bootstrap --from-literal=apiKey='<key>'
 
@@ -143,9 +143,9 @@ To inspect or vendor the chart, pull it and verify its signature first (see
 [SECURITY.md](SECURITY.md) for the key and the Radicle release record):
 
 ```sh
-helm pull oci://oci.this-is-fine.io/charts/tailnet-operator --version 0.5.0
+helm pull oci://oci.this-is-fine.io/charts/tailnet-operator --version 0.5.1
 cosign verify --key deploy/cosign.pub --insecure-ignore-tlog \
-  oci.this-is-fine.io/charts/tailnet-operator:0.5.0
+  oci.this-is-fine.io/charts/tailnet-operator:0.5.1
 ```
 
 ```sh
