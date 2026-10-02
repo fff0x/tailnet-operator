@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-02
+
 ### Fixed
 
 - HTTP ingress no longer negotiates gzip or decompresses backend responses on the client's behalf.
