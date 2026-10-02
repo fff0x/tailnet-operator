@@ -23,8 +23,14 @@ are published in the release notes and as Radicle issues labelled `security`.
 | Agent pod | Ephemeral tsnet identity, reusable preauth key, no Kubernetes client | Container compromise exposes the key and that identity's network access until the key expires. |
 | Operator pod | Credentials, workloads, status, Headscale policy | Needs broad namespace access by design; a compromised operator is a cluster and tailnet incident. |
 | Tailnet peer | Access per Headscale policy and per-CR identity | The operator authenticates nodes, not application users. |
-| HTTP backend | In `mode: http` the agent terminates TLS on the tailnet listener | Agent → backend is plain HTTP inside the cluster, not end-to-end TLS. |
+| HTTP backend | In `mode: http` the agent terminates frontend TLS; `backend.tls` enables verified HTTPS upstream | Without `backend.tls`, the cluster hop is plain HTTP. With it, frontend and backend TLS remain separate sessions. |
 | Registry | Release images and charts are signed with the CI's fixed Cosign key | A valid signature says who built it, not that it is safe to run; verify the immutable digest you deploy. |
+
+Backend HTTPS uses only the selected namespace-local CA bundle, with chain, hostname and validity verification.
+There is no system-root fallback or insecure mode. Protect writes to referenced CA ConfigMaps as trust-policy changes.
+After a projected CA change, new requests use the new transport and old idle connections close.
+Established streams continue; deleting a CA is not immediate revocation of existing connections.
+Service references can still resolve to administrator-controlled endpoints or ExternalName destinations; they are not an SSRF isolation boundary.
 
 ## Credentials
 

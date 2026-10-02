@@ -72,6 +72,9 @@ A `TailnetIngress` with a `mode: http` expose terminates TLS on the agent using 
 `kubernetes.io/tls` Secret or a cert-manager issuer ([USAGE §6.1](../../docs/USAGE.md#61-ingress-terminate-tls-on-the-agent)).
 The chart grants `Certificate` get/create/patch/delete for the issuer path; missing cert-manager CRDs
 do not affect startup or L4 operation. Do not downgrade below v0.4.0 while HTTP CRs exist.
+Backend TLS and expose timeouts require v0.5.0 agents, including explicit image overrides.
+CA ConfigMaps are namespace-local; existing ConfigMap permissions cover inspection and watch.
+See [compatibility](../../docs/COMPATIBILITY.md#http-extension-compatibility-v050) before enabling extensions or downgrading.
 
 ## Development
 

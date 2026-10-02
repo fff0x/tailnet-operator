@@ -204,8 +204,9 @@ spec:
 ```
 
 One `mode: http` expose per ingress, always on port 443; other exposes stay L4. The agent presents
-the certificate for `status.dnsName`, requires that name as SNI and Host, and forwards plain HTTP to
-the backend. `Tailnet.spec.dns.ingressNameTemplate` must be set.
+the certificate for `status.dnsName` and requires that name as SNI and Host.
+The backend receives plain HTTP unless `backend.tls` selects verified HTTPS.
+`Tailnet.spec.dns.ingressNameTemplate` must be set.
 
 The certificate source is, in order of precedence: `spec.tls.secretName` (a `kubernetes.io/tls`
 Secret in the ingress namespace whose leaf covers `status.dnsName`, wildcard SAN allowed),
@@ -229,12 +230,76 @@ curl -sI https://shop-shop-dev.prod-1.tailnet.example.internal | head -1      # 
 | `TLSReady=False/TLSConfigMismatch`, `TLSProbeStale` | agent serves another configuration or has not reported within 30 s | wait one probe interval (≤ 20 s); check the agent pod |
 | `TLSReady=False/TLSCertificateConflict`, `TLSSecretConflict` | a foreign Certificate/Secret owns the target name | rename or remove the foreign object |
 
-`TLSReady` is a local proof: the agent completes an in-memory handshake with the served certificate
-and reaches the backend over TCP; `Ready` additionally requires registration. Certificate rotation
+`TLSReady` proves a local in-memory handshake with the frontend certificate.
+`BackendsReachable` requires a TCP connection, or a verified TLS handshake when `backend.tls` is set.
+`Ready` requires both proofs and registration; none establishes the remote tailnet path. Certificate rotation
 is picked up within a minute without restarting the pod or dropping existing connections. A missing
 or invalid source withdraws the HTTP listener instead of serving plaintext. Switching an expose
 between `l4` and `http` changes the pod template and recreates the agent pod, which briefly
 interrupts the CR's other exposes; do not downgrade the operator below v0.4.0 while HTTP CRs exist.
+
+#### Verified backend HTTPS (v0.5.0)
+
+```yaml
+# Within exposes[], with mode: http and port: 443:
+backend:
+  service: shop-frontend
+  namespace: shop-backend
+  port: 8443
+  tls:
+    serverName: shop-frontend.shop-backend.svc.cluster.local
+    caConfigMapRef:
+      name: backend-ca
+      key: ca.crt
+```
+
+Create `backend-ca` in the **TailnetIngress namespace**, even when the Service uses another namespace.
+The selected key must contain only PEM certificates, at most 1 MiB. The agent mounts that key read-only.
+Frontend certificates and backend trust are independent. The operator does not copy CA material between namespaces.
+
+`serverName` controls backend SNI and certificate verification, not the dial destination or HTTP Host.
+The agent requires TLS 1.2 or later and verifies the chain, hostname and validity interval.
+There is no insecure mode, system-root fallback or retry over plaintext HTTP.
+
+After Kubernetes projects a changed CA bundle, the agent uses a new transport and closes old idle connections.
+Existing verified streams finish normally. CA removal or malformed content blocks new requests and backend readiness.
+Use an overlapping old/new CA bundle for planned rotation. Revocation is not instantaneous and does not terminate existing streams.
+
+`BackendsReachable` reports bounded backend TLS failures. Readiness requires a fresh handshake whose CA digest matches the current ConfigMap.
+A reachable TCP port alone does not establish backend TLS readiness. Preserve backend NetworkPolicies; admit only the intended ingress agent.
+
+#### HTTP timeouts (v0.5.0)
+
+```yaml
+# Within the HTTP expose, alongside backend:
+timeouts:
+  request: 600s
+  backendRequest: 600s
+```
+
+| Field | Omitted | Meaning |
+| --- | --- | --- |
+| `timeouts.request` | No whole-response deadline | From request handler entry through response completion, including uploads and SSE |
+| `timeouts.backendRequest` | `30s` | Wait for backend response headers after sending the request body |
+
+`0s` disables the named timer. Values use Gateway API duration syntax, such as `500ms`, `30s` or `1h2m`.
+There is no additional 24-hour limit: inputs are bounded by that syntax and Go duration parsing.
+Choose a finite budget for each application when unlimited requests are not appropriate.
+The first applicable deadline wins. A successful protocol upgrade completes the HTTP exchange; the request timer does not limit the upgraded tunnel's lifetime.
+A timeout before response commitment returns 504. Its delivery has a bounded one-second write budget.
+After commitment, the response is aborted without appending an error body. The write deadline also covers buffered output after handler return.
+
+These are not connection-idle or stream-idle timers. Existing keepalive settings remain unchanged.
+Do not copy an Envoy `connectionIdleTimeout` into either field.
+
+Upgrade CRDs, operator and agents to v0.5.0 before using these fields, including explicit image overrides.
+Enabling extensions changes the internal protocol to `http-v2` and recreates the agent Pod.
+For changed extended HTTP configuration, the controller stops the owned predecessor before checking Headscale dependencies.
+It waits for termination and valid replacement configuration before restoring replicas. CA content rotation does not trigger this retirement.
+Before a downgrade, restore a verified legacy gateway path; do not remove backend TLS merely to satisfy an older agent.
+
+`allowFrom` authorizes tailnet peers; it neither performs OIDC nor supplies application identity headers.
+Removing gateway authentication is a separate access-control decision. Native application login and credentials remain independent.
 
 ### 6.2. Ingress: HTTPS through a shared gateway
 
@@ -399,6 +464,8 @@ Kubernetes **1.31 or later** is required. The API server validates these rules b
 | Backend `service` / optional `namespace` | DNS labels of at most 63 characters |
 | Ingress expose `mode` | Omitted or `l4` preserves TCP forwarding; `http` requires port 443 and at most one HTTP expose |
 | Ingress `tls` | HTTP only; optional Secret name or Issuer reference, never both; an omitted source may inherit the Tailnet issuer default |
+| Expose `backend.tls` | HTTP only; explicit DNS verification name and namespace-local ConfigMap name/key; no insecure or system-root fallback |
+| Expose `timeouts` | HTTP only; optional `request` and `backendRequest` durations; `0s` disables the named timer |
 | TLS issuer reference | Name is a DNS subdomain of at most 253 characters; kind defaults to `Issuer`, also permits `ClusterIssuer`; group defaults to and must equal `cert-manager.io` |
 | Target, listener and backend ports | 1–65535 |
 | Tailnet `server` | HTTPS scheme and a non-empty remainder; `apiUrl` may still use an internal HTTP endpoint |
