@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-02
+
 ### Changed
 
 - Product name: **Tsunaro**. Go module `tsunaro.io/tailnet-operator`. Chart name, image repository
