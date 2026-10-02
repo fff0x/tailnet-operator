@@ -4,6 +4,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed
+
+- HTTP ingress no longer negotiates gzip or decompresses backend responses on the client's behalf.
+  Stored object bytes, content-encoding metadata and explicit client `Accept-Encoding` are preserved.
+
 ## [0.5.0] - 2026-10-02
 
 ### Added
