@@ -4,6 +4,21 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- Verified HTTP-ingress backend TLS through `exposes[].backend.tls`: explicit SNI/verification name
+  and namespace-local CA ConfigMap key, TLS 1.2 minimum, no system-root or plaintext fallback.
+  Backend readiness requires a fresh verified handshake and matching projected trust.
+- HTTP expose `timeouts.request` and `timeouts.backendRequest`, with explicit `0s` to disable each
+  timer. Omission preserves unlimited whole-response duration and the 30-second backend-header wait.
+- Agent configuration envelope v2 and `http-v2` Pod protocol annotation for extended ingresses.
+  Older agents reject it; new agents retain legacy L4 and v1 HTTP support.
+
+### Changed
+
+- Backend CA updates replace transports and close idle connections without interrupting established
+  streams. Missing or invalid projected trust blocks new backend traffic and readiness.
+
 ## [0.4.0] - 2026-10-02
 
 ### Changed

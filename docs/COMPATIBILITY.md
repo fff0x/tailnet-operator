@@ -13,6 +13,33 @@
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator and agent |
 
+## HTTP extension compatibility (v0.5.0)
+
+Existing L4 and HTTP CRs retain their behavior when the new fields are absent.
+Backend TLS and HTTP timeouts require v0.5.0 CRDs, controller and agent images.
+Check `Tailnet.spec.proxy.image` and `TailnetIngress.spec.image` overrides during upgrade.
+
+| Configuration | Agent envelope | Pod protocol annotation |
+| --- | --- | --- |
+| Existing L4 | Legacy array | None |
+| Existing HTTP without extensions | Version 1 | `http-v1` |
+| Any backend TLS or timeout settings | Version 2 | `http-v2` |
+
+Old agents reject the new envelope rather than silently ignoring security settings.
+The `Recreate` strategy and changed `tsunaro.io/agent-config-protocol` annotation retire the old process on a protocol transition.
+Extended ingresses also carry a static `tsunaro.io/agent-http-config` digest of expose configuration and TLS/Tailnet references.
+A changed marker first scales the owned Deployment to zero and waits for its Pods to disappear, before checking Headscale dependencies.
+This also protects a timeout-only v2 ingress when backend TLS is added. Missing dependencies cannot restore the plaintext predecessor.
+Recovery installs the new configuration before restoring replicas. All exposes on that ingress are interrupted during retirement.
+Failed Kubernetes writes or stuck terminating Pods delay the transition; the operator does not force-delete Pods.
+
+CA content changes do not restart the Pod. New requests use the projected bundle; old idle connections close and established streams finish.
+Kubernetes projection delay and existing streams mean CA removal is not immediate connection revocation.
+
+Before downgrading below v0.5.0, move extended ingresses to a verified legacy gateway path.
+Do not remove backend TLS to make old agents accept the configuration.
+The two timeout fields do not reproduce Envoy connection-idle or stream-idle policies; review those separately before migrating applications.
+
 ## Preflight matrix
 
 The Tailnet controller derives these conditions from the API response shape, not from a version string:

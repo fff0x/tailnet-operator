@@ -316,8 +316,8 @@ Peers dial `ingress-shop:5432` (MagicDNS) or `shop-shop-dev.prod-1.tailnet.examp
 ([§5](#5-dns-coredns)).
 
 **HTTPS** has two shapes. With `mode: http` the agent terminates TLS itself using a `kubernetes.io/tls`
-Secret or a cert-manager issuer and forwards plain HTTP to one backend — no gateway involved
-([USAGE §6.2](USAGE.md#61-ingress-terminate-tls-on-the-agent)). Or TLS keeps terminating at a shared
+Secret or a cert-manager issuer. It forwards HTTP, or verified HTTPS with `backend.tls`, to one backend without a shared gateway
+([USAGE §6.1](USAGE.md#61-ingress-terminate-tls-on-the-agent)). Or TLS keeps terminating at a shared
 gateway and the ingress adds a per-app tailnet identity: point an expose at the gateway's Service
 (in its namespace) and give the tenant's HTTPRoute the rendered name:
 

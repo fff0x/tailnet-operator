@@ -30,7 +30,7 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
 - **`TailnetIngress`** (tenant namespace) — the mirror: expose in-cluster Services *on* the tailnet
   as one node with a MagicDNS name and, with a template, a DNS name under your zone. L4 exposes
   forward TCP; one `mode: http` expose terminates TLS on the agent with a Secret or cert-manager
-  certificate and forwards plain HTTP to the app — no shared gateway needed.
+  certificate and forwards HTTP or explicitly verified HTTPS to the app — no shared gateway needed.
 - **The tag is the authorization.** Each CR is its own node with its own tag; the policy's grants for
   that tag decide what it may reach (egress) or who may reach it (ingress). Without
   `Tailnet.spec.policy` the operator only *reads* the policy and reports what is missing; with it, the
@@ -147,8 +147,10 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | `tag` / `hostname` | from templates | node tag / MagicDNS name |
 | `allowFrom[]` | required | at least one non-empty peer source (policy `src`); each must match `ingressSourceAllowlist` when policy generation is enabled |
 | `exposes[].name`, `.port` | — | listener on the tailnet node; 1–50 exposes, unique names and ports |
-| `exposes[].backend.{service,namespace,port}` | namespace = CR's | in-cluster backend; another namespace only to funnel through a shared gateway |
-| `exposes[].mode` | `l4` | `http`: terminate TLS on the agent (port 443, one per CR) and forward plain HTTP |
+| `exposes[].backend.{service,namespace,port}` | namespace = CR's | in-cluster backend; an explicit namespace selects a Service there, while CA references stay in the CR namespace |
+| `exposes[].mode` | `l4` | `http`: terminate TLS on the agent (port 443, one per CR) and proxy HTTP |
+| `exposes[].backend.tls` | absent | verified HTTPS upstream with an explicit `serverName` and namespace-local `caConfigMapRef` |
+| `exposes[].timeouts.{request,backendRequest}` | unlimited / `30s` | whole HTTP response / backend response-header deadline; `0s` disables |
 | `tls.secretName` / `tls.issuerRef` | `Tailnet.spec.defaults.tls.issuerRef` | certificate for the `http` expose: a `kubernetes.io/tls` Secret in the CR namespace, or a cert-manager `Issuer`/`ClusterIssuer` |
 | `image`, `resources` | Tailnet defaults | agent overrides |
 
