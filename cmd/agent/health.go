@@ -25,19 +25,22 @@ const (
 	probeWorkers      = maxAgentTargets // every supported target gets a slot in a full pass
 )
 
-// HTTP Reachable is backend TCP AND local TLS component readiness. It is not evidence of a
-// working tailnet data path: peer end-to-end TLS/HTTP acceptance remains a separate check.
+// HTTP Reachable combines backend proof (verified TLS when configured, otherwise TCP)
+// with local frontend TLS readiness. Peer end-to-end acceptance remains a separate check.
 type probeResult struct {
-	Name             string     `json:"name"`
-	Reachable        bool       `json:"reachable"`
-	LastProbe        time.Time  `json:"lastProbe"`
-	Error            string     `json:"error,omitempty"`
-	ConfigID         string     `json:"configID,omitempty"`
-	BackendReachable *bool      `json:"backendReachable,omitempty"`
-	TLSReady         *bool      `json:"tlsReady,omitempty"`
-	TLSCertSHA256    string     `json:"tlsCertSHA256,omitempty"`
-	TLSNotAfter      *time.Time `json:"tlsNotAfter,omitempty"`
-	owner            probeTarget
+	Name               string     `json:"name"`
+	Reachable          bool       `json:"reachable"`
+	LastProbe          time.Time  `json:"lastProbe"`
+	Error              string     `json:"error,omitempty"`
+	ConfigID           string     `json:"configID,omitempty"`
+	BackendReachable   *bool      `json:"backendReachable,omitempty"`
+	TLSReady           *bool      `json:"tlsReady,omitempty"`
+	TLSCertSHA256      string     `json:"tlsCertSHA256,omitempty"`
+	TLSNotAfter        *time.Time `json:"tlsNotAfter,omitempty"`
+	BackendCAHash      string     `json:"backendCAHash,omitempty"`
+	BackendTLSNotAfter *time.Time `json:"backendTLSNotAfter,omitempty"`
+	BackendTLSReason   string     `json:"backendTLSReason,omitempty"`
+	owner              probeTarget
 }
 
 type prober struct {
@@ -67,6 +70,24 @@ func invalidateTLS(r *probeResult, reason string) {
 	r.Error = reason
 }
 
+func validateBackendProof(r *probeResult, h *httpIngress) {
+	if r.owner.t.BackendServerName == "" {
+		return
+	}
+	age := time.Since(r.LastProbe)
+	if r.BackendReachable != nil && *r.BackendReachable && r.BackendTLSNotAfter != nil && h != nil && age >= 0 && age <= httpProofMaxAge && h.currentBackendProof(r.BackendCAHash, *r.BackendTLSNotAfter) {
+		return
+	}
+	r.BackendReachable = falseBool()
+	r.Reachable = false
+	r.BackendCAHash = ""
+	r.BackendTLSNotAfter = nil
+	if r.BackendTLSReason == "" {
+		r.BackendTLSReason = backendTLSProofStale
+	}
+	r.Error = "backend TLS proof unavailable or stale"
+}
+
 // snapshotFor also includes configured HTTP targets with missing binds or no observations.
 // Lock ordering is always forwarder -> prober; reload cannot replace an instance mid-validation.
 func (p *prober) snapshotFor(fw *forwarder) []probeResult {
@@ -87,15 +108,20 @@ func (p *prober) snapshotFor(fw *forwarder) []probeResult {
 			age := time.Since(r.LastProbe)
 			if !valid || age < 0 || age > httpProofMaxAge || !h.currentProof(tlsObservation{sha256: r.TLSCertSHA256, notAfter: *r.TLSNotAfter}) {
 				invalidateTLS(&r, "local TLS proof unavailable or stale")
-				p.results[name] = r // an invalidated proof cannot resurrect on a later read
 			}
+			validateBackendProof(&r, h)
+			p.results[name] = r // invalidated proofs cannot resurrect on a later read
 		}
 		out = append(out, r)
 		seen[name] = true
 	}
 	missing := func(t target) {
 		if t.Mode == "http" && !seen[t.Name] {
-			out = append(out, probeResult{Name: t.Name, ConfigID: t.ConfigID, TLSReady: falseBool(), BackendReachable: falseBool(), Error: "HTTP listener or probe unavailable"})
+			r := probeResult{Name: t.Name, ConfigID: t.ConfigID, TLSReady: falseBool(), BackendReachable: falseBool(), Error: "HTTP listener or probe unavailable"}
+			if t.BackendServerName != "" {
+				r.BackendTLSReason = backendTLSProofStale
+			}
+			out = append(out, r)
 			seen[t.Name] = true
 		}
 	}
@@ -146,7 +172,7 @@ func healthMux(lc statuser, fw *forwarder, pr *prober) *http.ServeMux {
 }
 
 // serveHealth retains the tsnet Running gate. HTTP also requires current local TLS and backend
-// TCP proof. With probes disabled HTTP fails closed; L4 readiness is unchanged.
+// TCP or verified backend TLS proof. With probes disabled HTTP fails closed; L4 is unchanged.
 func serveHealth(ctx context.Context, addr string, ts *tsnet.Server, lc statuser, fw *forwarder, interval time.Duration) {
 	pr := &prober{results: map[string]probeResult{}}
 	if interval > 0 {
@@ -206,6 +232,10 @@ func (p *prober) publish(fw *forwarder, r probeResult) {
 			invalidateTLS(&r, "local TLS proof unavailable or stale")
 		}
 	}
+	if r.owner.t.Mode == "http" {
+		h, _ := r.owner.ln.(*httpIngress)
+		validateBackendProof(&r, h)
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.results == nil {
@@ -235,12 +265,25 @@ func probeOne(ctx context.Context, probe probeTarget) probeResult {
 			}
 		}
 	}
-	c, err := probe.dial(ctx, t)
-	if err == nil {
-		c.Close()
-		r.Reachable = true
+	if t.Mode == "http" && t.BackendServerName != "" {
+		r.BackendTLSReason = backendTLSProofStale
+		if h, ok := probe.ln.(*httpIngress); ok {
+			hash, expiry, reason := h.probeBackendTLS(ctx)
+			r.BackendTLSReason = reason
+			if reason == "" {
+				r.BackendCAHash = hash
+				r.BackendTLSNotAfter = &expiry
+				r.Reachable = true
+			}
+		}
 	} else {
-		r.Error = err.Error() // retain L4 error behavior
+		c, err := probe.dial(ctx, t)
+		if err == nil {
+			c.Close()
+			r.Reachable = true
+		} else {
+			r.Error = err.Error() // retain L4 error behavior
+		}
 	}
 	if t.Mode == "http" {
 		backend := r.Reachable
@@ -249,6 +292,8 @@ func probeOne(ctx context.Context, probe probeTarget) probeResult {
 		switch {
 		case !*r.TLSReady:
 			r.Error = "local TLS component probe failed"
+		case !backend && t.BackendServerName != "":
+			r.Error = "backend TLS probe failed"
 		case !backend:
 			r.Error = "backend TCP probe failed"
 		default:

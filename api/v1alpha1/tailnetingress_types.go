@@ -22,10 +22,52 @@ type Backend struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port"`
+	// Verified HTTPS to the backend. Omission preserves plaintext HTTP.
+	// +optional
+	TLS *BackendTLS `json:"tls,omitempty"`
+}
+
+// BackendTLS selects explicit backend trust, separate from the frontend TLS source.
+type BackendTLS struct {
+	// DNS name verified against the backend certificate; does not change the dial address or HTTP Host.
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$`
+	// +kubebuilder:validation:XValidation:rule="!isIP(self)",message="serverName must be a DNS name, not an IP address"
+	ServerName string `json:"serverName"`
+	// Public CA bundle in the ingress CR namespace, even if the backend is elsewhere.
+	CAConfigMapRef CAConfigMapRef `json:"caConfigMapRef"`
+}
+
+// CAConfigMapRef selects exactly one public PEM bundle key. No system-root fallback is used.
+type CAConfigMapRef struct {
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
+	Name string `json:"name"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[-._a-zA-Z0-9]+$`
+	Key string `json:"key"`
+}
+
+// HTTPTimeouts controls independent HTTP timers. Omission preserves existing behavior;
+// explicit 0s disables the selected timer. Upgraded connections are not timed.
+type HTTPTimeouts struct {
+	// Whole-response deadline. Omitted means no deadline.
+	// +optional
+	// +kubebuilder:validation:MaxLength=32
+	// +kubebuilder:validation:Pattern=`^([0-9]{1,5}(h|m|s|ms)){1,4}$`
+	Request *string `json:"request,omitempty"`
+	// Wait for backend response headers after sending the request body. Defaults to 30s.
+	// +optional
+	// +kubebuilder:validation:MaxLength=32
+	// +kubebuilder:validation:Pattern=`^([0-9]{1,5}(h|m|s|ms)){1,4}$`
+	BackendRequest *string `json:"backendRequest,omitempty"`
 }
 
 // Expose publishes one in-cluster backend on the tailnet node, listening on Port.
 // +kubebuilder:validation:XValidation:rule="!has(self.mode) || self.mode != 'http' || self.port == 443",message="HTTP exposes must listen on port 443"
+// +kubebuilder:validation:XValidation:rule="!has(self.backend.tls) || (has(self.mode) && self.mode == 'http')",message="backend TLS requires HTTP mode"
+// +kubebuilder:validation:XValidation:rule="!has(self.timeouts) || (has(self.mode) && self.mode == 'http')",message="timeouts require HTTP mode"
 type Expose struct {
 	// Listener mode. Omitted means L4 forwarding; HTTP requests TLS termination.
 	// +optional
@@ -42,10 +84,13 @@ type Expose struct {
 	// +kubebuilder:validation:Maximum=65535
 	Port    int32   `json:"port"`
 	Backend Backend `json:"backend"`
+	// HTTP-only timeout overrides.
+	// +optional
+	Timeouts *HTTPTimeouts `json:"timeouts,omitempty"`
 }
 
 // TailnetIngressSpec exposes in-cluster services through one tsnet node. L4 forwards TCP;
-// HTTP mode terminates TLS and proxies plain HTTP to the selected backend.
+// HTTP mode terminates TLS and proxies HTTP or explicitly verified HTTPS to the selected backend.
 // +kubebuilder:validation:XValidation:rule="!has(self.tls) || self.exposes.exists(e, has(e.mode) && e.mode == 'http')",message="tls requires an HTTP expose"
 type TailnetIngressSpec struct {
 	TailnetRef TailnetRef `json:"tailnetRef"`
@@ -86,13 +131,14 @@ type ExposeStatus struct {
 	ListenPort int32 `json:"listenPort"`
 	// The in-cluster backend the agent dials, as service:port.
 	Backend string `json:"backend"`
-	// True once the agent last dialled the backend successfully.
+	// Backend reachability. With backend TLS this requires a fresh verified handshake
+	// bound to the current configuration, CA bundle and unexpired certificate.
 	Reachable bool `json:"reachable"`
 	// Local TLS component readiness for an HTTP expose; omitted for L4.
 	// This does not establish remote tailnet reachability or client CA trust.
 	// +optional
 	TLSReady *bool `json:"tlsReady,omitempty"`
-	// Empty when reachable; "Unreachable" otherwise.
+	// Bounded backend or frontend failure reason; empty when ready.
 	// +optional
 	Reason string `json:"reason,omitempty"`
 }

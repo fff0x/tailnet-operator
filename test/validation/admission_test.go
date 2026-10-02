@@ -272,6 +272,10 @@ func TestAdmission(t *testing.T) {
 			}
 		}
 
+		t.Run("extensions", func(t *testing.T) {
+			testHTTPExtensionAdmission(t, newIngress, admit, reject)
+		})
+
 		for _, mode := range []string{"omitted", "l4", "http"} {
 			t.Run("mode/"+mode, func(t *testing.T) {
 				obj := newIngress()

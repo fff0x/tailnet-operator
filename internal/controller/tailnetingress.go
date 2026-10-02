@@ -54,6 +54,19 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	transition, waiting, err := r.retireIngressHTTPPredecessor(ctx, &in)
+	if err != nil {
+		return r.fail(ctx, &in, "HTTPTransitionBlocked", err)
+	}
+	if waiting {
+		invalidateIngressTLSObservation(&in)
+		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, "HTTPTransitionPending",
+			"waiting for the previous ingress agent to terminate before changing HTTP configuration")
+		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
+		// Deployment ownership watches handle scale/status updates. Pods are not
+		// directly owned by the CR, so also poll until termination completes.
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
 	ns := in.Namespace
 
 	var tn tnv1.Tailnet
@@ -153,6 +166,11 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	tlsState := r.prepareIngressTLS(ctx, &in, &tn, time.Now())
+	if transition {
+		if reason := ingressTransitionSourceReason(&in, tlsState); reason != "" {
+			return r.fail(ctx, &in, reason, fmt.Errorf("HTTP configuration transition is waiting for valid TLS sources and configuration"))
+		}
+	}
 
 	image := in.Spec.Image
 	if image == "" {
@@ -263,7 +281,11 @@ func (r *TailnetIngressReconciler) applyChildren(ctx context.Context, in *tnv1.T
 		if err := controllerutil.SetControllerReference(in, obj, r.Scheme); err != nil {
 			return err
 		}
-		if err := ssaApply(ctx, r.Client, obj); err != nil {
+		if obj == dep && ingressConfigVersion(in) == 2 {
+			if err := r.applyExtendedIngressDeployment(ctx, in, dep); err != nil {
+				return err
+			}
+		} else if err := ssaApply(ctx, r.Client, obj); err != nil {
 			return err
 		}
 	}
@@ -385,6 +407,13 @@ func (r *TailnetIngressReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
 			var requests []ctrl.Request
 			for _, key := range r.ingressesForTLSSecret(ctx, obj) {
+				requests = append(requests, ctrl.Request{NamespacedName: key})
+			}
+			return requests
+		})).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+			var requests []ctrl.Request
+			for _, key := range r.ingressesForBackendCA(ctx, obj) {
 				requests = append(requests, ctrl.Request{NamespacedName: key})
 			}
 			return requests

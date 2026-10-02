@@ -20,11 +20,15 @@ import (
 	"golang.org/x/net/http2"
 
 	"tsunaro.io/tailnet-operator/internal/certificates"
+	"tsunaro.io/tailnet-operator/internal/httpconfig"
 )
 
 func (t target) validateHTTP() error {
 	switch t.Mode {
 	case "", "l4":
+		if t.BackendServerName != "" || t.BackendCAFile != "" || t.RequestTimeout != "" || t.BackendRequestTimeout != "" {
+			return errors.New("HTTP settings require HTTP target mode")
+		}
 		return nil
 	case "http":
 		if t.ListenPort != 443 || !validDNSName(t.DNSName) || t.CertFile == "" || t.KeyFile == "" {
@@ -32,6 +36,16 @@ func (t target) validateHTTP() error {
 		}
 		if (net.ParseIP(t.Address) == nil && !validDNSName(t.Address)) || t.Port < 1 || t.Port > 65535 {
 			return errors.New("HTTP target requires a backend host and TCP port, not a URL")
+		}
+		if (t.BackendServerName == "") != (t.BackendCAFile == "") || (t.BackendServerName != "" && !validDNSName(t.BackendServerName)) {
+			return errors.New("backend TLS requires DNS server name and CA file")
+		}
+		for _, value := range []string{t.RequestTimeout, t.BackendRequestTimeout} {
+			if value != "" {
+				if _, err := httpconfig.ParseDuration(value); err != nil {
+					return errors.New("invalid HTTP timeout")
+				}
+			}
 		}
 		return nil
 	default:
@@ -207,7 +221,7 @@ func (l *trackedListener) Close() error {
 type httpIngress struct {
 	net.Listener
 	srv       *http.Server
-	transport *http.Transport
+	transport *backendSource
 	cancel    context.CancelFunc
 	once      sync.Once
 	done      chan struct{}
@@ -231,7 +245,7 @@ func (h *httpIngress) Close() error {
 		<-h.done
 		h.probes.Wait()   // cancellation closes raw probe pipes and joins both TLS handshakes
 		h.handlers.Wait() // includes ReverseProxy's upgraded-connection copies
-		h.transport.CloseIdleConnections()
+		h.transport.Close()
 	})
 	return nil
 }
@@ -248,28 +262,34 @@ func serveHTTPIngress(ctx context.Context, ln net.Listener, t target, dial func(
 	certs := &certificateSource{t: t}
 	ctx, cancel := context.WithCancel(ctx)
 	tracked := &trackedListener{Listener: ln, conns: make(map[*trackedConn]struct{})}
-	transport := &http.Transport{
-		// Deliberately no ProxyFromEnvironment and no TLS backend path.
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
-			return dial(dctx, t)
-		},
-		IdleConnTimeout:       90 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		MaxIdleConnsPerHost:   16,
+	headerTimeout := 30 * time.Second
+	if t.BackendRequestTimeout != "" {
+		headerTimeout, _ = httpconfig.ParseDuration(t.BackendRequestTimeout) // validated above
 	}
+	var requestDuration time.Duration
+	if t.RequestTimeout != "" {
+		requestDuration, _ = httpconfig.ParseDuration(t.RequestTimeout)
+	}
+	transport := &backendSource{t: t, dial: dial, headerTimeout: headerTimeout}
 	// net/http and ReverseProxy can log arbitrary transport errors and request material.
 	// Suppress those logs; only bounded, fixed errors are sent to callers.
 	quiet := log.New(io.Discard, "", 0)
 	proxy := &httputil.ReverseProxy{
 		Transport: transport,
 		ErrorLog:  quiet,
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			var timeout net.Error
+			if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+				http.Error(w, "backend timeout", http.StatusGatewayTimeout)
+				return
+			}
 			http.Error(w, "backend unavailable", http.StatusBadGateway)
 		},
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.URL.Scheme = "http"
+			if t.BackendServerName != "" {
+				r.Out.URL.Scheme = "https"
+			}
 			r.Out.URL.Host = net.JoinHostPort(t.Address, strconv.Itoa(t.Port))
 			r.Out.URL.User = nil
 			r.Out.Host = r.In.Host
@@ -319,7 +339,7 @@ func serveHTTPIngress(ctx context.Context, ln net.Listener, t target, dial func(
 				http.Error(w, "TLS certificate unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			proxy.ServeHTTP(w, r)
+			serveHTTPWithTimeout(w, r, proxy, requestDuration)
 		}),
 	}
 	if err := http2.ConfigureServer(h.srv, &http2.Server{}); err != nil {

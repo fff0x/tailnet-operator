@@ -26,12 +26,12 @@ func renderedIngressTargets(t *testing.T, in *tnv1.TailnetIngress, ns string, pl
 		t.Fatal(err)
 	}
 	var targets []agentTarget
-	if ingressHTTPProtocol(in) {
+	if ingressConfigVersion(in) > 0 {
 		var envelope struct {
 			Version int           `json:"version"`
 			Targets []agentTarget `json:"targets"`
 		}
-		if err := json.Unmarshal([]byte(cm.Data[targetsFile]), &envelope); err != nil || envelope.Version != 1 || envelope.Targets == nil {
+		if err := json.Unmarshal([]byte(cm.Data[targetsFile]), &envelope); err != nil || envelope.Version != ingressConfigVersion(in) || envelope.Targets == nil {
 			t.Fatal("invalid HTTP config envelope")
 		}
 		return envelope.Targets
