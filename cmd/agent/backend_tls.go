@@ -87,6 +87,9 @@ func (s *backendSource) refreshLocked() error {
 	s.retireLocked()
 	next := &backendTransport{hash: hash}
 	next.transport = &http.Transport{
+		// Preserve response bytes/metadata (including stored S3 gzip objects).
+		// Forward client Accept-Encoding unchanged; never negotiate or decode for it.
+		DisableCompression: true,
 		// No ambient proxy, system-root fallback, session cache, or plaintext retry.
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			// A pre-rotation admission that has not begun dialing may not establish
