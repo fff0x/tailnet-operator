@@ -169,6 +169,10 @@ ports for your site first — NetworkPolicy cannot select a hostname — and lis
 `networkPolicy.metricsPeers`, otherwise metrics ingress is denied. Agent pods get their own
 generated policies; cluster DNS and agent status traffic on TCP 9080 stay allowed.
 
+On Cilium, `ipBlock` rules do not match cluster/node identities; leave `networkPolicy.enabled: false`
+and provide a site-specific `CiliumNetworkPolicy` using `toEntities: kube-apiserver` and `toEndpoints`
+for in-cluster destinations.
+
 ### Kustomize
 
 ```sh
