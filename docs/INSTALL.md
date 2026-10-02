@@ -118,7 +118,7 @@ the rendered policy even in file mode.
 
 ```sh
 helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
-  --version 0.4.0 --namespace tailnet-system --create-namespace
+  --version 0.5.0 --namespace tailnet-system --create-namespace
 
 kubectl -n tailnet-system create secret generic headscale-bootstrap --from-literal=apiKey='<key>'
 
