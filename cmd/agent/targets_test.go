@@ -118,7 +118,7 @@ func TestLoadTargetsRejectsInvalidShapes(t *testing.T) {
 		"non-json-whitespace-envelope": "\u00a0{\"version\":1,\"targets\":[]}",
 		"missing-version":              `{"targets":[]}`,
 		"null-version":                 `{"version":null,"targets":[]}`,
-		"unknown-version":              `{"version":2,"targets":[]}`,
+		"unknown-version":              `{"version":3,"targets":[]}`,
 		"zero-version":                 `{"version":0,"targets":[]}`,
 		"negative-version":             `{"version":-1,"targets":[]}`,
 		"fractional-version":           `{"version":1.1,"targets":[]}`,

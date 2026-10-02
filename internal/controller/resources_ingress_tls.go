@@ -16,6 +16,9 @@ import (
 )
 
 const ingressTLSMount = "/tls"
+const ingressBackendTLSMount = "/backend-tls"
+const ingressProtocolAnnotation = "tsunaro.io/agent-config-protocol"
+const ingressHTTPConfigAnnotation = "tsunaro.io/agent-http-config"
 
 // A protocol transition retires the old process: legacy agents keep last-good listeners on
 // reload errors, but reject the HTTP envelope at startup. This is not an atomic cutover; the
@@ -29,11 +32,44 @@ func ingressHTTPProtocol(in *tnv1.TailnetIngress) bool {
 	return false
 }
 
-func ingressProtocolAnnotations(in *tnv1.TailnetIngress) map[string]string {
+// Presence, not validity, selects v2: even empty or admission-bypassed new settings
+// must retire a v1 process rather than let it ignore security-sensitive fields.
+func ingressConfigVersion(in *tnv1.TailnetIngress) int {
+	for _, e := range in.Spec.Exposes {
+		if e.Backend.TLS != nil || e.Timeouts != nil {
+			return 2
+		}
+	}
 	if ingressHTTPProtocol(in) {
-		return map[string]string{"tsunaro.io/agent-config-protocol": "http-v1"}
+		return 1
+	}
+	return 0
+}
+
+func ingressProtocolAnnotations(in *tnv1.TailnetIngress) map[string]string {
+	if ingressConfigVersion(in) == 2 {
+		return map[string]string{
+			ingressProtocolAnnotation:   "http-v2",
+			ingressHTTPConfigAnnotation: ingressDesiredHTTPConfigDigest(in),
+		}
+	}
+	if ingressHTTPProtocol(in) {
+		return map[string]string{ingressProtocolAnnotation: "http-v1"}
 	}
 	return nil
+}
+
+// ingressDesiredHTTPConfigDigest is available before any dependency lookup. Include
+// reference identity and optional-field presence, not resolved material, generation,
+// or status: trust/certificate rotation must not restart an unchanged process.
+func ingressDesiredHTTPConfigDigest(in *tnv1.TailnetIngress) string {
+	data, _ := json.Marshal(struct {
+		Exposes    []tnv1.Expose
+		TLS        *tnv1.IngressTLS
+		TailnetRef tnv1.TailnetRef
+	}{in.Spec.Exposes, in.Spec.TLS, in.Spec.TailnetRef})
+	digest := sha256.Sum256(data)
+	return hex.EncodeToString(digest[:])
 }
 
 // safeIngressExposes prevents ambiguous configurations from keeping or creating plaintext
@@ -49,6 +85,9 @@ func safeIngressExposes(exposes []tnv1.Expose) bool {
 			e.Port < 1 || e.Port > 65535 || e.Backend.Port < 1 || e.Backend.Port > 65535 ||
 			len(validation.IsDNS1123Label(e.Backend.Service)) != 0 ||
 			(e.Backend.Namespace != "" && len(validation.IsDNS1123Label(e.Backend.Namespace)) != 0) {
+			return false
+		}
+		if !safeIngressHTTPExtensions(e) {
 			return false
 		}
 		names[e.Name], ports[e.Port] = true, true
@@ -84,13 +123,23 @@ func projectIngressTLS(in *tnv1.TailnetIngress, plan ingressTLSPlan) bool {
 // Certificate rotation must not change targets, restart listeners, or replace the Pod.
 func ingressHTTPConfigID(in *tnv1.TailnetIngress, target agentTarget, plan ingressTLSPlan) string {
 	target.ConfigID = ""
+	var extension *tnv1.Expose
+	for _, e := range in.Spec.Exposes {
+		if e.Name == target.Name && (e.Backend.TLS != nil || e.Timeouts != nil) {
+			copy := e
+			extension = &copy
+			break
+		}
+	}
 	data, _ := json.Marshal(struct {
 		UID        types.UID
 		Generation int64
 		Target     agentTarget
 		Secret     string
 		Issuer     *tnv1.TLSIssuerReference
-	}{in.UID, in.Generation, target, plan.secretName, plan.issuer})
+		// Bind CA reference identity and optional-field presence, never CA contents.
+		Extension *tnv1.Expose `json:"Extension,omitempty"`
+	}{in.UID, in.Generation, target, plan.secretName, plan.issuer, extension})
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])
 }
@@ -114,5 +163,21 @@ func ingressAgentDeploymentTLS(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, im
 	})
 	pod.Containers[0].VolumeMounts = append(pod.Containers[0].VolumeMounts,
 		corev1.VolumeMount{Name: "tls", MountPath: ingressTLSMount, ReadOnly: true})
+	for _, e := range in.Spec.Exposes {
+		if e.Mode != "http" || e.Backend.TLS == nil {
+			continue
+		}
+		ref := e.Backend.TLS.CAConfigMapRef
+		pod.Volumes = append(pod.Volumes, corev1.Volume{
+			Name: "backend-tls",
+			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: ref.Name},
+				DefaultMode:          &mode, Optional: &optional,
+				Items: []corev1.KeyToPath{{Key: ref.Key, Path: "ca.crt"}},
+			}},
+		})
+		pod.Containers[0].VolumeMounts = append(pod.Containers[0].VolumeMounts,
+			corev1.VolumeMount{Name: "backend-tls", MountPath: ingressBackendTLSMount, ReadOnly: true})
+	}
 	return dep
 }

@@ -62,18 +62,30 @@ func ingressExposesConfigMap(in *tnv1.TailnetIngress, ns string, plan ingressTLS
 		if e.Mode == "http" {
 			target.Mode, target.DNSName = "http", in.Status.DNSName
 			target.CertFile, target.KeyFile = ingressTLSMount+"/tls.crt", ingressTLSMount+"/tls.key"
+			if e.Backend.TLS != nil {
+				target.BackendServerName = e.Backend.TLS.ServerName
+				target.BackendCAFile = ingressBackendTLSMount + "/ca.crt"
+			}
+			if e.Timeouts != nil {
+				if e.Timeouts.Request != nil {
+					target.RequestTimeout = *e.Timeouts.Request
+				}
+				if e.Timeouts.BackendRequest != nil {
+					target.BackendRequestTimeout = *e.Timeouts.BackendRequest
+				}
+			}
 			target.ConfigID = ingressHTTPConfigID(in, target, plan)
 		}
 		out = append(out, target)
 	}
 	var config any = out
-	if ingressHTTPProtocol(in) {
+	if ingressConfigVersion(in) > 0 {
 		// Old agents reject an object at startup instead of ignoring HTTP mode and
 		// forwarding plaintext. The Pod template also changes to retire old listeners.
 		config = struct {
 			Version int           `json:"version"`
 			Targets []agentTarget `json:"targets"`
-		}{Version: 1, Targets: out}
+		}{Version: ingressConfigVersion(in), Targets: out}
 	}
 	b, err := json.Marshal(config)
 	if err != nil {

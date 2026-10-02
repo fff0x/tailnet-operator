@@ -59,7 +59,7 @@ spec:
           spec:
             description: |-
               TailnetIngressSpec exposes in-cluster services through one tsnet node. L4 forwards TCP;
-              HTTP mode terminates TLS and proxies plain HTTP to the selected backend.
+              HTTP mode terminates TLS and proxies HTTP or explicitly verified HTTPS to the selected backend.
             properties:
               allowFrom:
                 description: |-
@@ -100,6 +100,41 @@ spec:
                           maxLength: 63
                           pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                           type: string
+                        tls:
+                          description: Verified HTTPS to the backend. Omission preserves
+                            plaintext HTTP.
+                          properties:
+                            caConfigMapRef:
+                              description: Public CA bundle in the ingress CR namespace,
+                                even if the backend is elsewhere.
+                              properties:
+                                key:
+                                  maxLength: 253
+                                  minLength: 1
+                                  pattern: ^[-._a-zA-Z0-9]+$
+                                  type: string
+                                name:
+                                  maxLength: 253
+                                  pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                            serverName:
+                              description: DNS name verified against the backend certificate;
+                                does not change the dial address or HTTP Host.
+                              maxLength: 253
+                              pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
+                              type: string
+                              x-kubernetes-validations:
+                              - message: serverName must be a DNS name, not an IP
+                                  address
+                                rule: '!isIP(self)'
+                          required:
+                          - caConfigMapRef
+                          - serverName
+                          type: object
                       required:
                       - port
                       - service
@@ -126,6 +161,21 @@ spec:
                       maximum: 65535
                       minimum: 1
                       type: integer
+                    timeouts:
+                      description: HTTP-only timeout overrides.
+                      properties:
+                        backendRequest:
+                          description: Wait for backend response headers after sending
+                            the request body. Defaults to 30s.
+                          maxLength: 32
+                          pattern: ^([0-9]{1,5}(h|m|s|ms)){1,4}$
+                          type: string
+                        request:
+                          description: Whole-response deadline. Omitted means no deadline.
+                          maxLength: 32
+                          pattern: ^([0-9]{1,5}(h|m|s|ms)){1,4}$
+                          type: string
+                      type: object
                   required:
                   - backend
                   - name
@@ -135,6 +185,12 @@ spec:
                   - message: HTTP exposes must listen on port 443
                     rule: '!has(self.mode) || self.mode != ''http'' || self.port ==
                       443'
+                  - message: backend TLS requires HTTP mode
+                    rule: '!has(self.backend.tls) || (has(self.mode) && self.mode
+                      == ''http'')'
+                  - message: timeouts require HTTP mode
+                    rule: '!has(self.timeouts) || (has(self.mode) && self.mode ==
+                      ''http'')'
                 maxItems: 50
                 minItems: 1
                 type: array
@@ -362,10 +418,13 @@ spec:
                     name:
                       type: string
                     reachable:
-                      description: True once the agent last dialled the backend successfully.
+                      description: |-
+                        Backend reachability. With backend TLS this requires a fresh verified handshake
+                        bound to the current configuration, CA bundle and unexpired certificate.
                       type: boolean
                     reason:
-                      description: Empty when reachable; "Unreachable" otherwise.
+                      description: Bounded backend or frontend failure reason; empty
+                        when ready.
                       type: string
                     tlsReady:
                       description: |-

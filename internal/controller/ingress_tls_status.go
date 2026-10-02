@@ -23,6 +23,7 @@ type ingressTLSState struct {
 	leaf     servingCertificate
 	reason   string
 	required bool
+	backends map[string]ingressBackendTLSState
 }
 
 func (r *TailnetIngressReconciler) prepareIngressTLS(ctx context.Context, in *tnv1.TailnetIngress, tn *tnv1.Tailnet, now time.Time) ingressTLSState {
@@ -30,7 +31,8 @@ func (r *TailnetIngressReconciler) prepareIngressTLS(ctx context.Context, in *tn
 	previousSecret := in.Status.TLSSecretName
 	oldManaged := previousSecret == in.Name+"-tls" || meta.FindStatusCondition(in.Status.Conditions, "TLSCleanup") != nil
 	plan, reason := resolveIngressTLS(in, tn)
-	state := ingressTLSState{plan: plan, reason: reason, required: ingressHTTPProtocol(in)}
+	state := ingressTLSState{plan: plan, reason: reason, required: ingressHTTPProtocol(in),
+		backends: r.prepareIngressBackendTLS(ctx, in)}
 	in.Status.TLSSecretName, in.Status.TLSNotAfter = "", nil
 	if reason != "" {
 		// The old generated name is no longer the selected source, but a rejected
@@ -122,14 +124,17 @@ func (r *TailnetIngressReconciler) prepareIngressTLS(ctx context.Context, in *tn
 }
 
 type ingressProbe struct {
-	Name             string     `json:"name"`
-	Reachable        bool       `json:"reachable"`
-	BackendReachable *bool      `json:"backendReachable,omitempty"`
-	TLSReady         *bool      `json:"tlsReady,omitempty"`
-	ConfigID         string     `json:"configID,omitempty"`
-	TLSCertSHA256    string     `json:"tlsCertSHA256,omitempty"`
-	TLSNotAfter      *time.Time `json:"tlsNotAfter,omitempty"`
-	LastProbe        time.Time  `json:"lastProbe"`
+	Name               string     `json:"name"`
+	Reachable          bool       `json:"reachable"`
+	BackendReachable   *bool      `json:"backendReachable,omitempty"`
+	TLSReady           *bool      `json:"tlsReady,omitempty"`
+	ConfigID           string     `json:"configID,omitempty"`
+	TLSCertSHA256      string     `json:"tlsCertSHA256,omitempty"`
+	TLSNotAfter        *time.Time `json:"tlsNotAfter,omitempty"`
+	BackendCAHash      string     `json:"backendCAHash,omitempty"`
+	BackendTLSNotAfter *time.Time `json:"backendTLSNotAfter,omitempty"`
+	BackendTLSReason   string     `json:"backendTLSReason,omitempty"`
+	LastProbe          time.Time  `json:"lastProbe"`
 }
 
 var errIngressProbe = errors.New("agent probe unavailable or invalid")
@@ -162,7 +167,7 @@ func (r *TailnetIngressReconciler) scrapeIngressProbes(ctx context.Context, ns, 
 func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress, state ingressTLSState, probes map[string]ingressProbe, probeErr error, now time.Time) {
 	// Derive the identity through the same renderer used for the ConfigMap.
 	expected := make(map[string]string)
-	if state.reason == "" && state.required {
+	if state.required {
 		cm, err := ingressExposesConfigMap(in, in.Namespace, state.plan)
 		if err == nil {
 			var envelope struct {
@@ -176,9 +181,17 @@ func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress,
 		}
 	}
 	backends := make(map[string]bool, len(probes))
+	backendReasons := make(map[string]string)
+	validExposes := safeIngressExposes(in.Spec.Exposes)
 	for _, expose := range in.Spec.Exposes {
 		probe := probes[expose.Name]
-		if expose.Mode == "http" {
+		if !validExposes {
+			backendReasons[expose.Name] = "BackendConfigurationInvalid"
+		} else if expose.Backend.TLS != nil {
+			reason := ingressBackendTLSReason(state.backends[expose.Name], probe, expected[expose.Name], probeErr, now)
+			backendReasons[expose.Name] = reason
+			backends[expose.Name] = reason == ""
+		} else if expose.Mode == "http" {
 			backends[expose.Name] = probe.BackendReachable != nil && *probe.BackendReachable &&
 				expected[expose.Name] != "" && probe.ConfigID == expected[expose.Name] && ingressProbeFresh(probe, now)
 		} else {
@@ -190,6 +203,21 @@ func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress,
 		probeErr = errIngressProbe
 	}
 	r.computeExposeStatus(in, backends, probeErr)
+	backendReason := ""
+	for i, expose := range in.Spec.Exposes {
+		if reason := backendReasons[expose.Name]; reason != "" {
+			in.Status.Exposes[i].Reason = reason
+			if backendReason == "" {
+				backendReason = reason
+			}
+		}
+	}
+	if backendReason != "" {
+		setCond(&in.Status.Conditions, in.Generation, "BackendsReachable", metav1.ConditionFalse, backendReason,
+			"backend configuration, trust source or verified agent observation is not ready")
+		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, backendReason,
+			"all backends require current verified observations")
+	}
 	if !state.required && state.reason == "" {
 		meta.RemoveStatusCondition(&in.Status.Conditions, "TLSReady")
 		return
@@ -239,6 +267,14 @@ func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress,
 // Early control-plane failures must not preserve a green TLS verdict indefinitely.
 // Keep the selected Secret name for cleanup tracking and the last observed public expiry.
 func invalidateIngressTLSObservation(in *tnv1.TailnetIngress) {
+	if ingressConfigVersion(in) > 0 {
+		setCond(&in.Status.Conditions, in.Generation, "BackendsReachable", metav1.ConditionFalse, "BackendProbePending",
+			"a current backend observation is unavailable")
+		for i := range in.Status.Exposes {
+			in.Status.Exposes[i].Reachable = false
+			in.Status.Exposes[i].Reason = "BackendProbePending"
+		}
+	}
 	if !ingressHTTPProtocol(in) {
 		meta.RemoveStatusCondition(&in.Status.Conditions, "TLSReady")
 		for i := range in.Status.Exposes {

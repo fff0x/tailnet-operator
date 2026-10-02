@@ -36,6 +36,8 @@ func TestIngressEarlyFailureClearsTLSProof(t *testing.T) {
 			}
 			if condStatus(got.Status.Conditions, "Ready") != metav1.ConditionFalse ||
 				condStatus(got.Status.Conditions, "TLSReady") != metav1.ConditionFalse ||
+				condStatus(got.Status.Conditions, "BackendsReachable") != metav1.ConditionFalse ||
+				got.Status.Exposes[0].Reachable ||
 				got.Status.Exposes[0].TLSReady == nil || *got.Status.Exposes[0].TLSReady {
 				t.Fatal("early control-plane failure preserved a green TLS proof")
 			}
