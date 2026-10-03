@@ -35,9 +35,9 @@ func TestSeparateServingTrustDoesNotReplaceControlTrust(t *testing.T) {
 				return nil, errors.New("rejected")
 			}
 		},
-		start: func(_ string, pool *x509.CertPool) error {
+		start: func(_ string, pool *x509.CertPool, denied bool) error {
 			started = true
-			if !pool.Equal(want) {
+			if !pool.Equal(want) || denied {
 				t.Fatal("serving roots not isolated")
 			}
 			return nil

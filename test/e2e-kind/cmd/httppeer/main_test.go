@@ -109,9 +109,9 @@ func TestStartupInputsAndOrder(t *testing.T) {
 			order = append(order, path)
 			return io.NopCloser(bytes.NewReader(data)), nil
 		},
-		start: func(key string, roots *x509.CertPool) error {
+		start: func(key string, roots *x509.CertPool, denied bool) error {
 			order = append(order, "start")
-			if key != "fixture-secret" || roots == nil {
+			if key != "fixture-secret" || roots == nil || denied {
 				t.Fatal("bad startup inputs")
 			}
 			return nil
@@ -130,7 +130,7 @@ func TestStartupInputsAndOrder(t *testing.T) {
 		}
 	}
 	d.getenv = func(string) string { return strings.Repeat("k", 4096) }
-	d.start = func(key string, _ *x509.CertPool) error {
+	d.start = func(key string, _ *x509.CertPool, _ bool) error {
 		if len(key) != 4096 {
 			t.Fatal("key length")
 		}
@@ -144,6 +144,72 @@ func TestStartupInputsAndOrder(t *testing.T) {
 	if err := run([]string{"--fixture=p1.8-http"}, "linux", 65532, d); err != errRejected {
 		t.Fatal("setenv failure")
 	}
+}
+
+func TestDeniedIdentityGuardBeforeIO(t *testing.T) {
+	for _, args := range [][]string{
+		{"--fixture=p1.8-http", "--identity=allowed"},
+		{"--fixture=p1.8-http", "--identity=denied "},
+		{"--fixture=p1.8-http", "--identity", "denied"},
+		{"--fixture=p1.8-http", "--identity=arbitrary-host"},
+		{"--fixture=p1.8-http", "--identity=denied", "--identity=denied"},
+		{"--fixture=p1.8-http", "--identity=denied", "--serving-ca=cert-manager"},
+		{"--fixture=p1.8-http", "--serving-ca=cert-manager", "--identity=denied"},
+		{"--identity=denied", "--fixture=p1.8-http"},
+		{"--fixture=wrong", "--identity=denied"},
+		{"--identity=denied"},
+	} {
+		if run(args, "linux", 65532, dependencies{}) != errRejected {
+			t.Fatal("invalid identity mode accepted")
+		}
+	}
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		for _, uid := range []int{0, 65532, 65533} {
+			if goos == "linux" && uid == 65532 {
+				continue
+			}
+			if run([]string{"--fixture=p1.8-http", "--identity=denied"}, goos, uid, dependencies{}) != errRejected {
+				t.Fatal("identity mode bypassed platform/uid guard")
+			}
+		}
+	}
+}
+
+func TestDeniedIdentityStartupAndConfiguration(t *testing.T) {
+	data, _, _ := makeCA(t, nil)
+	var order []string
+	d := dependencies{
+		getenv: func(name string) string { order = append(order, name); return "denied-key" },
+		setenv: func(name, value string) error { order = append(order, name+"="+value); return nil },
+		open: func(path string) (io.ReadCloser, error) {
+			order = append(order, path)
+			return io.NopCloser(bytes.NewReader(data)), nil
+		},
+		start: func(key string, pool *x509.CertPool, denied bool) error {
+			order = append(order, "start")
+			want, err := parseRoot(data, time.Now())
+			if err != nil || !denied || key != "denied-key" || !pool.Equal(want) {
+				t.Fatal("denied identity changed trust/key")
+			}
+			return nil
+		},
+	}
+	if run([]string{"--fixture=p1.8-http", "--identity=denied"}, "linux", 65532, d) != nil {
+		t.Fatal("denied identity rejected")
+	}
+	want := []string{"TS_AUTHKEY", "SSL_CERT_FILE=/control-ca/ca.pem", "SSL_CERT_DIR=/control-ca", rootPath, "start"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("startup effects: %v", order)
+	}
+	p := peerServer("denied-key", true) // Construction only: no tsnet effects.
+	if p.Hostname != "denied-peer" || p.ControlURL != "https://fixture-headscale.tailnet-system.svc:8443" || p.Dir != "/state" || !p.Ephemeral || p.AuthKey != "denied-key" || p.Logf == nil || p.UserLogf == nil {
+		t.Fatal("denied peer config")
+	}
+	if _, ok := p.Store.(*mem.Store); !ok {
+		t.Fatal("denied peer not in-memory")
+	}
+	p.Logf("must not log %s", "secret")
+	p.UserLogf("must not log %s", "secret")
 }
 
 func TestRootValidation(t *testing.T) {
@@ -209,7 +275,7 @@ func TestBoundedCARead(t *testing.T) {
 }
 
 func TestPeerConfigurationAndRunningIP(t *testing.T) {
-	p := peerServer("key") // Construction only; never Up, Start or Close.
+	p := peerServer("key", false) // Construction only; never Up, Start or Close.
 	if p.Hostname != "http-peer" || p.ControlURL != controlURL || p.Dir != "/state" || !p.Ephemeral || p.AuthKey != "key" || p.Logf == nil || p.UserLogf == nil {
 		t.Fatal("peer config")
 	}
@@ -374,7 +440,7 @@ func TestControlRoutesAndBoundedErrors(t *testing.T) {
 		return probe(ctx, input, func(*http.Request) (*http.Response, error) {
 			return nil, errors.New(strings.Repeat("private 100.64.0.9 ", 1000))
 		})
-	})
+	}, nil)
 	for _, tc := range []struct {
 		method, path, body string
 		status             int
@@ -537,7 +603,7 @@ func TestProbeBodyValidation(t *testing.T) {
 }
 
 // TLS and both wire protocols run exclusively over net.Pipe. No host listener,
-// DNS, tsnet startup, packet capture, or httptest.NewServer is used by this suite.
+// DNS, tsnet startup, packet capture, or httptest.NewServer is used by this test.
 func TestRealTLSOverInMemoryDial(t *testing.T) {
 	data, root, key := makeCA(t, nil)
 	roots, err := parseRoot(data, time.Now())
