@@ -125,11 +125,13 @@ func (r running) stop() {
 // which side of each hop is the tailnet: egress listens local and dials the tailnet; ingress listens
 // on the tailnet and dials the in-cluster backend.
 type forwarder struct {
-	ts      *tsnet.Server
-	mode    string
-	mu      sync.Mutex
-	run     map[string]running
-	metrics *agentMetrics
+	ts *tsnet.Server
+	// Optional owned-listener seam for unit tests; production always uses tsnet.Listen.
+	listenTailnet func(network, address string) (net.Listener, error)
+	mode          string
+	mu            sync.Mutex
+	run           map[string]running
+	metrics       *agentMetrics
 	// desired includes failed binds: absence from run must not make HTTP ready.
 	desired        []target
 	nextGeneration uint64
@@ -162,10 +164,13 @@ func (f *forwarder) reload(ctx context.Context, path string) (pending int, err e
 			return 0, fmt.Errorf("HTTP targets require ingress mode")
 		}
 	}
-	start, stop := diffTargets(f.current(), desired)
-
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	current := make(map[string]target, len(f.run))
+	for name, r := range f.run {
+		current[name] = r.t
+	}
+	start, stop := diffTargets(current, desired)
 	f.desired = desired
 	// Removals and failed binds also invalidate readiness immediately.
 	defer func() {
@@ -182,7 +187,12 @@ func (f *forwarder) reload(ctx context.Context, path string) (pending int, err e
 			log.Printf("target %s: listener stopped", name)
 		}
 	}
+	var httpTargets []target
 	for _, t := range start {
+		if t.Mode == "http" {
+			httpTargets = append(httpTargets, t)
+			continue
+		}
 		lctx, lcancel := context.WithCancel(ctx)
 		ln, err := f.listen(lctx, t)
 		if err != nil {
@@ -199,7 +209,47 @@ func (f *forwarder) reload(ctx context.Context, path string) (pending int, err e
 		default:
 		}
 	}
+	if len(httpTargets) != 0 {
+		lctx, lcancel := context.WithCancel(ctx)
+		ln, err := f.listenHTTP(lctx, httpTargets)
+		if err != nil {
+			lcancel()
+			pending += len(httpTargets)
+			log.Printf("HTTP group: listen :443 failed")
+		} else {
+			group := running{ln: ln, cancel: lcancel}
+			for _, t := range httpTargets {
+				f.nextGeneration++
+				group.t, group.generation = t, f.nextGeneration
+				f.run[t.Name] = group
+			}
+		}
+	}
 	return pending, nil
+}
+
+func (f *forwarder) bindTailnet(port int) (net.Listener, error) {
+	if f.listenTailnet != nil {
+		return f.listenTailnet("tcp", fmt.Sprintf(":%d", port))
+	}
+	return f.ts.Listen("tcp", fmt.Sprintf(":%d", port))
+}
+
+func (f *forwarder) listenHTTP(ctx context.Context, targets []target) (net.Listener, error) {
+	if f.mode != "ingress" {
+		return nil, fmt.Errorf("HTTP targets require ingress mode")
+	}
+	ln, err := f.bindTailnet(443)
+	if err != nil {
+		return nil, err
+	}
+	// Group admission, certificate policy and SNI metric selection ship as one unit.
+	h, err := serveHTTPIngressGroup(ctx, ln, targets, f.dial, f.metrics)
+	if err != nil {
+		ln.Close()
+		return nil, err
+	}
+	return h, nil
 }
 
 // listen binds one listen port and forwards every connection to the target. Egress binds a local
@@ -209,13 +259,13 @@ func (f *forwarder) listen(ctx context.Context, t target) (net.Listener, error) 
 	if err := t.validateHTTP(); err != nil {
 		return nil, err
 	}
-	if t.Mode == "http" && f.mode != "ingress" {
-		return nil, fmt.Errorf("HTTP targets require ingress mode")
+	if t.Mode == "http" {
+		return f.listenHTTP(ctx, []target{t})
 	}
 	var ln net.Listener
 	var err error
 	if f.mode == "ingress" {
-		ln, err = f.ts.Listen("tcp", fmt.Sprintf(":%d", t.ListenPort))
+		ln, err = f.bindTailnet(t.ListenPort)
 	} else {
 		ln, err = net.Listen("tcp", fmt.Sprintf(":%d", t.ListenPort))
 	}
@@ -226,15 +276,6 @@ func (f *forwarder) listen(ctx context.Context, t target) (net.Listener, error) 
 	dial := metrics.wrapDial(f.dial)
 	if f.metrics != nil {
 		ln = &measuredListener{Listener: ln, metrics: metrics}
-	}
-	if t.Mode == "http" {
-		// TLS wraps this exact tsnet listener, never a listener in the pod network.
-		h, err := serveHTTPIngress(ctx, ln, t, dial)
-		if err != nil {
-			ln.Close()
-			return nil, err
-		}
-		return h, nil
 	}
 	go func() {
 		for {
@@ -309,18 +350,24 @@ func pipe(a, b net.Conn) {
 // swap that fsnotify handles awkwardly, the set is tiny, and 10s of lag on adding a target is
 // invisible in practice. ponytail: 10s poll, not events.
 func watchTargets(ctx context.Context, path string, fw *forwarder) {
+	tick := time.NewTicker(10 * time.Second)
+	defer tick.Stop()
+	watchTargetsOnTicks(ctx, path, fw, tick.C)
+}
+
+func watchTargetsOnTicks(ctx context.Context, path string, fw *forwarder, ticks <-chan time.Time) {
 	var last time.Time
-	var retry bool
+	// Reconcile once even without an mtime change: the initial load may have failed
+	// binds, or the file may have changed before this watcher captured its mtime.
+	retry := true
 	if fi, err := os.Stat(path); err == nil {
 		last = fi.ModTime()
 	}
-	tick := time.NewTicker(10 * time.Second)
-	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-ticks:
 			fi, err := os.Stat(path)
 			if err != nil || (!retry && !fi.ModTime().After(last)) {
 				continue

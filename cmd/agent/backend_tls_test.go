@@ -26,6 +26,11 @@ const backendDNS = "service.backend.test"
 
 func backendCertificate(t *testing.T, expiry time.Time) (tls.Certificate, []byte) {
 	t.Helper()
+	return backendCertificateFor(t, backendDNS, expiry)
+}
+
+func backendCertificateFor(t *testing.T, name string, expiry time.Time) (tls.Certificate, []byte) {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +44,7 @@ func backendCertificate(t *testing.T, expiry time.Time) (tls.Certificate, []byte
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), DNSNames: []string{backendDNS}, NotBefore: time.Now().Add(-time.Hour), NotAfter: expiry, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), DNSNames: []string{name}, NotBefore: time.Now().Add(-time.Hour), NotAfter: expiry, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	leafDER, err := x509.CreateCertificate(rand.Reader, leaf, ca, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)

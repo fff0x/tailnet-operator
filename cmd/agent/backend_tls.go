@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -193,14 +194,30 @@ func (s *backendSource) proofConfig() (*tls.Config, string, error) {
 }
 
 func (h *httpIngress) currentBackendProof(hash string, notAfter time.Time) bool {
-	if hash == "" || !h.active() || !time.Now().Before(notAfter) {
+	return len(h.routes) == 1 && h.currentBackendProofFor(h.certs.t.DNSName, hash, notAfter)
+}
+
+func (h *httpIngress) currentBackendProofFor(dnsName, hash string, notAfter time.Time) bool {
+	runtime := h.routes[strings.ToLower(dnsName)]
+	if runtime == nil || hash == "" || !h.active() || !time.Now().Before(notAfter) {
 		return false
 	}
-	_, currentHash, err := h.transport.proofConfig()
+	_, currentHash, err := runtime.transport.proofConfig()
 	return err == nil && currentHash == hash && h.active()
 }
 
 func (h *httpIngress) probeBackendTLS(ctx context.Context) (string, time.Time, string) {
+	if len(h.routes) != 1 {
+		return "", time.Time{}, backendTLSProofStale
+	}
+	return h.probeBackendTLSFor(ctx, h.certs.t.DNSName)
+}
+
+func (h *httpIngress) probeBackendTLSFor(ctx context.Context, dnsName string) (string, time.Time, string) {
+	runtime := h.routes[strings.ToLower(dnsName)]
+	if runtime == nil {
+		return "", time.Time{}, backendTLSProofStale
+	}
 	h.mu.Lock()
 	if h.closing {
 		h.mu.Unlock()
@@ -213,11 +230,11 @@ func (h *httpIngress) probeBackendTLS(ctx context.Context) (string, time.Time, s
 	defer cancel()
 	stop := context.AfterFunc(h.ctx, cancel)
 	defer stop()
-	cfg, hash, err := h.transport.proofConfig()
+	cfg, hash, err := runtime.transport.proofConfig()
 	if err != nil {
 		return "", time.Time{}, backendCAUnavailable
 	}
-	raw, err := h.transport.dial(ctx, h.transport.t)
+	raw, err := runtime.transport.dial(ctx, runtime.t)
 	if err != nil {
 		return "", time.Time{}, backendTLSFailed
 	}
@@ -239,7 +256,7 @@ func (h *httpIngress) probeBackendTLS(ctx context.Context) (string, time.Time, s
 			notAfter = cert.NotAfter
 		}
 	}
-	if ctx.Err() != nil || !h.currentBackendProof(hash, notAfter) {
+	if ctx.Err() != nil || !h.currentBackendProofFor(dnsName, hash, notAfter) {
 		return "", time.Time{}, backendTLSProofStale
 	}
 	return hash, notAfter, ""

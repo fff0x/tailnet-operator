@@ -15,13 +15,14 @@ import (
 // to scrape metadata, never peer identities or addresses. A private registry avoids tsnet/global
 // collector collisions and does not accidentally expose unrelated process collectors.
 type agentMetrics struct {
-	mode     string
-	registry *prometheus.Registry
-	active   *prometheus.GaugeVec
-	bytes    *prometheus.CounterVec
-	dial     *prometheus.HistogramVec
-	mu       sync.Mutex
-	targets  map[string]connectionMetrics
+	mode         string
+	registry     *prometheus.Registry
+	active       *prometheus.GaugeVec
+	bytes        *prometheus.CounterVec
+	dial         *prometheus.HistogramVec
+	mu           sync.Mutex
+	targets      map[string]connectionMetrics
+	unattributed connectionMetrics
 }
 
 type connectionMetrics struct {
@@ -34,10 +35,10 @@ func newAgentMetrics(mode string) *agentMetrics {
 	m := &agentMetrics{
 		mode: mode, registry: prometheus.NewRegistry(), targets: make(map[string]connectionMetrics),
 		active: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "tailnet_agent_connections_active", Help: "Accepted client TCP connections currently open, including TLS handshakes.",
+			Name: "tailnet_agent_connections_active", Help: "Open client TCP connections assigned to a target; HTTP assignment begins at recognized SNI.",
 		}, []string{"target", "expose"}),
 		bytes: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "tailnet_agent_bytes_total", Help: "Bytes read from or written to accepted client connections; HTTP includes TLS wire overhead.",
+			Name: "tailnet_agent_bytes_total", Help: "Bytes on target-assigned client connections; HTTP counts after recognized SNI, including TLS wire overhead.",
 		}, []string{"target", "expose", "direction"}),
 		dial: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "tailnet_agent_dial_duration_seconds", Help: "Upstream TCP dial duration, including failed dials and health probes.",
@@ -45,6 +46,20 @@ func newAgentMetrics(mode string) *agentMetrics {
 	}
 	m.registry.MustRegister(m.active, m.bytes, m.dial)
 	return m
+}
+
+// Dedicated families prevent collisions with arbitrary configured expose names. Created only
+// for HTTP listeners; pre-SNI bytes stay here even after a route is selected.
+func (m *agentMetrics) unattributedConnection() connectionMetrics {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.unattributed.active == nil {
+		active := prometheus.NewGauge(prometheus.GaugeOpts{Name: "tailnet_agent_http_unattributed_connections_active", Help: "Open HTTP connections without a recognized SNI."})
+		bytes := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "tailnet_agent_http_unattributed_bytes_total", Help: "TLS wire bytes before recognized SNI, including rejected handshakes."}, []string{"direction"})
+		m.registry.MustRegister(active, bytes)
+		m.unattributed = connectionMetrics{active: active, toTarget: bytes.WithLabelValues("to_target"), fromTarget: bytes.WithLabelValues("from_target")}
+	}
+	return m.unattributed
 }
 
 func (m *agentMetrics) labels(name string) (target, expose string) {
