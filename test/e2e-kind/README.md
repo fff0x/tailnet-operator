@@ -6,12 +6,14 @@ created. Neither touches an existing kube-context, Docker socket or host configu
 | Runner | Tests | Typical duration |
 | --- | --- | --- |
 | `hack/e2e-kind.sh` | `TestInstall`, `TestLeaderFailover` | 3–4 min |
-| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP` | About 17 min for `--http-only` with backend CA projection checks; the full suite takes longer |
+| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP`, `TestIngressL4` | About 17 min for `--http-only`; full test-process budget 26 min, HTTP-only 18 min, L4-only 10 min (setup/cleanup additional) |
 
 ```sh
 # kind must be v0.32.0 (its embedded node image is pinned in kind.yaml / kind-http.yaml)
 nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind.sh'
-nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind-projection.sh [--http-only]'
+nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind-projection.sh'
+# Focused L4 acceptance; use --http-only instead for the HTTP/cert-manager path.
+nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind-projection.sh --l4-only'
 ```
 
 ## Requirements
@@ -105,8 +107,29 @@ wrong/invalid/deleted CA rejection and recovery without another agent restart.
 The existing endpoint returns 404 for the peer's fixed path; a proxy-generated 502 is a failure,
 not successful upstream acceptance. No new fixture binary, listener or mode is introduced.
 
-Not covered here: NetworkPolicy semantics of production CNIs, DERP/STUN traffic, L4 coexistence with
-HTTP, ACL-negative cases, WebSockets, published images, arm64 execution, long-running operation.
+**`TestIngressL4`** (`--l4-only` for a focused run) uses the real chart/reconciler, a generated L4 ingress
+and two separately authenticated tsnet peers. TCP 8443 forwards to a fixed fixture backend on 8081.
+A random nonce and hash response verify byte forwarding through both tailnet IPv4 and MagicDNS.
+The generated agent and both peers pass the same pre-start network gates as the HTTP fixture.
+
+One user remains allowed throughout. The other is denied, temporarily added to the allowed group,
+then removed again through the operator-owned policy. Positive stages check fresh connections through both address forms.
+Each negative stage requires three fresh IPv4 dial timeouts: any connection or unclassified failure fails immediately, without retries.
+Only revocation has a separate bounded convergence window before these assertions; initial denial has none.
+Unclassified MagicDNS failures do not count as ACL evidence. Positive controls and successful temporary access
+help distinguish denial from an unusable peer/backend, but do not prove every ACL behavior.
+Final checks require unchanged peer/agent identities and restart counts, an unchanged agent Deployment generation,
+and a Ready ingress. `probe-observations.json` retains every attempt, including convergence and failed-run observations.
+Probe results expose only bounded booleans and fixed phase/address-kind labels, not credentials or raw network errors.
+
+The peer helper has fixed ports and framing, bounded deadlines/concurrency, strict control JSON and no arbitrary dial mode.
+Its optional `--identity=denied` selects one fixed second hostname; it cannot be combined with the serving-CA override.
+This runner still preloads verified cert-manager assets for L4-only mode, but that test does not install cert-manager.
+
+Not covered here: NetworkPolicy semantics of production CNIs, DERP/STUN traffic, L4 egress/subnet routing,
+L4 coexistence with HTTP, HTTP-specific ACL-negative cases, WebSockets, published images, arm64 execution,
+long-running operation, DNS-specific ACL denial, or immediate revocation of new/established connections.
+Bounded negative observations are not exhaustive ACL coverage.
 
 ## Offline checks
 
