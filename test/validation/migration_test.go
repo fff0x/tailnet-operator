@@ -63,6 +63,9 @@ func TestMigration(t *testing.T) {
 		if clone.Spec.Names.Kind == "TailnetIngress" {
 			for i := range clone.Spec.Versions {
 				root := clone.Spec.Versions[i].Schema.OpenAPIV3Schema
+				// Object-level rules (e.g. a dnsLabel colliding with metadata.name) also reference
+				// exposes mode and must drop when the legacy schema has no mode field.
+				root.XValidations = withoutMigrationModeRules(root.XValidations)
 				spec := root.Properties["spec"]
 				delete(spec.Properties, "tls")
 				spec.XValidations = withoutMigrationModeRules(spec.XValidations)

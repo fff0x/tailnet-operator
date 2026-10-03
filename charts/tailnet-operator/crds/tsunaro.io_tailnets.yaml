@@ -141,6 +141,22 @@ spec:
                       Name of the ConfigMap (operator namespace, key "hosts") that receives the rendered hosts file.
                       Empty → the feature is off and a previously rendered ConfigMap is removed.
                     type: string
+                  ingressAliasTemplate:
+                    description: |-
+                      Optional template for a shorter DNS alias of an HTTP expose that opts in with `alias: true`.
+                      Same placeholders as ingressNameTemplate; {name} is the expose's effective label (dnsLabel or
+                      the CR name). The operator requires the alias to end in the SAME literal zone as
+                      ingressNameTemplate, because only that zone is guaranteed to resolve over the tailnet.
+                      Empty → aliases are disabled. The alias becomes an additional certificate SAN and SNI route;
+                      a name claimed by two CRs is resolved oldest-first and the loser reports DNSNameConflict.
+                    maxLength: 253
+                    type: string
+                    x-kubernetes-validations:
+                    - message: ingressAliasTemplate must contain {name} and end in
+                        a literal lowercase DNS zone with at least two labels
+                      rule: self == '' || (self.contains('{name}') && self.replace('{name}',
+                        'n').replace('{namespace}', 'ns').matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?([.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$')
+                        && self.matches('[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'))
                   ingressNameTemplate:
                     description: |-
                       Template for a TailnetIngress's DNS name; {name} is the CR name, {namespace} its namespace.

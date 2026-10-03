@@ -76,6 +76,12 @@ spec:
                   description: Expose publishes one in-cluster backend on the tailnet
                     node, listening on Port.
                   properties:
+                    alias:
+                      description: |-
+                        Request a shorter DNS alias for this HTTP expose, rendered from the Tailnet's
+                        ingressAliasTemplate with the effective label (dnsLabel or the CR name). Requires
+                        ingressAliasTemplate to be set; otherwise the CR reports InvalidDNSName.
+                      type: boolean
                     backend:
                       description: |-
                         Backend is the in-cluster Service an Expose forwards to. Namespace defaults to the CR's
@@ -139,6 +145,13 @@ spec:
                       - port
                       - service
                       type: object
+                    dnsLabel:
+                      description: |-
+                        HTTP DNS label substituted for {name} in the Tailnet's ingressNameTemplate.
+                        Omitted or empty uses the ingress-level name; does not change the expose identifier.
+                      maxLength: 63
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$
+                      type: string
                     mode:
                       default: l4
                       description: Listener mode. Omitted means L4 forwarding; HTTP
@@ -191,17 +204,31 @@ spec:
                   - message: timeouts require HTTP mode
                     rule: '!has(self.timeouts) || (has(self.mode) && self.mode ==
                       ''http'')'
+                  - message: dnsLabel requires HTTP mode
+                    rule: '!has(self.dnsLabel) || (has(self.mode) && self.mode ==
+                      ''http'')'
+                  - message: alias requires HTTP mode
+                    rule: '!has(self.alias) || !self.alias || (has(self.mode) && self.mode
+                      == ''http'')'
                 maxItems: 50
                 minItems: 1
                 type: array
                 x-kubernetes-validations:
-                - message: expose ports must be unique
-                  rule: self.all(e, self.exists_one(other, other.port == e.port))
+                - message: L4 expose ports must be unique and must not overlap HTTP
+                    ports
+                  rule: self.all(e, (has(e.mode) && e.mode == 'http') || self.exists_one(other,
+                    other.port == e.port))
                 - message: expose names must be unique
                   rule: self.all(e, self.exists_one(other, other.name == e.name))
-                - message: at most one HTTP expose is allowed
-                  rule: self.filter(e, has(e.mode) && e.mode == 'http').size() <=
-                    1
+                - message: at most one HTTP expose without a nonempty dnsLabel is
+                    allowed
+                  rule: self.filter(e, has(e.mode) && e.mode == 'http' && (!has(e.dnsLabel)
+                    || e.dnsLabel == '')).size() <= 1
+                - message: nonempty HTTP dnsLabels must be unique
+                  rule: self.all(e, !has(e.mode) || e.mode != 'http' || !has(e.dnsLabel)
+                    || e.dnsLabel == '' || self.filter(other, has(other.mode) && other.mode
+                    == 'http' && has(other.dnsLabel) && other.dnsLabel == e.dnsLabel).size()
+                    == 1)
               hostname:
                 description: Explicit tailnet (MagicDNS) hostname. Empty → rendered
                   from the Tailnet's ingressHostnameTemplate.
@@ -282,8 +309,8 @@ spec:
                 - name
                 type: object
               tls:
-                description: TLS source for the HTTP expose. An omitted or empty source
-                  may use Tailnet defaults.
+                description: TLS source shared by the HTTP exposes. An omitted or
+                  empty source may use Tailnet defaults.
                 properties:
                   issuerRef:
                     description: |-
@@ -411,6 +438,16 @@ spec:
                     backend:
                       description: The in-cluster backend the agent dials, as service:port.
                       type: string
+                    dnsAliases:
+                      description: Additional resolved DNS aliases for an HTTP expose;
+                        empty unless alias is requested and won.
+                      items:
+                        type: string
+                      type: array
+                    dnsName:
+                      description: Resolved DNS name for an HTTP expose; empty for
+                        L4.
+                      type: string
                     listenPort:
                       description: Port the tailnet node listens on for this expose.
                       format: int32
@@ -468,6 +505,12 @@ spec:
         x-kubernetes-validations:
         - message: name must be a DNS label of at most 40 characters
           rule: size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+        - message: an HTTP dnsLabel equal to the ingress name conflicts with an unlabeled
+            HTTP expose
+          rule: '!self.spec.exposes.exists(e, has(e.mode) && e.mode == ''http'' &&
+            (!has(e.dnsLabel) || size(e.dnsLabel) == 0)) || !self.spec.exposes.exists(e,
+            has(e.mode) && e.mode == ''http'' && has(e.dnsLabel) && e.dnsLabel ==
+            self.metadata.name)'
     served: true
     storage: true
     subresources:
