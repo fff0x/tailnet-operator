@@ -60,6 +60,7 @@ func TestResolveIngressTLS(t *testing.T) {
 			in := tlsIngress()
 			in.Spec.TLS = tt.local
 			tn := &tnv1.Tailnet{Spec: tnv1.TailnetSpec{Defaults: tnv1.TailnetDefaults{TLS: &tnv1.TLSDefaults{IssuerRef: tt.global}}}}
+			tn.Spec.DNS = tlsTestTailnet().Spec.DNS
 			beforeIn, beforeTN := in.DeepCopy(), tn.DeepCopy()
 			plan, reason := resolveIngressTLS(in, tn)
 			if reason != tt.reason || !plan.http || plan.secretName != tt.secret || !reflect.DeepEqual(plan.issuer, tt.issuer) {
@@ -112,7 +113,12 @@ func TestResolveIngressTLSAdmissionBypass(t *testing.T) {
 			in := tlsIngress()
 			in.Spec.TLS = &tnv1.IngressTLS{IssuerRef: &tnv1.TLSIssuerReference{Name: "ca"}}
 			tt.mutate(in)
-			_, reason := resolveIngressTLS(in, &tnv1.Tailnet{})
+			tn := tlsTestTailnet()
+			// These cases now exercise current Tailnet input, not observed status.
+			if tt.reason == "TLSInvalidDNSName" {
+				tn.Spec.DNS.IngressNameTemplate = in.Status.DNSName
+			}
+			_, reason := resolveIngressTLS(in, tn)
 			if reason != tt.reason {
 				t.Fatalf("reason=%q, want %q", reason, tt.reason)
 			}
@@ -120,7 +126,7 @@ func TestResolveIngressTLSAdmissionBypass(t *testing.T) {
 	}
 	// A global HTTP default does not change either omitted-mode or explicit L4 listeners.
 	for _, mode := range []string{"", "l4"} {
-		in := ingress("legacy", "tenant", tnv1.Expose{Name: "tcp", Mode: mode, Port: 6443})
+		in := ingress("legacy", "tenant", tnv1.Expose{Name: "tcp", Mode: mode, Port: 6443, Backend: tnv1.Backend{Service: "tcp", Port: 6443}})
 		tn := &tnv1.Tailnet{Spec: tnv1.TailnetSpec{Defaults: tnv1.TailnetDefaults{TLS: &tnv1.TLSDefaults{
 			IssuerRef: &tnv1.TLSIssuerReference{Name: "invalid-default", Group: "unsupported"},
 		}}}}
@@ -172,8 +178,8 @@ func TestInspectIngressCertificate(t *testing.T) {
 		{name: "expired", mutate: func(c *x509.Certificate) { c.NotAfter = now.Add(-time.Second) }, reason: "TLSCertificateExpired"},
 		{name: "exact-not-after", mutate: func(c *x509.Certificate) { c.NotAfter = now }, reason: "TLSCertificateExpired"},
 		{name: "future", mutate: func(c *x509.Certificate) { c.NotBefore = now.Add(time.Second) }, reason: "TLSCertificateNotYetValid"},
-		{name: "wrong-san", mutate: func(c *x509.Certificate) { c.DNSNames = []string{"different.invalid"} }, reason: "TLSCertificateInvalid"},
-		{name: "common-name-is-not-san", mutate: func(c *x509.Certificate) { c.DNSNames = nil; c.Subject.CommonName = dns }, reason: "TLSCertificateInvalid"},
+		{name: "wrong-san", mutate: func(c *x509.Certificate) { c.DNSNames = []string{"different.invalid"} }, reason: "TLSNameMismatch"},
+		{name: "common-name-is-not-san", mutate: func(c *x509.Certificate) { c.DNSNames = nil; c.Subject.CommonName = dns }, reason: "TLSNameMismatch"},
 		{name: "client-only", mutate: func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth} }, reason: "TLSCertificateInvalid"},
 		{name: "unknown-purpose-only", mutate: func(c *x509.Certificate) {
 			c.ExtKeyUsage = nil

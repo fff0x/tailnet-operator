@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -19,11 +20,12 @@ import (
 // Source inspection, projected material and a live local TLS observation are separate facts.
 // None of these proves that a remote tailnet peer can reach the listener.
 type ingressTLSState struct {
-	plan     ingressTLSPlan
-	leaf     servingCertificate
-	reason   string
-	required bool
-	backends map[string]ingressBackendTLSState
+	plan          ingressTLSPlan
+	leaf          servingCertificate
+	reason        string
+	uncoveredName string
+	required      bool
+	backends      map[string]ingressBackendTLSState
 }
 
 func (r *TailnetIngressReconciler) prepareIngressTLS(ctx context.Context, in *tnv1.TailnetIngress, tn *tnv1.Tailnet, now time.Time) ingressTLSState {
@@ -42,7 +44,7 @@ func (r *TailnetIngressReconciler) prepareIngressTLS(ctx context.Context, in *tn
 				"previous owned Certificate remains tracked until TLS source selection is resolved")
 		}
 		// Do not project references from a rejected source selection.
-		state.plan = ingressTLSPlan{}
+		state.plan = ingressTLSPlan{names: plan.names}
 		return state
 	}
 	if oldManaged && plan.issuer == nil {
@@ -112,7 +114,8 @@ func (r *TailnetIngressReconciler) prepareIngressTLS(ctx context.Context, in *tn
 		}
 		return state
 	}
-	leaf, secretReason := inspectIngressCertificate(&secret, in.Status.DNSName, now)
+	leaf, secretReason, uncoveredName := inspectIngressCertificateNames(&secret, plan.names.certificateNames, now)
+	state.uncoveredName = uncoveredName
 	state.leaf = leaf
 	if !leaf.notAfter.IsZero() {
 		in.Status.TLSNotAfter = leaf.notAfter.DeepCopy()
@@ -205,6 +208,12 @@ func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress,
 	r.computeExposeStatus(in, backends, probeErr)
 	backendReason := ""
 	for i, expose := range in.Spec.Exposes {
+		if expose.Mode == "http" {
+			in.Status.Exposes[i].DNSName = state.plan.names.exposeNames[expose.Name]
+			if alias := state.plan.names.aliasNames[expose.Name]; alias != "" {
+				in.Status.Exposes[i].DNSAliases = []string{alias}
+			}
+		}
 		if reason := backendReasons[expose.Name]; reason != "" {
 			in.Status.Exposes[i].Reason = reason
 			if backendReason == "" {
@@ -254,8 +263,11 @@ func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress,
 		}
 	}
 	if reason != "" {
-		setCond(&in.Status.Conditions, in.Generation, "TLSReady", metav1.ConditionFalse, reason,
-			"local TLS source or agent observation is not ready; this condition does not test a remote tailnet path")
+		message := "local TLS source or agent observation is not ready; this condition does not test a remote tailnet path"
+		if reason == "TLSNameMismatch" && state.uncoveredName != "" {
+			message = fmt.Sprintf("certificate does not cover configured DNS name %q", state.uncoveredName)
+		}
+		setCond(&in.Status.Conditions, in.Generation, "TLSReady", metav1.ConditionFalse, reason, message)
 		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, reason,
 			"HTTP requires a current local TLS observation and reachable backend")
 		return

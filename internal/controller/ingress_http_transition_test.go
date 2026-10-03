@@ -52,8 +52,8 @@ func transitionFixture(t *testing.T, previousV2 bool) (*TailnetIngressReconciler
 	if previousV2 {
 		in.Spec.Exposes[0].Timeouts = &tnv1.HTTPTimeouts{Request: extensionString("60s")}
 	}
-	plan := ingressTLSPlan{http: true, secretName: "frontend"}
-	dep := ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, in.Namespace, "old:agent", nil, plan)
+	plan := tlsTestPlan(in, "frontend")
+	dep := ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, in.Namespace, "old:agent", nil, corev1.ResourceRequirements{}, plan)
 	dep.UID, dep.Generation = "deployment-uid", 4
 	dep.Status.ObservedGeneration, dep.Status.Replicas = 4, 1
 	cm, err := ingressExposesConfigMap(in, in.Namespace, plan)
@@ -224,7 +224,7 @@ func TestIngressHTTPTransitionPrecedesControlPlaneFailures(t *testing.T) {
 func TestIngressHTTPTransitionRecovery(t *testing.T) {
 	ctx := context.Background()
 	r, in, _, oldCM, pod := transitionFixture(t, true)
-	transitionControlPlane(t, r, true)
+	tn := transitionControlPlane(t, r, true)
 	transitionReconcile(t, r, in)
 	transitionAcknowledgeScale(t, r, in)
 	if err := r.Delete(ctx, pod); err != nil {
@@ -239,7 +239,7 @@ func TestIngressHTTPTransitionRecovery(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Neither a missing frontend Secret nor a missing backend CA may unpause it.
+	// Shared frontend failure stays paused; a missing backend CA is target-local.
 	if _, reason := transitionReconcile(t, r, in); reason != "TLSSecretMissing" {
 		t.Fatalf("expected missing TLS source, got %s", reason)
 	}
@@ -253,11 +253,16 @@ func TestIngressHTTPTransitionRecovery(t *testing.T) {
 	if err := r.Create(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
-	if _, reason := transitionReconcile(t, r, in); reason != "BackendCAMissing" {
-		t.Fatalf("expected missing CA, got %s", reason)
+	transitionReconcile(t, r, in)
+	var got tnv1.TailnetIngress
+	if err := r.Get(ctx, client.ObjectKeyFromObject(in), &got); err != nil {
+		t.Fatal(err)
 	}
-	if *transitionDeployment(t, r, in).Spec.Replicas != 0 {
-		t.Fatal("missing backend CA restarted predecessor")
+	if condReason(got.Status.Conditions, "BackendsReachable") != "BackendCAMissing" {
+		t.Fatalf("expected per-backend missing CA: %+v", got.Status.Conditions)
+	}
+	if *transitionDeployment(t, r, in).Spec.Replicas != 1 {
+		t.Fatal("missing backend CA blocked the new configuration and healthy siblings")
 	}
 	if err := r.Create(ctx, backendCAFixture(t, in.Namespace, time.Now())); err != nil {
 		t.Fatal(err)
@@ -265,7 +270,8 @@ func TestIngressHTTPTransitionRecovery(t *testing.T) {
 	transitionReconcile(t, r, in)
 	dep := transitionDeployment(t, r, in)
 	if *dep.Spec.Replicas != 1 || dep.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType ||
-		!reflect.DeepEqual(dep.Spec.Template.Annotations, ingressProtocolAnnotations(in)) {
+		!ingressHTTPMarkersMatch(dep.Spec.Template.Annotations, ingressProtocolAnnotations(in), false) ||
+		dep.Spec.Template.Annotations[ingressHTTPSourceAnnotation] != ingressResolvedSourceDigest(in, tn) {
 		t.Fatalf("did not recover with new marker/config: %+v", dep.Spec)
 	}
 	var cm corev1.ConfigMap

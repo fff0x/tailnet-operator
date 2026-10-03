@@ -22,7 +22,7 @@ func TestIngressCleanupSurvivesMissingInheritedSource(t *testing.T) {
 			r := &TailnetIngressReconciler{Client: ingressTLSFakeClient(t), Certificates: certificates}
 			// The previously inherited issuer has been removed from the Tailnet. The CR
 			// remains admission-valid; resolution now fails before source inspection.
-			tn := &tnv1.Tailnet{}
+			tn := tlsTestTailnet()
 			state := r.prepareIngressTLS(context.Background(), in, tn, time.Now())
 			if state.reason != "TLSConfigurationMissing" || len(certificates.Actions()) != 0 {
 				t.Fatal("rejected source must not operate on the previous Certificate yet")

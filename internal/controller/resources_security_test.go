@@ -13,8 +13,8 @@ import (
 func TestAgentDeploymentSecurity(t *testing.T) {
 	tn := &tnv1.Tailnet{}
 	for name, dep := range map[string]*appsv1.Deployment{
-		"egress":  agentDeployment(&tnv1.TailnetEgress{ObjectMeta: metav1.ObjectMeta{Name: "out"}}, tn, "agents", "image", nil),
-		"ingress": ingressAgentDeployment(&tnv1.TailnetIngress{ObjectMeta: metav1.ObjectMeta{Name: "in"}}, tn, "agents", "image", nil),
+		"egress":  agentDeployment(&tnv1.TailnetEgress{ObjectMeta: metav1.ObjectMeta{Name: "out"}}, tn, "agents", "image", nil, corev1.ResourceRequirements{}),
+		"ingress": ingressAgentDeployment(&tnv1.TailnetIngress{ObjectMeta: metav1.ObjectMeta{Name: "in"}}, tn, "agents", "image", nil, corev1.ResourceRequirements{}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			pod := dep.Spec.Template.Spec

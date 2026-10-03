@@ -203,10 +203,39 @@ spec:
       backend: { service: shop-frontend, port: 8080 }
 ```
 
-One `mode: http` expose per ingress, always on port 443; other exposes stay L4. The agent presents
-the certificate for `status.dnsName` and requires that name as SNI and Host.
-The backend receives plain HTTP unless `backend.tls` selects verified HTTPS.
-`Tailnet.spec.dns.ingressNameTemplate` must be set.
+One ingress may publish several `mode: http` exposes (virtual hosts), always on port 443; other
+exposes stay L4. Each HTTP expose gets its own DNS name: without `dnsLabel` it uses the ingress base
+name (`status.dnsName`); with `dnsLabel: grafana` it renders `{name}` in
+`Tailnet.spec.dns.ingressNameTemplate` from that label. At most one HTTP expose may omit `dnsLabel`.
+The agent terminates TLS on one certificate covering every name, selects the backend by SNI, and
+requires the HTTP `Host` to equal the SNI. The backend receives plain HTTP unless `backend.tls`
+selects verified HTTPS. `Tailnet.spec.dns.ingressNameTemplate` must be set; each resolved name is
+reported in `status.exposes[].dnsName`.
+
+An HTTP expose may also request a shorter alias with `alias: true`, rendered from
+`Tailnet.spec.dns.ingressAliasTemplate` (same effective label). The alias must resolve in the SAME
+DNS zone as `ingressNameTemplate` — the operator rejects a different zone with `InvalidDNSName`,
+because only that zone is guaranteed over the tailnet. Aliases become extra certificate SANs and SNI
+routes, listed in `status.exposes[].dnsAliases`. A name claimed by two CRs of one Tailnet is
+resolved oldest-owner-first; the younger CR reports `Ready=False/DNSNameConflict` and is not
+published. For multi-tenant clusters use `{name}.{namespace}.<zone>` (dot-separated, never a hyphen)
+so conflicts can only arise within one namespace.
+
+```yaml
+# Multiple virtual hosts behind one node, with a short alias for the primary.
+spec:
+  exposes:
+    - name: web
+      mode: http
+      port: 443
+      alias: true                                     # also serve {name}.<alias-zone>
+      backend: { service: shop-frontend, port: 8080 }
+    - name: admin
+      mode: http
+      port: 443
+      dnsLabel: shop-admin                            # shop-admin.<zone>
+      backend: { service: shop-admin, port: 8080 }
+```
 
 The certificate source is, in order of precedence: `spec.tls.secretName` (a `kubernetes.io/tls`
 Secret in the ingress namespace whose leaf covers `status.dnsName`, wildcard SAN allowed),
@@ -225,7 +254,8 @@ curl -sI https://shop-shop-dev.prod-1.tailnet.example.internal | head -1      # 
 | --- | --- | --- |
 | `TLSReady=False/TLSSecretMissing`, `TLSSecretInvalid` | Secret absent, not `kubernetes.io/tls`, or key pair invalid | create or fix the Secret |
 | `TLSReady=False/TLSCertificatePending` | cert-manager has not issued yet | `kubectl -n shop-dev describe certificate shop-tls` |
-| `TLSReady=False/TLSCertificateMismatch`, `TLSInvalidDNSName` | leaf does not cover `status.dnsName` | fix the SANs or the ingress name template |
+| `TLSReady=False/TLSCertificateMismatch`, `TLSInvalidDNSName` | leaf does not cover every expose name (the first uncovered name is in the message) | fix the SANs or the ingress name/alias template |
+| `Ready=False/DNSNameConflict` | an older CR of this Tailnet already claims one of these DNS names/aliases | rename, drop the alias, or remove the other CR |
 | `TLSReady=False/TLSCertificateExpired`, `TLSCertificateNotYetValid` | validity interval | renew |
 | `TLSReady=False/TLSConfigMismatch`, `TLSProbeStale` | agent serves another configuration or has not reported within 30 s | wait one probe interval (≤ 20 s); check the agent pod |
 | `TLSReady=False/TLSCertificateConflict`, `TLSSecretConflict` | a foreign Certificate/Secret owns the target name | rename or remove the foreign object |

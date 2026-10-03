@@ -10,6 +10,17 @@ import (
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
+func tlsTestTailnet() *tnv1.Tailnet {
+	tn := &tnv1.Tailnet{}
+	tn.Spec.DNS.IngressNameTemplate = "{name}.{namespace}.tailnet.invalid"
+	return tn
+}
+
+func tlsTestPlan(in *tnv1.TailnetIngress, secret string) ingressTLSPlan {
+	names, _ := resolveIngressDNSNames(in, tlsTestTailnet())
+	return ingressTLSPlan{http: true, secretName: secret, names: names}
+}
+
 func tlsResourceIngress() *tnv1.TailnetIngress {
 	in := tlsIngress()
 	in.UID, in.Generation = "ingress-uid", 3
@@ -45,7 +56,7 @@ func renderedIngressTargets(t *testing.T, in *tnv1.TailnetIngress, ns string, pl
 func TestIngressTLSResources(t *testing.T) {
 	in, tn := tlsResourceIngress(), &tnv1.Tailnet{}
 	before := in.DeepCopy()
-	plan := ingressTLSPlan{http: true, secretName: "external-tls"}
+	plan := tlsTestPlan(in, "external-tls")
 	targets := renderedIngressTargets(t, in, in.Namespace, plan)
 	if len(targets) != 2 || targets[0].Mode != "http" || targets[0].ListenPort != 443 ||
 		targets[0].Address != "app.backend-only.svc.cluster.local" || targets[0].Port != 8080 ||
@@ -56,14 +67,14 @@ func TestIngressTLSResources(t *testing.T) {
 	if targets[1].Mode != "" || targets[1].CertFile != "" || targets[1].ConfigID != "" {
 		t.Fatal("L4 inherited TLS configuration")
 	}
-	dep := ingressAgentDeploymentTLS(in, tn, in.Namespace, "operator:test", nil, plan)
+	dep := ingressAgentDeploymentTLS(in, tn, in.Namespace, "operator:test", nil, corev1.ResourceRequirements{}, plan)
 	pod := dep.Spec.Template.Spec
 	if dep.Spec.Template.Annotations["tsunaro.io/agent-config-protocol"] != "http-v1" || dep.Spec.Strategy.Type != "Recreate" {
 		t.Fatal("HTTP protocol transition must retire legacy listeners")
 	}
 	plain := in.DeepCopy()
 	plain.Spec.Exposes[0].Mode = "l4"
-	if ingressAgentDeployment(plain, tn, plain.Namespace, "operator:test", nil).Spec.Template.Annotations != nil {
+	if ingressAgentDeployment(plain, tn, plain.Namespace, "operator:test", nil, corev1.ResourceRequirements{}).Spec.Template.Annotations != nil {
 		t.Fatal("L4-only configuration must retain its legacy Pod template")
 	}
 	if dep.Namespace != in.Namespace || pod.SecurityContext.FSGroup == nil || *pod.SecurityContext.FSGroup != 65532 {
@@ -96,7 +107,7 @@ func TestIngressTLSResources(t *testing.T) {
 	rotated := in.DeepCopy()
 	rotated.ResourceVersion = "next"
 	rotated.Status.TLSSecretName = "changed-observation"
-	if got := ingressAgentDeploymentTLS(rotated, tn, in.Namespace, "operator:test", nil, plan); !reflect.DeepEqual(dep, got) {
+	if got := ingressAgentDeploymentTLS(rotated, tn, in.Namespace, "operator:test", nil, corev1.ResourceRequirements{}, plan); !reflect.DeepEqual(dep, got) {
 		t.Fatal("observed certificate status changed the Pod template")
 	}
 	if got := renderedIngressTargets(t, rotated, in.Namespace, plan); !reflect.DeepEqual(targets, got) {
@@ -113,18 +124,18 @@ func TestIngressHTTPNeverFallsBackToL4(t *testing.T) {
 		{"missing-secret", func(_ *tnv1.TailnetIngress, p *ingressTLSPlan, _ *string) { p.secretName = "" }},
 		{"invalid-secret", func(_ *tnv1.TailnetIngress, p *ingressTLSPlan, _ *string) { p.secretName = "../secret" }},
 		{"no-uid", func(in *tnv1.TailnetIngress, _ *ingressTLSPlan, _ *string) { in.UID = "" }},
-		{"ip-dns", func(in *tnv1.TailnetIngress, _ *ingressTLSPlan, _ *string) { in.Status.DNSName = "100.64.0.1" }},
+		{"unresolved-names", func(_ *tnv1.TailnetIngress, p *ingressTLSPlan, _ *string) { p.names = ingressDNSPlan{} }},
 		{"wrong-namespace", func(_ *tnv1.TailnetIngress, _ *ingressTLSPlan, ns *string) { *ns = "foreign" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := tlsResourceIngress()
-			plan, ns := ingressTLSPlan{http: true, secretName: "external-tls"}, in.Namespace
+			plan, ns := tlsTestPlan(in, "external-tls"), in.Namespace
 			tc.change(in, &plan, &ns)
 			got := renderedIngressTargets(t, in, ns, plan)
 			if len(got) != 1 || got[0].Name != "ssh" || got[0].Mode != "" {
 				t.Fatalf("HTTP not withdrawn independently of L4: %+v", got)
 			}
-			dep := ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, ns, "operator:test", nil, plan)
+			dep := ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, ns, "operator:test", nil, corev1.ResourceRequirements{}, plan)
 			for _, v := range dep.Spec.Template.Spec.Volumes {
 				if v.Name == "tls" {
 					t.Fatal("invalid configuration projected a Secret")
@@ -157,7 +168,7 @@ func TestIngressAmbiguousExposesWithdrawAllListeners(t *testing.T) {
 	} {
 		in := tlsResourceIngress()
 		change(in)
-		plan := ingressTLSPlan{http: true, secretName: "external-tls"}
+		plan := tlsTestPlan(in, "external-tls")
 		if got := renderedIngressTargets(t, in, in.Namespace, plan); len(got) != 0 {
 			t.Fatalf("ambiguous listeners retained: %+v", got)
 		}
@@ -166,12 +177,14 @@ func TestIngressAmbiguousExposesWithdrawAllListeners(t *testing.T) {
 
 func TestIngressHTTPConfigIdentity(t *testing.T) {
 	in := tlsResourceIngress()
-	plan := ingressTLSPlan{http: true, secretName: "external-tls"}
+	plan := tlsTestPlan(in, "external-tls")
 	base := renderedIngressTargets(t, in, in.Namespace, plan)[0].ConfigID
 	for _, change := range []func(*tnv1.TailnetIngress, *ingressTLSPlan){
 		func(in *tnv1.TailnetIngress, _ *ingressTLSPlan) { in.UID = "recreated" },
 		func(in *tnv1.TailnetIngress, _ *ingressTLSPlan) { in.Generation++ },
-		func(in *tnv1.TailnetIngress, _ *ingressTLSPlan) { in.Status.DNSName = "new.tailnet.invalid" },
+		func(_ *tnv1.TailnetIngress, p *ingressTLSPlan) {
+			p.names = ingressDNSPlan{baseName: "new.tailnet.invalid", exposeNames: map[string]string{"web": "new.tailnet.invalid"}, certificateNames: []string{"new.tailnet.invalid"}}
+		},
 		func(in *tnv1.TailnetIngress, _ *ingressTLSPlan) { in.Spec.Exposes[0].Backend.Port++ },
 		func(_ *tnv1.TailnetIngress, p *ingressTLSPlan) { p.secretName = "new-secret" },
 		func(_ *tnv1.TailnetIngress, p *ingressTLSPlan) {

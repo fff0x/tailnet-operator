@@ -29,8 +29,9 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
   end routes by SNI/Host.
 - **`TailnetIngress`** (tenant namespace) — the mirror: expose in-cluster Services *on* the tailnet
   as one node with a MagicDNS name and, with a template, a DNS name under your zone. L4 exposes
-  forward TCP; one `mode: http` expose terminates TLS on the agent with a Secret or cert-manager
-  certificate and forwards HTTP or explicitly verified HTTPS to the app — no shared gateway needed.
+  forward TCP; one or more `mode: http` exposes (virtual hosts, each with its own name and optional
+  short alias) terminate TLS on the agent with a Secret or cert-manager certificate and forward HTTP
+  or explicitly verified HTTPS to the app, routed by SNI — no shared gateway needed.
 - **The tag is the authorization.** Each CR is its own node with its own tag; the policy's grants for
   that tag decide what it may reach (egress) or who may reach it (ingress). Without
   `Tailnet.spec.policy` the operator only *reads* the policy and reports what is missing; with it, the
@@ -163,7 +164,7 @@ at admission. See [validation rules and tests](docs/USAGE.md#13-validation) befo
 | --- | --- | --- |
 | `Tailnet` | `ApiReachable`, `ApiKeyValid`, `HeadscaleCompatible`, `PolicyMode`, `SplitDNS`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable` / `Unhealthy` (database down); `Valid` / `Rejected` / `Error`; `Compatible` / `Incompatible` / `CannotVerify` / `ProbeFailed`; `Database` / `File`; `SplitDNS=Unknown/CannotVerify` (manual configuration required); `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyModeFile` (write skipped), `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
 | `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`, `ProbeFailed` (agent not scraped — NetworkPolicy or pod down; nothing is known about routes/dials); `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`; per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved` (re-approved by the operator on the next policy reconcile), `NoGrant`, `ProbeFailed` |
-| `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `TLSReady`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist), `InvalidDNSName`, and for `mode: http` the `TLS*` reasons ([USAGE §6.1](docs/USAGE.md#61-ingress-terminate-tls-on-the-agent)) |
+| `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `TLSReady`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist), `InvalidDNSName`, `DNSNameConflict` (an older CR already claims a name/alias), and for `mode: http` the `TLS*` reasons ([USAGE §6.1](docs/USAGE.md#61-ingress-terminate-tls-on-the-agent)) |
 
 `Tailnet.status.policy` = `{renderedHash, appliedHash, appliedAt, generated{tags,grants,routes}}`;
 `TailnetIngress.status.dnsName` is the rendered DNS name (published as A record only — the IPv4 node
