@@ -54,6 +54,16 @@ type DNSSpec struct {
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:XValidation:rule="self == '' || (self.contains('{name}') && self.replace('{name}', 'n').replace('{namespace}', 'ns').matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?([.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$') && self.matches('[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'))",message="ingressNameTemplate must contain {name} and end in a literal lowercase DNS zone with at least two labels"
 	IngressNameTemplate string `json:"ingressNameTemplate,omitempty"`
+	// Optional template for a shorter DNS alias of an HTTP expose that opts in with `alias: true`.
+	// Same placeholders as ingressNameTemplate; {name} is the expose's effective label (dnsLabel or
+	// the CR name). The operator requires the alias to end in the SAME literal zone as
+	// ingressNameTemplate, because only that zone is guaranteed to resolve over the tailnet.
+	// Empty → aliases are disabled. The alias becomes an additional certificate SAN and SNI route;
+	// a name claimed by two CRs is resolved oldest-first and the loser reports DNSNameConflict.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="self == '' || (self.contains('{name}') && self.replace('{name}', 'n').replace('{namespace}', 'ns').matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?([.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$') && self.matches('[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'))",message="ingressAliasTemplate must contain {name} and end in a literal lowercase DNS zone with at least two labels"
+	IngressAliasTemplate string `json:"ingressAliasTemplate,omitempty"`
 }
 
 // PolicySpec lets the operator own the control server's policy (Headscale "database" policy mode).

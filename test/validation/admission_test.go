@@ -275,6 +275,9 @@ func TestAdmission(t *testing.T) {
 		t.Run("extensions", func(t *testing.T) {
 			testHTTPExtensionAdmission(t, newIngress, admit, reject)
 		})
+		t.Run("virtual-hosts", func(t *testing.T) {
+			testHTTPVirtualHostAdmission(t, newIngress, admit, reject)
+		})
 
 		for _, mode := range []string{"omitted", "l4", "http"} {
 			t.Run("mode/"+mode, func(t *testing.T) {
@@ -357,7 +360,7 @@ func TestAdmission(t *testing.T) {
 				second := newIngress()
 				expose(second)["name"] = "another"
 				spec["exposes"] = append(spec["exposes"].([]any), expose(second))
-			}, "at most one HTTP expose is allowed"},
+			}, "at most one HTTP expose without a nonempty dnsLabel is allowed"},
 			{"mutually-exclusive", func(o *unstructured.Unstructured) {
 				o.Object["spec"].(map[string]any)["tls"] = map[string]any{"secretName": "app-tls", "issuerRef": map[string]any{"name": "ca"}}
 			}, "tls.secretName and tls.issuerRef are mutually exclusive"},

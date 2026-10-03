@@ -68,6 +68,8 @@ type HTTPTimeouts struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.mode) || self.mode != 'http' || self.port == 443",message="HTTP exposes must listen on port 443"
 // +kubebuilder:validation:XValidation:rule="!has(self.backend.tls) || (has(self.mode) && self.mode == 'http')",message="backend TLS requires HTTP mode"
 // +kubebuilder:validation:XValidation:rule="!has(self.timeouts) || (has(self.mode) && self.mode == 'http')",message="timeouts require HTTP mode"
+// +kubebuilder:validation:XValidation:rule="!has(self.dnsLabel) || (has(self.mode) && self.mode == 'http')",message="dnsLabel requires HTTP mode"
+// +kubebuilder:validation:XValidation:rule="!has(self.alias) || !self.alias || (has(self.mode) && self.mode == 'http')",message="alias requires HTTP mode"
 type Expose struct {
 	// Listener mode. Omitted means L4 forwarding; HTTP requests TLS termination.
 	// +optional
@@ -79,6 +81,17 @@ type Expose struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// +kubebuilder:validation:MaxLength=63
 	Name string `json:"name"`
+	// HTTP DNS label substituted for {name} in the Tailnet's ingressNameTemplate.
+	// Omitted or empty uses the ingress-level name; does not change the expose identifier.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$`
+	// +kubebuilder:validation:MaxLength=63
+	DNSLabel string `json:"dnsLabel,omitempty"`
+	// Request a shorter DNS alias for this HTTP expose, rendered from the Tailnet's
+	// ingressAliasTemplate with the effective label (dnsLabel or the CR name). Requires
+	// ingressAliasTemplate to be set; otherwise the CR reports InvalidDNSName.
+	// +optional
+	Alias bool `json:"alias,omitempty"`
 	// Port the tailnet node listens on — what a tailnet peer dials on this node's MagicDNS name/IP.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
@@ -103,11 +116,12 @@ type TailnetIngressSpec struct {
 	Hostname string `json:"hostname,omitempty"`
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=50
-	// +kubebuilder:validation:XValidation:rule="self.all(e, self.exists_one(other, other.port == e.port))",message="expose ports must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.all(e, (has(e.mode) && e.mode == 'http') || self.exists_one(other, other.port == e.port))",message="L4 expose ports must be unique and must not overlap HTTP ports"
 	// +kubebuilder:validation:XValidation:rule="self.all(e, self.exists_one(other, other.name == e.name))",message="expose names must be unique"
-	// +kubebuilder:validation:XValidation:rule="self.filter(e, has(e.mode) && e.mode == 'http').size() <= 1",message="at most one HTTP expose is allowed"
+	// +kubebuilder:validation:XValidation:rule="self.filter(e, has(e.mode) && e.mode == 'http' && (!has(e.dnsLabel) || e.dnsLabel == '')).size() <= 1",message="at most one HTTP expose without a nonempty dnsLabel is allowed"
+	// +kubebuilder:validation:XValidation:rule="self.all(e, !has(e.mode) || e.mode != 'http' || !has(e.dnsLabel) || e.dnsLabel == '' || self.filter(other, has(other.mode) && other.mode == 'http' && has(other.dnsLabel) && other.dnsLabel == e.dnsLabel).size() == 1)",message="nonempty HTTP dnsLabels must be unique"
 	Exposes []Expose `json:"exposes"`
-	// TLS source for the HTTP expose. An omitted or empty source may use Tailnet defaults.
+	// TLS source shared by the HTTP exposes. An omitted or empty source may use Tailnet defaults.
 	// +optional
 	TLS *IngressTLS `json:"tls,omitempty"`
 	// Peers allowed to reach this node (policy grant src), e.g. ["group:team-a"]. Only used when
@@ -127,6 +141,12 @@ type TailnetIngressSpec struct {
 // ExposeStatus is the per-expose observed state.
 type ExposeStatus struct {
 	Name string `json:"name"`
+	// Resolved DNS name for an HTTP expose; empty for L4.
+	// +optional
+	DNSName string `json:"dnsName,omitempty"`
+	// Additional resolved DNS aliases for an HTTP expose; empty unless alias is requested and won.
+	// +optional
+	DNSAliases []string `json:"dnsAliases,omitempty"`
 	// Port the tailnet node listens on for this expose.
 	ListenPort int32 `json:"listenPort"`
 	// The in-cluster backend the agent dials, as service:port.
@@ -190,6 +210,7 @@ type TailnetIngressStatus struct {
 // TailnetIngress exposes in-cluster L4 services on the tailnet as one tsnet node with a MagicDNS
 // name. It lives in the tenant namespace; the tag's grants decide which tailnet peers may reach it.
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="name must be a DNS label of at most 40 characters"
+// +kubebuilder:validation:XValidation:rule="!self.spec.exposes.exists(e, has(e.mode) && e.mode == 'http' && (!has(e.dnsLabel) || size(e.dnsLabel) == 0)) || !self.spec.exposes.exists(e, has(e.mode) && e.mode == 'http' && has(e.dnsLabel) && e.dnsLabel == self.metadata.name)",message="an HTTP dnsLabel equal to the ingress name conflicts with an unlabeled HTTP expose"
 type TailnetIngress struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
