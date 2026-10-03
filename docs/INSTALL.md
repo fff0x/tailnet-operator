@@ -83,12 +83,22 @@ Switching to `database` is described in [§7.3](#73-migrating-from-file-mode).
 
 If Headscale uses PostgreSQL, set `HEADSCALE_DATABASE_POSTGRES_SSL=verify-full`, mount the server
 CA and point `PGSSLROOTCERT` at it (with CloudNativePG: the generated server CA and the `-rw`
-Service FQDN). Verify on the primary that every Headscale connection shows `ssl=t`:
+Service FQDN). Select the intended kube-context and the current database primary. Adjust the database
+role filter if the deployment does not use `headscale`:
 
 ```sh
-kubectl -n <headscale-ns> exec <db-primary> -c postgres -- \
-  psql -qtAc "select s.ssl, s.version from pg_stat_ssl s join pg_stat_activity a using (pid) where a.usename='headscale'"
+kubectl --context <context> -n <headscale-ns> exec <db-primary> -c postgres -- \
+  psql -X --no-password -v ON_ERROR_STOP=1 -qtAc \
+  "select host(a.client_addr), s.ssl, s.version, s.cipher from pg_stat_activity a left join pg_stat_ssl s using (pid) where a.usename='headscale'"
 ```
+
+Require at least one row and `ssl=t` in every row. An empty result is inconclusive, not a pass;
+`false` or `NULL` fails the transport check. Correlate client addresses with the running Headscale pods.
+
+This proves encryption for the observed connections, not certificate-name or CA validation by itself.
+Check the live pod's selected SSL mode, database hostname and CA mount without dumping credentials.
+Absence of TLS errors in logs is not a negative validation test; retained logs might omit startup.
+Test rejection of a wrong CA or hostname only in an isolated fixture, not by breaking a production database connection.
 
 ### 2.5 Preflight
 
