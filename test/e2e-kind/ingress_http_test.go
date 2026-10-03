@@ -140,7 +140,7 @@ func TestIngressHTTP(t *testing.T) {
 		Server: "https://fixture-headscale.tailnet-system.svc:8443", APIURL: "https://fixture-headscale.tailnet-system.svc:8443",
 		APISecretRef: tnv1.SecretKeyRef{Name: "headscale-bootstrap", Key: "apiKey"}, APIKeyLifetime: metav1.Duration{Duration: time.Hour}, AuthKeyLifetime: metav1.Duration{Duration: time.Hour},
 		Proxy:  tnv1.ProxySpec{ProbeInterval: metav1.Duration{Duration: 2 * time.Second}},
-		DNS:    tnv1.DNSSpec{IngressNameTemplate: "{name}.fixture.test"},
+		DNS:    tnv1.DNSSpec{IngressNameTemplate: "{name}.fixture.test", IngressAliasTemplate: "{name}-{namespace}.fixture.test"},
 		Policy: tnv1.PolicySpec{BaseConfigMap: "headscale-policy", Mode: "Apply", TagOwners: []string{httpFixtureUser + "@"}, RouteApprovers: []string{httpFixtureUser + "@"}, IngressSourceAllowlist: []string{"autogroup:member"}},
 	}}
 	x.create(tn)
@@ -327,8 +327,13 @@ func TestIngressHTTP(t *testing.T) {
 	x.save("agent-final.json", &agent)
 	x.save("result.json", map[string]any{"realChartAndReconciler": true, "realCertManagerIssuance": true, "webhookAdmittedAgentGateExecuted": true, "initialHTTP": beforeResults, "rotatedHTTP": afterResults, "sameAgentAcrossRotation": true, "aclNegativeTested": false, "webSocketsTested": false, "l4Tested": false})
 	t.Log("gate: real chart/reconciler/cert-manager, generated agent gate, peer HTTP1+HTTP2 and actual issued-certificate rotation without agent restart")
-	t.Run("BackendTLS", func(t *testing.T) {
+	if !t.Run("BackendTLS", func(t *testing.T) {
 		testIngressBackendTLS(t, x, ingress, &agent, rotatedLeaf.hash, servingCA)
+	}) {
+		return // The v3 gate requires the proven, recovered v2 predecessor.
+	}
+	t.Run("VirtualHosts", func(t *testing.T) {
+		testIngressVirtualHosts(t, x, ingress, &agent, initialCertificateUID, rotatedLeaf.hash)
 	})
 }
 
