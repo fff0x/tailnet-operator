@@ -95,11 +95,24 @@ func TestIngressTLSExternalSecretAndMissingManager(t *testing.T) {
 			if err := kube.Create(ctx, in); err != nil {
 				t.Fatal(err)
 			}
+			// envtest runs no Deployment controller. The HTTP source transition scales the agent
+			// Deployment to zero and waits for the controller to observe it; emulate exactly that
+			// observation (never Pods, never a non-zero replica count) so the barrier can clear.
+			observeScaleDown := func(ctx context.Context) {
+				var dep appsv1.Deployment
+				if kube.Get(ctx, key, &dep) != nil || dep.Spec.Replicas == nil || *dep.Spec.Replicas != 0 ||
+					(dep.Status.ObservedGeneration == dep.Generation && dep.Status.Replicas == 0) {
+					return
+				}
+				dep.Status.ObservedGeneration, dep.Status.Replicas = dep.Generation, 0
+				_ = kube.Status().Update(ctx, &dep) // conflicts retry on the next poll
+			}
 			waitTLS := func(reason string, expires *time.Time, limit time.Duration) {
 				t.Helper()
 				deadline, cancel := context.WithTimeout(ctx, limit)
 				defer cancel()
 				eventually(t, deadline, "bounded TLS verdict "+reason, func() bool {
+					observeScaleDown(deadline)
 					if err := kube.Get(deadline, key, in); err != nil {
 						t.Fatal("read ingress fixture")
 					}
