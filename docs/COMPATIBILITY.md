@@ -37,8 +37,10 @@ lexical hosts-file de-duplication. `ingressAliasTemplate` must share the zone of
 
 Old agents reject the new envelope rather than silently ignoring security settings.
 The `Recreate` strategy and changed `tsunaro.io/agent-config-protocol` annotation retire the old process on a protocol transition.
-Extended ingresses also carry a static `tsunaro.io/agent-http-config` digest of expose configuration and TLS/Tailnet references.
-A changed marker first scales the owned Deployment to zero and waits for its Pods to disappear, before checking Headscale dependencies.
+HTTP ingresses also carry a static `tsunaro.io/agent-http-config` digest of expose configuration and TLS/Tailnet references.
+A separate marker tracks the resolved TLS source, including a Tailnet-default issuer.
+On upgrade to v0.6.0, **every existing HTTP ingress retires its agent once**, including single-expose v1 and v2 ingresses, because this source marker is absent.
+A missing or changed marker first scales the owned Deployment to zero and waits for its Pods to disappear, before checking Headscale dependencies.
 This also protects a timeout-only v2 ingress when backend TLS is added. Missing dependencies cannot restore the plaintext predecessor.
 Recovery installs the new configuration before restoring replicas. All exposes on that ingress are interrupted during retirement.
 Failed Kubernetes writes or stuck terminating Pods delay the transition; the operator does not force-delete Pods.
