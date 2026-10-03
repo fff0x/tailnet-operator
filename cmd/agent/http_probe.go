@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -54,6 +55,16 @@ func (h *httpIngress) currentProof(proof tlsObservation) bool {
 // It intentionally does NOT exercise tsnet Accept, ACLs, DERP, routing or DNS. Real peer TLS/HTTP
 // acceptance is separate. net.Pipe does not expose another pod/network listener.
 func (h *httpIngress) probeTLS(ctx context.Context) (tlsObservation, error) {
+	if len(h.routes) != 1 {
+		return tlsObservation{}, errLocalTLS
+	}
+	return h.probeTLSFor(ctx, h.certs.t.DNSName)
+}
+
+func (h *httpIngress) probeTLSFor(ctx context.Context, dnsName string) (tlsObservation, error) {
+	if h.routes[strings.ToLower(dnsName)] == nil {
+		return tlsObservation{}, errLocalTLS
+	}
 	h.mu.Lock()
 	if h.closing {
 		h.mu.Unlock()
@@ -73,7 +84,7 @@ func (h *httpIngress) probeTLS(ctx context.Context) (tlsObservation, error) {
 	if err != nil {
 		return tlsObservation{}, errLocalTLS
 	}
-	proof, err := localTLSHandshake(ctx, h.srv.TLSConfig, selected.Leaf, h.certs.t.DNSName)
+	proof, err := localTLSHandshake(ctx, h.srv.TLSConfig, selected.Leaf, dnsName)
 	if err != nil || ctx.Err() != nil || !h.currentProof(proof) {
 		return tlsObservation{}, errLocalTLS
 	}

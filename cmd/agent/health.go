@@ -75,7 +75,7 @@ func validateBackendProof(r *probeResult, h *httpIngress) {
 		return
 	}
 	age := time.Since(r.LastProbe)
-	if r.BackendReachable != nil && *r.BackendReachable && r.BackendTLSNotAfter != nil && h != nil && age >= 0 && age <= httpProofMaxAge && h.currentBackendProof(r.BackendCAHash, *r.BackendTLSNotAfter) {
+	if r.BackendReachable != nil && *r.BackendReachable && r.BackendTLSNotAfter != nil && h != nil && age >= 0 && age <= httpProofMaxAge && h.currentBackendProofFor(r.owner.t.DNSName, r.BackendCAHash, *r.BackendTLSNotAfter) {
 		return
 	}
 	r.BackendReachable = falseBool()
@@ -256,7 +256,7 @@ func probeOne(ctx context.Context, probe probeTarget) probeResult {
 			// Closure cancels backend work as well as the component handshake.
 			stop := context.AfterFunc(h.ctx, cancel)
 			defer stop()
-			proof, err := h.probeTLS(ctx)
+			proof, err := h.probeTLSFor(ctx, t.DNSName)
 			if err == nil {
 				ready := true
 				r.TLSReady = &ready
@@ -268,7 +268,7 @@ func probeOne(ctx context.Context, probe probeTarget) probeResult {
 	if t.Mode == "http" && t.BackendServerName != "" {
 		r.BackendTLSReason = backendTLSProofStale
 		if h, ok := probe.ln.(*httpIngress); ok {
-			hash, expiry, reason := h.probeBackendTLS(ctx)
+			hash, expiry, reason := h.probeBackendTLSFor(ctx, t.DNSName)
 			r.BackendTLSReason = reason
 			if reason == "" {
 				r.BackendCAHash = hash
