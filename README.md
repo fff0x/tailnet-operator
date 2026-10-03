@@ -119,7 +119,8 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | `tagTemplate` / `hostnameTemplate` | `tag:egress-{name}` / `egress-{name}` | egress tag and MagicDNS name when the CR sets none |
 | `ingressTagTemplate` / `ingressHostnameTemplate` | `tag:ingress-{name}` / `ingress-{name}` | same for ingress |
 | `dns.hostsConfigMap` | off | ConfigMap (key `hosts`) receiving the rendered CoreDNS hosts file |
-| `dns.ingressNameTemplate` | off | `{name}`, `{namespace}` → `TailnetIngress.status.dnsName`; keep it one label below your wildcard cert |
+| `dns.ingressNameTemplate` | off | `{name}`, `{namespace}` → ingress and HTTP-expose DNS names; an expose's `dnsLabel` replaces `{name}` |
+| `dns.ingressAliasTemplate` | off | Optional HTTP-alias template in the same zone as `ingressNameTemplate` |
 | `policy.baseConfigMap` | off | ConfigMap (key `policy`) with the human-written base policy (HuJSON) |
 | `policy.renderedConfigMap` | `<base>-rendered` | where the render is published for review |
 | `policy.mode` | `DryRun` | `DryRun` renders only; `Apply` also writes Headscale when live ≠ render |
@@ -147,12 +148,14 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 | `tailnetRef.name` | — | the Tailnet |
 | `tag` / `hostname` | from templates | node tag / MagicDNS name |
 | `allowFrom[]` | required | at least one non-empty peer source (policy `src`); each must match `ingressSourceAllowlist` when policy generation is enabled |
-| `exposes[].name`, `.port` | — | listener on the tailnet node; 1–50 exposes, unique names and ports |
+| `exposes[].name`, `.port` | — | 1–50 exposes with unique names; HTTP exposes share port 443, L4 ports must be unique |
 | `exposes[].backend.{service,namespace,port}` | namespace = CR's | in-cluster backend; an explicit namespace selects a Service there, while CA references stay in the CR namespace |
-| `exposes[].mode` | `l4` | `http`: terminate TLS on the agent (port 443, one per CR) and proxy HTTP |
+| `exposes[].mode` | `l4` | `http`: terminate TLS on the agent (port 443) and proxy HTTP, routing virtual hosts by SNI |
+| `exposes[].dnsLabel` | CR name | HTTP name substituted into `ingressNameTemplate`; at most one HTTP expose may omit it |
+| `exposes[].alias` | `false` | Also publish the HTTP expose under `ingressAliasTemplate` and include that name in the certificate |
 | `exposes[].backend.tls` | absent | verified HTTPS upstream with an explicit `serverName` and namespace-local `caConfigMapRef` |
 | `exposes[].timeouts.{request,backendRequest}` | unlimited / `30s` | whole HTTP response / backend response-header deadline; `0s` disables |
-| `tls.secretName` / `tls.issuerRef` | `Tailnet.spec.defaults.tls.issuerRef` | certificate for the `http` expose: a `kubernetes.io/tls` Secret in the CR namespace, or a cert-manager `Issuer`/`ClusterIssuer` |
+| `tls.secretName` / `tls.issuerRef` | `Tailnet.spec.defaults.tls.issuerRef` | One certificate covering all HTTP names and aliases: a namespace-local `kubernetes.io/tls` Secret, or a cert-manager `Issuer`/`ClusterIssuer` |
 | `image`, `resources` | Tailnet defaults | agent overrides |
 
 Kubernetes ≥1.31 is required. CR names, addresses, ports, list sizes and policy inputs are checked
@@ -167,8 +170,9 @@ at admission. See [validation rules and tests](docs/USAGE.md#13-validation) befo
 | `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `TLSReady`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist), `InvalidDNSName`, `DNSNameConflict` (an older CR already claims a name/alias), and for `mode: http` the `TLS*` reasons ([USAGE §6.1](docs/USAGE.md#61-ingress-terminate-tls-on-the-agent)) |
 
 `Tailnet.status.policy` = `{renderedHash, appliedHash, appliedAt, generated{tags,grants,routes}}`;
-`TailnetIngress.status.dnsName` is the rendered DNS name (published as A record only — the IPv4 node
-address; `status.tag` is the effective tag). `kubectl get tailnet` includes `COMPAT` and `DNS` reason columns.
+`TailnetIngress.status.dnsName` is the ingress-level DNS name; HTTP names and aliases appear in
+`status.exposes[].dnsName` and `.dnsAliases`. All are published as A records with the node's IPv4
+address; `status.tag` is the effective tag. `kubectl get tailnet` includes `COMPAT` and `DNS` reason columns.
 Preflight uses the API response shape, not a reported server version: database policy mode and a
 successful non-mutating `policy/check` probe are required for `Compatible`. Missing or failed
 observations stay `Unknown`. See [preflight details](docs/INSTALL.md#25-preflight).
