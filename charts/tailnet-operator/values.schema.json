@@ -26,7 +26,16 @@
       "digest": {"$ref": "#/definitions/digest"}
     }},
     "imagePullSecrets": {"type": "array", "uniqueItems": true, "items": {"type": "object", "required": ["name"], "additionalProperties": false, "properties": {"name": {"$ref": "#/definitions/secretName"}}}},
-    "agent": {"type": "object", "additionalProperties": false, "required": ["imagePullSecrets"], "properties": {"imagePullSecrets": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/secretName"}}}},
+    "agent": {"type": "object", "additionalProperties": false, "required": ["imagePullSecrets"], "properties": {
+      "imagePullSecrets": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/secretName"}},
+      "resources": {"type": ["object", "null"], "additionalProperties": false, "properties": {
+        "requests": {"$ref": "#/definitions/resourceList"},
+        "limits": {"$ref": "#/definitions/resourceList"},
+        "claims": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {
+          "name": {"type": "string"}, "request": {"type": "string"}
+        }}}
+      }}
+    }},
     "resources": {"type": "object"},
     "podSecurityContext": {"type": "object"},
     "securityContext": {"type": "object"},
@@ -65,6 +74,9 @@
     "then": {"properties": {"leaderElection": {"properties": {"enabled": {"const": true}}}}}
   }],
   "definitions": {
+    "resourceList": {"type": ["object", "null"], "additionalProperties": {"anyOf": [
+      {"type": "string", "minLength": 1}, {"type": "number", "minimum": 0}
+    ]}},
     "secretName": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"},
     "tag": {"type": "string", "maxLength": 128, "pattern": "^$|^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$"},
     "digest": {"type": "string", "pattern": "^$|^sha256:[a-f0-9]{64}$"},

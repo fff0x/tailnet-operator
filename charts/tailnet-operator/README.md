@@ -25,6 +25,16 @@ missing CRDs but never upgrades or removes them: use `task crd-upgrade KUBE_CONT
 manual installation, or `install.crds: CreateReplace` / `upgrade.crds: CreateReplace` on a Flux
 `HelmRelease`. Validate existing CRs against a new schema first ([USAGE §13](../../docs/USAGE.md#13-validation)).
 
+## Permissions
+
+The chart grants main-resource PATCH for ingress CRs cluster-wide and egress CRs in the operator
+namespace, intended for future drain finalizers. PATCH also permits spec edits; RBAC cannot restrict
+it to metadata. Main Tailnet resources remain read-only. ReplicaSets and Pods have only
+`get/list/watch`; Services remain operator-namespace scoped. Review the
+[exact RBAC reference](../../docs/reference/rbac.md) and
+[DNS history schema limitations](../../docs/SECURITY.md#dns-claim-history-schema-not-lifecycle-enforcement).
+The schema/RBAC addition installs no finalizers and implements no DNS lifecycle or publisher behavior.
+
 ## Leader election and availability
 
 `leaderElection.enabled: true` (default) runs all controllers on the elected replica; the Lease is
@@ -43,6 +53,25 @@ uses `Chart.appVersion` unless it sets its own tag or digest. Per-CR `spec.image
 pod; `agent.imagePullSecrets` is the default list of Secret **names** for generated agent pods, which
 `Tailnet.spec.proxy.imagePullSecrets` replaces (`[]` clears). Each Secret must exist in the agent's
 namespace — the operator never copies registry credentials.
+
+## Agent resources
+
+`agent.resources` defaults to requests of CPU `10m` and memory `32Mi`, with a memory limit of `128Mi`
+and no CPU limit. Both ingress and egress select one whole block, without merging lower-tier keys:
+
+1. `TailnetIngress.spec.resources` or `TailnetEgress.spec.resources`.
+2. `Tailnet.spec.proxy.resources`.
+3. The operator's chart-supplied `agent.resources`.
+
+A CR/Tailnet block with both requests and limits unset falls through. Either non-nil map, even empty,
+selects that block in the controller; Kubernetes serialization may omit empty maps.
+Helm merges values separately: `agent.resources: {}` retains chart defaults. Use `agent.resources: null`
+to disable the chart fallback (the operator receives `{}`), or null individual default keys to remove them.
+The operator validates quantities at startup, rejecting negative values and requests above matching limits.
+Direct binary runs with `AGENT_RESOURCES` absent, empty, or `{}` retain the zero default.
+
+Changing effective resources updates agent pod templates. Each affected CR gets a `Recreate` restart
+and its ephemeral node re-registers; expect a brief interruption. Higher-tier overrides remain unchanged.
 
 ## Network isolation
 
@@ -89,10 +118,11 @@ See [compatibility](../../docs/COMPATIBILITY.md#http-extension-compatibility-v05
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | agent.imagePullSecrets | list | `[]` | Default agent pull-secret names, e.g. [dockerconfig]. Tailnet.spec.proxy.imagePullSecrets overrides these. Secrets must exist in each agent namespace. |
+| agent.resources | object | `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}` | Default agent resource block, below CR spec.resources and Tailnet.spec.proxy.resources (no per-key merging). Set null to disable chart defaults; {} does not clear Helm defaults. Changes restart agents that inherit them. |
 | agentImage.digest | string | `""` | Agent digest. An entirely empty agentImage inherits the complete operator image, including its digest. |
 | agentImage.repository | string | `""` | Agent repository; empty inherits image.repository. |
 | agentImage.tag | string | `""` | Agent tag. With an explicit repository, empty uses Chart.appVersion; otherwise inherits image.tag. |
-| env.extra | list | `[]` | Additional EnvVar entries. POD_NAMESPACE, OPERATOR_IMAGE, AGENT_IMAGE_PULL_SECRETS and SSL_CERT_FILE are reserved. |
+| env.extra | list | `[]` | Additional EnvVar entries. POD_NAMESPACE, OPERATOR_IMAGE, AGENT_IMAGE_PULL_SECRETS, AGENT_RESOURCES and SSL_CERT_FILE are reserved. |
 | fullnameOverride | string | `""` | Override the resource name with a letter-first DNS label (at most 53 characters). Install only one operator per cluster. |
 | image.digest | string | `""` | Optional sha256 digest; takes precedence over the tag. |
 | image.pullPolicy | string | `"IfNotPresent"` | Operator pull policy. |
