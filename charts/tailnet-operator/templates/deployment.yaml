@@ -57,6 +57,8 @@ spec:
               value: {{ include "tailnet-operator.agentImage" . | quote }}
             - name: AGENT_IMAGE_PULL_SECRETS
               value: {{ .Values.agent.imagePullSecrets | toJson | quote }}
+            - name: AGENT_RESOURCES
+              value: {{ .Values.agent.resources | default dict | toJson | quote }}
             {{- with .Values.env.extra }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

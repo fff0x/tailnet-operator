@@ -308,6 +308,7 @@ func TestDefaultRender(t *testing.T) {
 	equal(t, "scratch CA bundle", envVar(t, c, "SSL_CERT_FILE").Value, "/ca-certificates.crt")
 	equal(t, "default inherited agent image", envVar(t, c, "OPERATOR_IMAGE").Value, c.Image)
 	equal(t, "default agent pull secrets", envVar(t, c, "AGENT_IMAGE_PULL_SECRETS").Value, "[]")
+	equal(t, "default agent resources", envVar(t, c, "AGENT_RESOURCES").Value, `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}`)
 }
 
 // Pin the pre-split permission set, not merely a list of expected grants. This
@@ -533,6 +534,28 @@ env:
 	equal(t, "extra env valueFrom", envVar(t, c, "EXTRA_SECRET").ValueFrom, &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "extra-config"}, Key: "value"}})
 }
 
+func TestAgentResourceValues(t *testing.T) {
+	for _, tc := range []struct{ name, values, want string }{
+		{"override", "agent: {resources: {requests: {cpu: 25m, memory: 64Mi}, limits: {memory: 256Mi}}}", `{"limits":{"memory":"256Mi"},"requests":{"cpu":"25m","memory":"64Mi"}}`},
+		{"null disables", "agent: {resources: null}", `{}`},
+		{"empty object retains Helm defaults", "agent: {resources: {}}", `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}`},
+		{"empty maps retain Helm defaults", "agent: {resources: {requests: {}, limits: {}}}", `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}`},
+		{"partial override retains Helm defaults", "agent: {resources: {requests: {cpu: 25m}}}", `{"limits":{"memory":"128Mi"},"requests":{"cpu":"25m","memory":"32Mi"}}`},
+		{"remove limit", "agent: {resources: {limits: null}}", `{"requests":{"cpu":"10m","memory":"32Mi"}}`},
+		{"remove request key", "agent: {resources: {requests: {cpu: null}}}", `{"limits":{"memory":"128Mi"},"requests":{"memory":"32Mi"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, c := operator(t, render(t, tc.values))
+			value := envVar(t, c, "AGENT_RESOURCES").Value
+			equal(t, "agent resources JSON", value, tc.want)
+			var resources corev1.ResourceRequirements
+			if err := json.Unmarshal([]byte(value), &resources); err != nil {
+				t.Fatalf("AGENT_RESOURCES must decode as ResourceRequirements: %v", err)
+			}
+		})
+	}
+}
+
 func TestHardenedSingletonDefaults(t *testing.T) {
 	dep, c := operator(t, render(t, ""))
 	if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 1 {
@@ -698,6 +721,14 @@ func TestInvalidValues(t *testing.T) {
 		{"agent secret objects", "agent: {imagePullSecrets: [{name: registry}]}", "imagePullSecrets"},
 		{"agent secret scalar", "agent: {imagePullSecrets: registry}", "imagePullSecrets"},
 		{"agent secret number", "agent: {imagePullSecrets: [123]}", "imagePullSecrets"},
+		{"agent resources scalar", "agent: {resources: invalid}", "resources"},
+		{"agent resources array", "agent: {resources: []}", "resources"},
+		{"agent resources unknown field", "agent: {resources: {request: {cpu: 10m}}}", "resources"},
+		{"agent requests scalar", "agent: {resources: {requests: invalid}}", "requests"},
+		{"agent limits array", "agent: {resources: {limits: []}}", "limits"},
+		{"agent quantity object", "agent: {resources: {requests: {cpu: {value: 1}}}}", "cpu"},
+		{"agent quantity bool", "agent: {resources: {limits: {memory: false}}}", "memory"},
+		{"agent quantity negative number", "agent: {resources: {requests: {cpu: -1}}}", "cpu"},
 		{"dashboard invalid kind", "monitoring: {dashboard: {enabled: true, kind: Secret}}", "kind"},
 		{"podMonitor invalid interval", "monitoring: {podMonitor: {enabled: true, interval: invalid}}", "interval"},
 		{"podMonitor invalid selector", "monitoring: {podMonitor: {namespaceSelector: {matchLabels: {team: ops}}}}", "namespaceSelector"},
@@ -706,7 +737,7 @@ func TestInvalidValues(t *testing.T) {
 		{"network policy without API CIDRs", "networkPolicy: {enabled: true, headscaleCIDRs: [192.0.2.1/32]}", "kubeAPICIDRs"},
 		{"network policy without Headscale CIDRs", "networkPolicy: {enabled: true, kubeAPICIDRs: [10.96.0.1/32]}", "headscaleCIDRs"},
 	}
-	for _, name := range []string{"POD_NAMESPACE", "OPERATOR_IMAGE", "AGENT_IMAGE_PULL_SECRETS", "SSL_CERT_FILE"} {
+	for _, name := range []string{"POD_NAMESPACE", "OPERATOR_IMAGE", "AGENT_IMAGE_PULL_SECRETS", "AGENT_RESOURCES", "SSL_CERT_FILE"} {
 		cases = append(cases, struct{ name, values, diagnostic string }{"reserved " + name, "env: {extra: [{name: " + name + ", value: override}]}", name})
 	}
 	for _, name := range []string{"", "Invalid", "bad_name", "-leading", "trailing-", "bad..name", strings.Repeat("a", 254)} {

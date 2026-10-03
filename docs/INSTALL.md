@@ -181,6 +181,25 @@ egress, tenant namespace for ingress): `imagePullSecrets` for the operator pod,
 `agent.imagePullSecrets` as the default for agents, `Tailnet.spec.proxy.imagePullSecrets` to replace
 that default per Tailnet (`[]` clears it). The operator never copies registry credentials.
 
+### Agent resources
+
+The chart supplies agent requests of CPU `10m` and memory `32Mi`, and a memory limit of `128Mi`.
+There is no CPU limit. Both ingress and egress select a **whole block** in this order:
+`CR.spec.resources` > `Tailnet.spec.proxy.resources` > chart `agent.resources`.
+Missing keys are not filled from lower tiers. A CR/Tailnet block with both requests and limits unset
+falls through; either non-nil map selects the block, even if empty in memory.
+Kubernetes serialization may omit empty maps, so do not rely on them to disable the fallback in a stored CR.
+
+Helm merges supplied values with its defaults: `agent.resources: {}` does **not** disable resources.
+Set `agent.resources: null` to disable the chart fallback; this renders `AGENT_RESOURCES='{}'`.
+Use null for individual chart keys to remove them. A direct binary run with `AGENT_RESOURCES` absent,
+empty, or `{}` retains the zero default. Non-empty input must be one non-null ResourceRequirements
+JSON object with known fields and valid, nonnegative quantities; requests cannot exceed matching limits.
+
+Installing these defaults or changing effective resources restarts each affected agent with `Recreate`.
+Its ephemeral node re-registers, causing a brief interruption. CRs with higher-tier overrides keep their resources.
+The generated standalone bundle includes the same defaults; customize its operator environment in an overlay.
+
 ### Network isolation
 
 `networkPolicy.enabled` isolates the operator pod. Set the Kubernetes API and Headscale CIDRs and

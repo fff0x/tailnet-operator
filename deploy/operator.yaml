@@ -221,6 +221,8 @@ spec:
               value: "docker.io/ff0x/tailnet-operator:v0.5.1"
             - name: AGENT_IMAGE_PULL_SECRETS
               value: "[]"
+            - name: AGENT_RESOURCES
+              value: "{\"limits\":{\"memory\":\"128Mi\"},\"requests\":{\"cpu\":\"10m\",\"memory\":\"32Mi\"}}"
           ports:
             - {name: metrics, containerPort: 8080}
             - {name: health, containerPort: 8081}

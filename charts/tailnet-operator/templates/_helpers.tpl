@@ -41,7 +41,7 @@ app.kubernetes.io/name: {{ .Chart.Name | quote }}
 {{- fail "replicas > 1 requires leaderElection.enabled=true" -}}
 {{- end -}}
 {{- range .Values.env.extra -}}
-{{- if has .name (list "POD_NAMESPACE" "OPERATOR_IMAGE" "AGENT_IMAGE_PULL_SECRETS" "SSL_CERT_FILE") -}}
+{{- if has .name (list "POD_NAMESPACE" "OPERATOR_IMAGE" "AGENT_IMAGE_PULL_SECRETS" "AGENT_RESOURCES" "SSL_CERT_FILE") -}}
 {{- fail (printf "env.extra cannot override reserved variable %s" .name) -}}
 {{- end -}}
 {{- end -}}
