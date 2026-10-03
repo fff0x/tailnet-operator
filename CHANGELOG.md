@@ -26,6 +26,10 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Changed
 
+- Upgrading to v0.6.0 retires every existing HTTP ingress agent once, including single-expose
+  v1 and v2 ingresses, because the resolved TLS-source marker is absent. The operator scales the
+  Deployment to zero and waits for its Pods to disappear before installing the current configuration.
+  All exposes on that CR are briefly interrupted; L4-only ingresses do not use this HTTP barrier.
 - Agents that inherit the new defaults restart once per CR with `Recreate` when their effective
   resources change. Ephemeral nodes re-register; expect a brief interruption. Higher-tier overrides
   are preserved.
