@@ -95,7 +95,14 @@ func newHTTPPeerFixture(t *testing.T) *httpPeerFixture {
 }
 
 func newHTTPPeerFixtureWithServingCA(t *testing.T, servingCA []byte) *httpPeerFixture {
+	return newPeerFixture(t, servingCA, "")
+}
+
+func newPeerFixture(t *testing.T, servingCA []byte, evidenceScope string) *httpPeerFixture {
 	t.Helper()
+	if evidenceScope != "" && (evidenceScope != "ingress-l4" || servingCA != nil) {
+		t.Fatal("unsupported peer evidence scope")
+	}
 	if os.Getenv("E2E_KIND_HTTP_NETWORK_GATE") == "" {
 		t.Skip("requires owned isolated HTTP runner")
 	}
@@ -112,8 +119,11 @@ func newHTTPPeerFixtureWithServingCA(t *testing.T, servingCA []byte) *httpPeerFi
 	if err != nil || !filepath.IsAbs(root) || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
 		t.Fatal("private peer evidence missing")
 	}
-	if servingCA != nil {
-		root = filepath.Join(root, "ingress-http")
+	if servingCA != nil || evidenceScope != "" {
+		if servingCA != nil {
+			evidenceScope = "ingress-http"
+		}
+		root = filepath.Join(root, evidenceScope)
 		if os.Mkdir(root, 0700) != nil {
 			t.Fatal("exclusive integrated evidence unavailable")
 		}

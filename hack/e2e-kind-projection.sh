@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Source-only fixture image; a separate delegated user scope must already exist.
-# Only the fixed HTTP-only selection is optional; no reuse, route repair,
+# Only fixed HTTP-only or L4-only selections are optional; no reuse, route repair,
 # context/image overrides, or sudo fallback.
 set +x
 set -Eeuo pipefail
@@ -8,9 +8,14 @@ umask 077
 exec 3>&1
 exec >/dev/null 2>&1
 reject() { printf 'projection: stage=preflight result=rejected\n' >&3; exit 2; }
-test_pattern='^Test(FixtureCAProjection|PodNetworkGate|HeadscaleHTTPS|AgentHTTPSPeer|IngressHTTP)$'
+test_pattern='^Test(FixtureCAProjection|PodNetworkGate|HeadscaleHTTPS|AgentHTTPSPeer|IngressHTTP|IngressL4)$'
+test_timeout=26m
 if [[ $# == 1 && $1 == --http-only ]]; then
     test_pattern='^TestIngressHTTP$'
+    test_timeout=18m
+elif [[ $# == 1 && $1 == --l4-only ]]; then
+    test_pattern='^TestIngressL4$'
+    test_timeout=10m
 elif [[ $# != 0 ]]; then
     reject
 fi
@@ -392,9 +397,10 @@ run "$work/proofverify" "$out/binding.json" "$out/node-capture.json" "$out/pod-c
 chmod 0700 "$work/node-observation"
 stage=real-admission-and-projection
 printf '%s\n' "$test_pattern" > "$out/test-selection.txt"
+printf '%s\n' "$test_timeout" > "$out/test-timeout.txt"
 system_uid=$(< "$out/cluster-uid.txt")
 # Compiled test binaries do not inherit `go test`'s package working directory.
 (cd "$fixture"; run "${bins[env]}" "E2E_KIND_WORK=$work" "E2E_KIND_CLUSTER=$cluster" "E2E_KIND_CONTEXT=$ctx" \
     "E2E_KIND_FIXTURE_IMAGE=$image" "E2E_KIND_AGENT_IMAGE=$agent_image" "E2E_KIND_SYSTEM_UID=$system_uid" "E2E_KIND_HTTP_NETWORK_GATE=passed" "E2E_KIND_NET_EVIDENCE=$out" \
-    "$work/projection.test" -test.run "$test_pattern" -test.count=1 -test.timeout=18m -test.v) > "$out/projection-test.log" 2>&1
+    "$work/projection.test" -test.run "$test_pattern" -test.count=1 -test.timeout="$test_timeout" -test.v) > "$out/projection-test.log" 2>&1
 stage=projection-passed
