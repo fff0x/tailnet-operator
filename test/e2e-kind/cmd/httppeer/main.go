@@ -34,6 +34,8 @@ import (
 
 const (
 	publicDNS       = "http-agent.fixture.test"
+	virtualDNS      = "admin.fixture.test"
+	virtualAlias    = "admin-tailnet-system.fixture.test"
 	controlURL      = "https://fixture-headscale.tailnet-system.svc:8443"
 	rootPath        = "/control-ca/ca.pem"
 	servingRootPath = "/serving-ca/ca.pem"
@@ -236,6 +238,21 @@ func boundedServer(handler http.Handler) *http.Server {
 type probeInput struct {
 	Target string
 	HTTP2  bool
+	SNI    string
+	Host   string
+}
+
+// Only fixed fixture identities may vary; the destination port/path and dial
+// allowlist remain unchanged. Empty fields preserve the original strict probe.
+func allowedHTTPName(name string) bool {
+	return name == publicDNS || name == virtualDNS || name == virtualAlias
+}
+
+func (input probeInput) names() (sni, host string, ok bool) {
+	if input.SNI == "" && input.Host == "" {
+		return publicDNS, publicDNS, true
+	}
+	return input.SNI, input.Host, allowedHTTPName(input.SNI) && allowedHTTPName(input.Host)
 }
 
 type probeResult struct {
@@ -273,7 +290,7 @@ func decodeProbe(reader io.Reader) (probeInput, error) {
 	for dec.More() {
 		token, err := dec.Token()
 		name, ok := token.(string)
-		if err != nil || !ok || seen[name] || (name != "target" && name != "http2") {
+		if err != nil || !ok || seen[name] || (name != "target" && name != "http2" && name != "sni" && name != "host") {
 			return input, errRejected
 		}
 		seen[name] = true
@@ -286,16 +303,25 @@ func decodeProbe(reader io.Reader) (probeInput, error) {
 			input.Target, ok = value.(string)
 		case "http2":
 			input.HTTP2, ok = value.(bool)
+		case "sni":
+			input.SNI, ok = value.(string)
+		case "host":
+			input.Host, ok = value.(string)
 		}
 		if !ok {
 			return input, errRejected
 		}
 	}
-	if token, err := dec.Token(); err != nil || token != json.Delim('}') || len(seen) != 2 {
+	if token, err := dec.Token(); err != nil || token != json.Delim('}') || !seen["target"] || !seen["http2"] {
 		return input, errRejected
 	}
 	if _, err := dec.Token(); err != io.EOF || !allowedTarget(input.Target) {
 		return input, errRejected
+	}
+	if seen["sni"] || seen["host"] {
+		if !seen["sni"] || !seen["host"] || !allowedHTTPName(input.SNI) || !allowedHTTPName(input.Host) {
+			return input, errRejected
+		}
 	}
 	return input, nil
 }
@@ -351,6 +377,7 @@ type dialFunc func(context.Context, string, string) (net.Conn, error)
 type requestFunc func(*http.Request) (*http.Response, error)
 
 func probeClient(roots *x509.CertPool, dial dialFunc, input probeInput) (*http.Client, *http.Transport) {
+	sni, _, namesOK := input.names()
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(!input.HTTP2)
 	protocols.SetHTTP2(input.HTTP2)
@@ -361,11 +388,11 @@ func probeClient(roots *x509.CertPool, dial dialFunc, input probeInput) (*http.C
 	tr := &http.Transport{
 		Proxy: nil, Protocols: protocols, ForceAttemptHTTP2: input.HTTP2,
 		DisableKeepAlives: true, DisableCompression: true,
-		TLSClientConfig:     &tls.Config{RootCAs: roots, ServerName: publicDNS, MinVersion: tls.VersionTLS12, NextProtos: []string{alpn}},
+		TLSClientConfig:     &tls.Config{RootCAs: roots, ServerName: sni, MinVersion: tls.VersionTLS12, NextProtos: []string{alpn}},
 		TLSHandshakeTimeout: probeTimeout, ResponseHeaderTimeout: probeTimeout,
 		MaxResponseHeaderBytes: maxHeaderBytes,
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			if !allowedTarget(input.Target) {
+			if !allowedTarget(input.Target) || !namesOK {
 				return nil, errRejected
 			}
 			return dial(ctx, "tcp", net.JoinHostPort(input.Target, "443"))
@@ -379,15 +406,17 @@ func probeClient(roots *x509.CertPool, dial dialFunc, input probeInput) (*http.C
 
 func probe(ctx context.Context, input probeInput, request requestFunc) probeResult {
 	var result probeResult
-	if !allowedTarget(input.Target) {
+	sni, host, namesOK := input.names()
+	if !allowedTarget(input.Target) || !namesOK {
 		return result
 	}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+publicDNS+"/accept?fixed=1", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+sni+"/accept?fixed=1", nil)
 	if err != nil {
 		return result
 	}
+	req.Host = host
 	for _, name := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Forwarded-Arbitrary"} {
 		req.Header.Set(name, "fixture-spoof")
 	}

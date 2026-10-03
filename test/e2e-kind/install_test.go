@@ -81,7 +81,7 @@ func validateConfig(cfg *clientcmdapi.Config, cluster string) error {
 }
 
 type fixture struct {
-	kube                           client.Client
+	kube                           client.WithWatch
 	work, config, cluster, context string
 	policy                         string // independently verified installed Headscale policy
 }
@@ -125,7 +125,7 @@ func ownedFixture(t *testing.T) *fixture {
 	}
 	// Only our allowlisted diagnostics may reach test output, including on slow runs.
 	controllog.SetLogger(logr.Discard())
-	kube, err := client.New(rest, client.Options{Scheme: scheme})
+	kube, err := client.NewWithWatch(rest, client.Options{Scheme: scheme})
 	if err != nil {
 		t.Fatal("create owned client failed")
 	}
