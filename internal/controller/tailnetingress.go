@@ -43,6 +43,7 @@ type TailnetIngressReconciler struct {
 	OperatorNamespace     string
 	OperatorImage         string
 	AgentImagePullSecrets []string
+	AgentResources        corev1.ResourceRequirements
 }
 
 func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -77,6 +78,18 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
+	resolvedTransition, waiting, err := r.retireIngressHTTPConfiguration(ctx, &in, &tn)
+	transition = transition || resolvedTransition
+	if err != nil {
+		return r.fail(ctx, &in, "HTTPTransitionBlocked", err)
+	}
+	if waiting {
+		invalidateIngressTLSObservation(&in)
+		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, "HTTPTransitionPending",
+			"waiting for the previous ingress agent to terminate before changing resolved HTTP sources")
+		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
 	apiURL := tn.Spec.APIURL
 	if apiURL == "" {
 		apiURL = tn.Spec.Server
@@ -109,13 +122,22 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	in.Status.Hostname = hostname
 	in.Status.Tag = tag
 	// DNS name: rendered here (this reconciler has the Tailnet), consumed by the DNS reconciler.
-	in.Status.DNSName = ""
-	if tmpl := tn.Spec.DNS.IngressNameTemplate; tmpl != "" {
-		dnsName := naming.RenderDNSName(tmpl, in.Name, in.Namespace)
-		if err := naming.ValidateDNSName(dnsName); err != nil {
-			return r.fail(ctx, &in, "InvalidDNSName", err)
-		}
-		in.Status.DNSName = dnsName
+	names, nameReason := resolveIngressDNSNames(&in, &tn)
+	in.Status.DNSName = names.baseName
+	if nameReason != "" {
+		return r.fail(ctx, &in, nameReason, fmt.Errorf("ingress DNS configuration is invalid"))
+	}
+	// DNSNameConflict: oldest owner wins a name across all CRs of this Tailnet. A loser reserves
+	// its other names but publishes none of its own, so it must not advertise a stale DNS name.
+	decisions, err := collectDNSClaimDecisions(ctx, r.Client, &tn, r.OperatorNamespace)
+	if err != nil {
+		return r.fail(ctx, &in, "DNSConflictUnresolved", err)
+	}
+	ownerKey := dnsClaimOwnerKey{Kind: dnsIngressKind, Namespace: in.Namespace, Name: in.Name, UID: in.UID}
+	if d, ok := decisions[ownerKey]; ok && d.Blocked && d.Conflict != nil {
+		in.Status.DNSName = ""
+		in.Status.Exposes = nil
+		return r.fail(ctx, &in, "DNSNameConflict", dnsConflictError(d.Conflict))
 	}
 
 	// TagKnown: refuse to mint for a tag the policy never declared (a typo mints a useless node).
@@ -168,7 +190,12 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	tlsState := r.prepareIngressTLS(ctx, &in, &tn, time.Now())
 	if transition {
 		if reason := ingressTransitionSourceReason(&in, tlsState); reason != "" {
-			return r.fail(ctx, &in, reason, fmt.Errorf("HTTP configuration transition is waiting for valid TLS sources and configuration"))
+			// Retired workloads have no current probe. Preserve the bounded source
+			// diagnostic, including the first uncovered configured certificate name.
+			tlsState.reason = reason
+			r.computeIngressStatus(&in, tlsState, nil, errIngressProbe, time.Now())
+			_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 	}
 
@@ -179,7 +206,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if image == "" {
 		image = r.OperatorImage
 	}
-	if err := r.applyChildren(ctx, &in, &tn, ns, image, tlsState); err != nil {
+	if err := r.applyChildren(ctx, &in, &tn, ns, image, tlsState, transition); err != nil {
 		return r.fail(ctx, &in, "Apply", err)
 	}
 
@@ -266,7 +293,27 @@ func (r *TailnetIngressReconciler) ensureAuthKey(ctx context.Context, in *tnv1.T
 	return &exp, nil
 }
 
-func (r *TailnetIngressReconciler) applyChildren(ctx context.Context, in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string, tlsState ingressTLSState) error {
+func (r *TailnetIngressReconciler) applyChildren(ctx context.Context, in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string, tlsState ingressTLSState, retiring ...bool) error {
+	// Dependencies may have taken time; repeat the barrier before publishing config.
+	// This also covers exits and same-owner replacement Deployments.
+	transition, waiting, err := r.retireIngressHTTPConfiguration(ctx, in, tn)
+	for _, previous := range retiring {
+		transition = transition || previous
+	}
+	if err != nil {
+		return err
+	}
+	if waiting {
+		return errIngressTransitionPending
+	}
+	fenced := ingressConfigVersion(in) >= 2 || transition
+	var observed *appsv1.Deployment
+	if fenced {
+		observed, err = r.ingressHTTPDeploymentSnapshot(ctx, in, transition)
+		if err != nil {
+			return err
+		}
+	}
 	servingPlan := tlsState.plan
 	if tlsState.reason != "" {
 		servingPlan = ingressTLSPlan{} // no HTTP listener before its source is valid
@@ -275,14 +322,20 @@ func (r *TailnetIngressReconciler) applyChildren(ctx context.Context, in *tnv1.T
 	if err != nil {
 		return err
 	}
-	dep := ingressAgentDeploymentTLS(in, tn, ns, image, r.AgentImagePullSecrets, tlsState.plan)
+	dep := ingressAgentDeploymentTLS(in, tn, ns, image, r.AgentImagePullSecrets, r.AgentResources, tlsState.plan)
 	np := ingressNetworkPolicy(in, ns, r.OperatorNamespace)
 	for _, obj := range []client.Object{cm, dep, np} {
 		if err := controllerutil.SetControllerReference(in, obj, r.Scheme); err != nil {
 			return err
 		}
-		if obj == dep && ingressConfigVersion(in) == 2 {
-			if err := r.applyExtendedIngressDeployment(ctx, in, dep); err != nil {
+		if fenced {
+			var err error
+			if obj == dep {
+				err = r.applyExtendedIngressDeployment(ctx, in, dep, observed)
+			} else {
+				err = r.applyIngressHTTPChild(ctx, in, obj)
+			}
+			if err != nil {
 				return err
 			}
 		} else if err := ssaApply(ctx, r.Client, obj); err != nil {

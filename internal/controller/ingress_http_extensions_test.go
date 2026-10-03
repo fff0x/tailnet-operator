@@ -33,14 +33,14 @@ func TestIngressHTTPExtensionResources(t *testing.T) {
 	in.Spec.Exposes[0].Backend.TLS = backendTLSFixture()
 	in.Spec.Exposes[0].Timeouts = &tnv1.HTTPTimeouts{Request: extensionString("600s"), BackendRequest: extensionString("0s")}
 	before := in.DeepCopy()
-	plan := ingressTLSPlan{http: true, secretName: "frontend"}
+	plan := tlsTestPlan(in, "frontend")
 	target := renderedIngressTargets(t, in, in.Namespace, plan)[0]
 	if target.BackendServerName != in.Spec.Exposes[0].Backend.TLS.ServerName || target.BackendCAFile != "/backend-tls/ca.crt" ||
 		target.RequestTimeout != "600s" || target.BackendRequestTimeout != "0s" || target.Address != "app.backend-only.svc.cluster.local" {
 		t.Fatalf("incorrect extension target: %+v", target)
 	}
 	for _, image := range []string{"operator:old", "tailnet:override", "ingress:override"} {
-		dep := ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, in.Namespace, image, nil, plan)
+		dep := ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, in.Namespace, image, nil, corev1.ResourceRequirements{}, plan)
 		if dep.Spec.Strategy.Type != "Recreate" || dep.Spec.Template.Annotations["tsunaro.io/agent-config-protocol"] != "http-v2" ||
 			dep.Spec.Template.Spec.Containers[0].Image != image {
 			t.Fatal("image overrides must never bypass protocol transition and process retirement")
@@ -65,7 +65,7 @@ func TestIngressHTTPExtensionResources(t *testing.T) {
 			t.Fatal("backend CA projection must support rotation and remain read-only")
 		}
 	}
-	wrongNS := ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, "backend-only", "old", nil, plan)
+	wrongNS := ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, "backend-only", "old", nil, corev1.ResourceRequirements{}, plan)
 	for _, v := range wrongNS.Spec.Template.Spec.Volumes {
 		if v.Name == "backend-tls" {
 			t.Fatal("CA reference escaped ingress namespace")
@@ -115,7 +115,7 @@ func TestIngressHTTPExtensionProtocolSkew(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			in := tlsResourceIngress()
 			tc.change(&in.Spec.Exposes[0])
-			plan := ingressTLSPlan{http: true, secretName: "frontend"}
+			plan := tlsTestPlan(in, "frontend")
 			cm, err := ingressExposesConfigMap(in, in.Namespace, plan)
 			if err != nil {
 				t.Fatal(err)
@@ -292,7 +292,7 @@ func TestIngressBackendCARotationAndDeletionInvalidateProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	beforeTargets := renderedIngressTargets(t, in, in.Namespace, state.plan)
-	beforeDeployment := ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, in.Namespace, "override:old", nil, state.plan)
+	beforeDeployment := ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, in.Namespace, "override:old", nil, corev1.ResourceRequirements{}, state.plan)
 	state.backends = r.prepareIngressBackendTLS(ctx, in)
 	p := probes["web"]
 	p.ConfigID = beforeTargets[0].ConfigID
@@ -323,7 +323,7 @@ func TestIngressBackendCARotationAndDeletionInvalidateProof(t *testing.T) {
 	}
 	check("BackendCAMismatch")
 	if !reflect.DeepEqual(beforeTargets, renderedIngressTargets(t, in, in.Namespace, state.plan)) ||
-		!reflect.DeepEqual(beforeDeployment, ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, in.Namespace, "override:old", nil, state.plan)) {
+		!reflect.DeepEqual(beforeDeployment, ingressAgentDeploymentTLS(in, &tnv1.Tailnet{}, in.Namespace, "override:old", nil, corev1.ResourceRequirements{}, state.plan)) {
 		t.Fatal("CA rotation changed static configuration or Pod template")
 	}
 	p.BackendCAHash = state.backends["web"].sha256

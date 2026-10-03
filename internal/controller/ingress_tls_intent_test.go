@@ -46,7 +46,7 @@ func TestIngressCertificateCreationRequiresPersistedIntent(t *testing.T) {
 				}
 				obj := action.(k8stesting.CreateAction).GetObject().(*unstructured.Unstructured)
 				names, _, _ := unstructured.NestedStringSlice(obj.Object, "spec", "dnsNames")
-				if len(names) != 1 || names[0] != in.Status.DNSName {
+				if len(names) != 1 || names[0] != "web.tenant.tailnet.invalid" {
 					t.Fatal("intent patch response overwrote the desired Certificate DNS name")
 				}
 				for _, kind := range []string{"TLSReady", "Ready"} {
@@ -59,7 +59,7 @@ func TestIngressCertificateCreationRequiresPersistedIntent(t *testing.T) {
 				return false, nil, nil
 			})
 			r := &TailnetIngressReconciler{Client: kube, Certificates: certificates}
-			state := r.prepareIngressTLS(ctx, in, &tnv1.Tailnet{}, time.Now())
+			state := r.prepareIngressTLS(ctx, in, tlsTestTailnet(), time.Now())
 			if stored {
 				if !created || state.reason != "TLSCertificatePending" {
 					t.Fatal("persisted source did not reach Certificate creation")

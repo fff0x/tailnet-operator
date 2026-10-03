@@ -14,12 +14,16 @@ func desiredIngressCertificate(in *tnv1.TailnetIngress, plan ingressTLSPlan) *un
 	if !plan.http || plan.issuer == nil {
 		return nil
 	}
+	names := make([]any, len(plan.names.certificateNames))
+	for i, name := range plan.names.certificateNames {
+		names[i] = name
+	}
 	cert := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "cert-manager.io/v1",
 		"kind":       "Certificate",
 		"spec": map[string]any{
 			"secretName": plan.secretName,
-			"dnsNames":   []any{in.Status.DNSName},
+			"dnsNames":   names,
 			"issuerRef": map[string]any{
 				"name": plan.issuer.Name, "kind": plan.issuer.Kind, "group": plan.issuer.Group,
 			},

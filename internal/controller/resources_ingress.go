@@ -60,11 +60,15 @@ func ingressExposesConfigMap(in *tnv1.TailnetIngress, ns string, plan ingressTLS
 			ListenPort: e.Port,
 		}
 		if e.Mode == "http" {
-			target.Mode, target.DNSName = "http", in.Status.DNSName
+			target.Mode, target.DNSName = "http", plan.names.exposeNames[e.Name]
+			if alias := plan.names.aliasNames[e.Name]; alias != "" {
+				target.DNSAliases = []string{alias}
+			}
 			target.CertFile, target.KeyFile = ingressTLSMount+"/tls.crt", ingressTLSMount+"/tls.key"
 			if e.Backend.TLS != nil {
 				target.BackendServerName = e.Backend.TLS.ServerName
-				target.BackendCAFile = ingressBackendTLSMount + "/ca.crt"
+				_, mountPath := ingressBackendTLSProjection(in, e)
+				target.BackendCAFile = mountPath + "/ca.crt"
 			}
 			if e.Timeouts != nil {
 				if e.Timeouts.Request != nil {
@@ -86,6 +90,20 @@ func ingressExposesConfigMap(in *tnv1.TailnetIngress, ns string, plan ingressTLS
 			Version int           `json:"version"`
 			Targets []agentTarget `json:"targets"`
 		}{Version: ingressConfigVersion(in), Targets: out}
+	}
+	if ingressConfigVersion(in) == 3 {
+		names := []string{}
+		for _, target := range out {
+			if target.Mode == "http" {
+				names = plan.names.certificateNames
+				break
+			}
+		}
+		config = struct {
+			Version             int           `json:"version"`
+			CertificateDNSNames []string      `json:"certificateDNSNames"`
+			Targets             []agentTarget `json:"targets"`
+		}{3, names, out}
 	}
 	b, err := json.Marshal(config)
 	if err != nil {
@@ -142,15 +160,12 @@ func ingressNetworkPolicy(in *tnv1.TailnetIngress, ns, operatorNS string) *netwo
 // ingressAgentDeployment runs one ingress agent pod (AGENT_MODE=ingress). Same security posture,
 // state emptyDir and health probe as the egress agent; the only behavioural difference is the mode
 // env, which flips the agent from listen-local/dial-tailnet to listen-tailnet/dial-cluster.
-func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string, defaultImagePullSecrets []string) *appsv1.Deployment {
+func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string, defaultImagePullSecrets []string, defaultResources corev1.ResourceRequirements) *appsv1.Deployment {
 	replicas := int32(1)
 	automount := false
 	podSec, cSec := nonRoot()
 
-	res := in.Spec.Resources
-	if res.Requests == nil && res.Limits == nil {
-		res = tn.Spec.Proxy.Resources
-	}
+	res := agentResources(in.Spec.Resources, tn.Spec.Proxy.Resources, defaultResources)
 
 	probeInterval := tn.Spec.Proxy.ProbeInterval.Duration.String()
 	mtu := tn.Spec.Proxy.MTU

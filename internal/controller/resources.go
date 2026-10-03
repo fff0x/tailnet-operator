@@ -44,19 +44,20 @@ func targetsConfigMapName(cr string) string { return cr + "-targets" }
 
 // agentTarget is the ConfigMap JSON entry the agent reads.
 type agentTarget struct {
-	Name                  string `json:"name"`
-	Address               string `json:"address"`
-	Port                  int32  `json:"port"`
-	ListenPort            int32  `json:"listenPort"`
-	Mode                  string `json:"mode,omitempty"`
-	DNSName               string `json:"dnsName,omitempty"`
-	CertFile              string `json:"certFile,omitempty"`
-	KeyFile               string `json:"keyFile,omitempty"`
-	ConfigID              string `json:"configID,omitempty"`
-	BackendServerName     string `json:"backendServerName,omitempty"`
-	BackendCAFile         string `json:"backendCAFile,omitempty"`
-	RequestTimeout        string `json:"requestTimeout,omitempty"`
-	BackendRequestTimeout string `json:"backendRequestTimeout,omitempty"`
+	Name                  string   `json:"name"`
+	Address               string   `json:"address"`
+	Port                  int32    `json:"port"`
+	ListenPort            int32    `json:"listenPort"`
+	Mode                  string   `json:"mode,omitempty"`
+	DNSName               string   `json:"dnsName,omitempty"`
+	DNSAliases            []string `json:"dnsAliases,omitempty"`
+	CertFile              string   `json:"certFile,omitempty"`
+	KeyFile               string   `json:"keyFile,omitempty"`
+	ConfigID              string   `json:"configID,omitempty"`
+	BackendServerName     string   `json:"backendServerName,omitempty"`
+	BackendCAFile         string   `json:"backendCAFile,omitempty"`
+	RequestTimeout        string   `json:"requestTimeout,omitempty"`
+	BackendRequestTimeout string   `json:"backendRequestTimeout,omitempty"`
 }
 
 // targetsConfigMap holds the agent's target list. Its mtime changing is what makes the agent rebind.
@@ -196,15 +197,12 @@ func agentImagePullSecrets(override *[]string, defaults []string) []corev1.Local
 // agentDeployment runs one agent pod. Recreate, not RollingUpdate: two pods would briefly share one
 // tailnet hostname and fight over the identity. The tailnet identity is in-memory and ephemeral by
 // design; the only volumes are the targets ConfigMap and a throwaway emptyDir for tsnet's work Dir.
-func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string, defaultImagePullSecrets []string) *appsv1.Deployment {
+func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string, defaultImagePullSecrets []string, defaultResources corev1.ResourceRequirements) *appsv1.Deployment {
 	replicas := int32(1)
 	automount := false
 	podSec, cSec := nonRoot()
 
-	res := eg.Spec.Resources
-	if res.Requests == nil && res.Limits == nil {
-		res = tn.Spec.Proxy.Resources
-	}
+	res := agentResources(eg.Spec.Resources, tn.Spec.Proxy.Resources, defaultResources)
 
 	probeInterval := tn.Spec.Proxy.ProbeInterval.Duration.String()
 	mtu := tn.Spec.Proxy.MTU

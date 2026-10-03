@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,7 +46,7 @@ func TestExposesConfigMap(t *testing.T) {
 		t.Fatalf("want %d targets, got %d", len(want), len(got))
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Fatalf("target[%d] = %+v, want %+v", i, got[i], want[i])
 		}
 	}

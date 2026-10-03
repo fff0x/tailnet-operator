@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"net"
+	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +19,7 @@ const ingressTLSMount = "/tls"
 const ingressBackendTLSMount = "/backend-tls"
 const ingressProtocolAnnotation = "tsunaro.io/agent-config-protocol"
 const ingressHTTPConfigAnnotation = "tsunaro.io/agent-http-config"
+const ingressHTTPSourceAnnotation = "tsunaro.io/agent-http-source"
 
 // A protocol transition retires the old process: legacy agents keep last-good listeners on
 // reload errors, but reject the HTTP envelope at startup. This is not an atomic cutover; the
@@ -32,9 +33,21 @@ func ingressHTTPProtocol(in *tnv1.TailnetIngress) bool {
 	return false
 }
 
-// Presence, not validity, selects v2: even empty or admission-bypassed new settings
-// must retire a v1 process rather than let it ignore security-sensitive fields.
+// Presence, not validity, selects v2/v3: even malformed admission-bypassed intent
+// must retire an older process rather than let it ignore security-sensitive fields.
 func ingressConfigVersion(in *tnv1.TailnetIngress) int {
+	httpCount := 0
+	for _, e := range in.Spec.Exposes {
+		if e.DNSLabel != "" || e.Alias {
+			return 3
+		}
+		if e.Mode == "http" {
+			httpCount++
+		}
+	}
+	if httpCount > 1 {
+		return 3
+	}
 	for _, e := range in.Spec.Exposes {
 		if e.Backend.TLS != nil || e.Timeouts != nil {
 			return 2
@@ -47,9 +60,9 @@ func ingressConfigVersion(in *tnv1.TailnetIngress) int {
 }
 
 func ingressProtocolAnnotations(in *tnv1.TailnetIngress) map[string]string {
-	if ingressConfigVersion(in) == 2 {
+	if version := ingressConfigVersion(in); version >= 2 {
 		return map[string]string{
-			ingressProtocolAnnotation:   "http-v2",
+			ingressProtocolAnnotation:   fmt.Sprintf("http-v%d", version),
 			ingressHTTPConfigAnnotation: ingressDesiredHTTPConfigDigest(in),
 		}
 	}
@@ -64,10 +77,11 @@ func ingressProtocolAnnotations(in *tnv1.TailnetIngress) map[string]string {
 // or status: trust/certificate rotation must not restart an unchanged process.
 func ingressDesiredHTTPConfigDigest(in *tnv1.TailnetIngress) string {
 	data, _ := json.Marshal(struct {
-		Exposes    []tnv1.Expose
-		TLS        *tnv1.IngressTLS
-		TailnetRef tnv1.TailnetRef
-	}{in.Spec.Exposes, in.Spec.TLS, in.Spec.TailnetRef})
+		Exposes       []tnv1.Expose
+		TLS           *tnv1.IngressTLS
+		TailnetRef    tnv1.TailnetRef
+		Tag, Hostname string
+	}{in.Spec.Exposes, in.Spec.TLS, in.Spec.TailnetRef, in.Spec.Tag, in.Spec.Hostname})
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])
 }
@@ -78,10 +92,10 @@ func safeIngressExposes(exposes []tnv1.Expose) bool {
 	if len(exposes) == 0 || len(exposes) > 50 {
 		return false
 	}
-	names, ports := map[string]bool{}, map[int32]bool{}
+	names, ports, labels := map[string]bool{}, map[int32]bool{}, map[string]bool{}
 	httpCount := 0
 	for _, e := range exposes {
-		if names[e.Name] || ports[e.Port] || len(validation.IsDNS1123Label(e.Name)) != 0 ||
+		if names[e.Name] || len(validation.IsDNS1123Label(e.Name)) != 0 ||
 			e.Port < 1 || e.Port > 65535 || e.Backend.Port < 1 || e.Backend.Port > 65535 ||
 			len(validation.IsDNS1123Label(e.Backend.Service)) != 0 ||
 			(e.Backend.Namespace != "" && len(validation.IsDNS1123Label(e.Backend.Namespace)) != 0) {
@@ -90,33 +104,38 @@ func safeIngressExposes(exposes []tnv1.Expose) bool {
 		if !safeIngressHTTPExtensions(e) {
 			return false
 		}
-		names[e.Name], ports[e.Port] = true, true
+		names[e.Name] = true
 		switch e.Mode {
 		case "", "l4":
-		case "http":
-			httpCount++
-			if e.Port != 443 || httpCount > 1 {
+			if ports[e.Port] || e.DNSLabel != "" {
 				return false
 			}
+			ports[e.Port] = true
+		case "http":
+			httpCount++
+			if e.Port != 443 || labels[e.DNSLabel] || (e.DNSLabel != "" && naming.ValidateHostname(e.DNSLabel) != nil) {
+				return false
+			}
+			labels[e.DNSLabel] = true
 		default:
 			return false
 		}
 	}
-	return true
+	return httpCount == 0 || !ports[443]
 }
 
 func projectIngressTLS(in *tnv1.TailnetIngress, plan ingressTLSPlan) bool {
 	if !plan.http || in.UID == "" || len(validation.IsDNS1123Subdomain(plan.secretName)) != 0 ||
-		naming.ValidateDNSName(in.Status.DNSName) != nil || net.ParseIP(in.Status.DNSName) != nil ||
+		len(plan.names.certificateNames) == 0 ||
 		!safeIngressExposes(in.Spec.Exposes) {
 		return false
 	}
 	for _, e := range in.Spec.Exposes {
-		if e.Mode == "http" {
-			return true
+		if e.Mode == "http" && plan.names.exposeNames[e.Name] == "" {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // The revision binds probe results to this CR and its resolved configuration, not Secret data.
@@ -138,16 +157,21 @@ func ingressHTTPConfigID(in *tnv1.TailnetIngress, target agentTarget, plan ingre
 		Secret     string
 		Issuer     *tnv1.TLSIssuerReference
 		// Bind CA reference identity and optional-field presence, never CA contents.
-		Extension *tnv1.Expose `json:"Extension,omitempty"`
-	}{in.UID, in.Generation, target, plan.secretName, plan.issuer, extension})
+		Extension        *tnv1.Expose `json:"Extension,omitempty"`
+		CertificateNames []string
+		ControlIdentity  string
+	}{in.UID, in.Generation, target, plan.secretName, plan.issuer, extension, plan.names.certificateNames, plan.controlIdentity})
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])
 }
 
 // ingressAgentDeploymentTLS adds only a reference to namespace-local material. Optional projection
 // lets other L4 listeners run while certificate issuance is pending; HTTP handshakes still fail closed.
-func ingressAgentDeploymentTLS(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string, pullSecrets []string, plan ingressTLSPlan) *appsv1.Deployment {
-	dep := ingressAgentDeployment(in, tn, ns, image, pullSecrets)
+func ingressAgentDeploymentTLS(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string, pullSecrets []string, defaultResources corev1.ResourceRequirements, plan ingressTLSPlan) *appsv1.Deployment {
+	dep := ingressAgentDeployment(in, tn, ns, image, pullSecrets, defaultResources)
+	if ingressConfigVersion(in) > 0 {
+		dep.Spec.Template.Annotations[ingressHTTPSourceAnnotation] = ingressResolvedSourceDigest(in, tn)
+	}
 	if ns != in.Namespace || !projectIngressTLS(in, plan) {
 		return dep
 	}
@@ -168,8 +192,9 @@ func ingressAgentDeploymentTLS(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, im
 			continue
 		}
 		ref := e.Backend.TLS.CAConfigMapRef
+		volumeName, mountPath := ingressBackendTLSProjection(in, e)
 		pod.Volumes = append(pod.Volumes, corev1.Volume{
-			Name: "backend-tls",
+			Name: volumeName,
 			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{Name: ref.Name},
 				DefaultMode:          &mode, Optional: &optional,
@@ -177,7 +202,7 @@ func ingressAgentDeploymentTLS(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, im
 			}},
 		})
 		pod.Containers[0].VolumeMounts = append(pod.Containers[0].VolumeMounts,
-			corev1.VolumeMount{Name: "backend-tls", MountPath: ingressBackendTLSMount, ReadOnly: true})
+			corev1.VolumeMount{Name: volumeName, MountPath: mountPath, ReadOnly: true})
 	}
 	return dep
 }

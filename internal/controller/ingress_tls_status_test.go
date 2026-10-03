@@ -52,7 +52,7 @@ func ingressTLSStatusFixture(t *testing.T) (*TailnetIngressReconciler, *tnv1.Tai
 	})
 	secret.Name = in.Spec.TLS.SecretName
 	r := &TailnetIngressReconciler{Client: ingressTLSFakeClient(t, secret)}
-	state := r.prepareIngressTLS(context.Background(), in, &tnv1.Tailnet{}, now)
+	state := r.prepareIngressTLS(context.Background(), in, tlsTestTailnet(), now)
 	if state.reason != "" || in.Status.TLSNotAfter == nil || in.Status.TLSSecretName != secret.Name {
 		t.Fatalf("external Secret preparation failed: %s", state.reason)
 	}
@@ -152,16 +152,16 @@ func TestIngressTLSCleanupRetrySurvivesSourceChange(t *testing.T) {
 		return false, nil, nil
 	})
 	r := &TailnetIngressReconciler{Client: ingressTLSFakeClient(t), Certificates: c}
-	r.prepareIngressTLS(context.Background(), in, &tnv1.Tailnet{}, time.Now())
+	r.prepareIngressTLS(context.Background(), in, tlsTestTailnet(), time.Now())
 	if in.Status.TLSSecretName != "new-external" || meta.FindStatusCondition(in.Status.Conditions, "TLSCleanup") == nil {
 		t.Fatal("source change lost cleanup retry marker")
 	}
 	forbidden = false
-	r.prepareIngressTLS(context.Background(), in, &tnv1.Tailnet{}, time.Now())
+	r.prepareIngressTLS(context.Background(), in, tlsTestTailnet(), time.Now())
 	if meta.FindStatusCondition(in.Status.Conditions, "TLSCleanup") == nil {
 		t.Fatal("accepted deletion was treated as completed deletion")
 	}
-	r.prepareIngressTLS(context.Background(), in, &tnv1.Tailnet{}, time.Now())
+	r.prepareIngressTLS(context.Background(), in, tlsTestTailnet(), time.Now())
 	if meta.FindStatusCondition(in.Status.Conditions, "TLSCleanup") != nil {
 		t.Fatal("confirmed cleanup retained retry marker")
 	}

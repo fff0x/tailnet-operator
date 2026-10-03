@@ -180,7 +180,9 @@ func reason(s string) string {
 		"TLSSecretMissing", "TLSSecretInvalid", "TLSSecretConflict", "TLSSecretForbidden", "TLSSecretUnavailable",
 		"TLSCertificateInvalid", "TLSCertificateNotYetValid", "TLSCertificateExpired", "TLSCertificatePending",
 		"TLSCertificateUnavailable", "TLSCertificateForbidden", "TLSCertificateConflict", "CertManagerMissing",
-		"TLSProbePending", "TLSProbeFailed", "TLSProbeStale", "TLSConfigMismatch", "TLSCertificateMismatch":
+		"TLSProbePending", "TLSProbeFailed", "TLSProbeStale", "TLSConfigMismatch", "TLSCertificateMismatch",
+		"DNSNameConflict", "DNSConflictUnresolved", "DNSEgressTargetInvalid", "DNSEgressAliasInvalid",
+		"DNSEgressAliasAmbiguous", "DNSClaimIdentityInvalid", "DNSClaimInputInvalid":
 		return s
 	default:
 		return "Other"

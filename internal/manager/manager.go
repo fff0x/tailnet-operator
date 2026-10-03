@@ -35,6 +35,7 @@ type Options struct {
 	LeaderElection         bool
 	Image                  string
 	AgentImagePullSecrets  []string
+	AgentResources         corev1.ResourceRequirements
 	MetricsBindAddress     string
 	HealthProbeBindAddress string
 }
@@ -79,11 +80,13 @@ func New(cfg *rest.Config, opts Options) (ctrl.Manager, error) {
 			Metrics: metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
 		}).SetupWithManager},
 		{"TailnetEgress", (&controller.TailnetEgressReconciler{
-			Metrics: metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
+			AgentResources: *opts.AgentResources.DeepCopy(),
+			Metrics:        metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
 			OperatorImage: opts.Image, AgentImagePullSecrets: append([]string(nil), opts.AgentImagePullSecrets...),
 		}).SetupWithManager},
 		{"TailnetIngress", (&controller.TailnetIngressReconciler{
-			Metrics: metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
+			AgentResources: *opts.AgentResources.DeepCopy(),
+			Metrics:        metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
 			Certificates: certificateClient, SecretReader: mgr.GetAPIReader(),
 			OperatorImage: opts.Image, AgentImagePullSecrets: append([]string(nil), opts.AgentImagePullSecrets...),
 		}).SetupWithManager},

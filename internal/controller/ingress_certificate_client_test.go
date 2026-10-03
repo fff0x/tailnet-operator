@@ -30,9 +30,8 @@ func certificateClientFixture() (*tnv1.TailnetIngress, ingressTLSPlan, *unstruct
 			Backend: tnv1.Backend{Namespace: "foreign-backend", Service: "web", Port: 8080}}}},
 		Status: tnv1.TailnetIngressStatus{DNSName: "web.tenant.invalid"},
 	}
-	plan := ingressTLSPlan{http: true, secretName: "web-tls", issuer: &tnv1.TLSIssuerReference{
-		Name: "tenant-ca", Kind: "Issuer", Group: "cert-manager.io",
-	}}
+	plan := tlsTestPlan(in, "web-tls")
+	plan.issuer = &tnv1.TLSIssuerReference{Name: "tenant-ca", Kind: "Issuer", Group: "cert-manager.io"}
 	cert := desiredIngressCertificate(in, plan)
 	cert.SetUID("certificate-uid")
 	cert.SetResourceVersion("7")

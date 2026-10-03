@@ -22,14 +22,14 @@ func TestAgentDeploymentImagePullSecrets(t *testing.T) {
 			name: "egress", namespace: "tailnet-system",
 			build: func(tn *tnv1.Tailnet, defaults []string) *appsv1.Deployment {
 				eg := &tnv1.TailnetEgress{ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "tailnet-system"}}
-				return agentDeployment(eg, tn, eg.Namespace, "selected-image", defaults)
+				return agentDeployment(eg, tn, eg.Namespace, "selected-image", defaults, corev1.ResourceRequirements{})
 			},
 		},
 		{
 			name: "ingress", namespace: "tenant-app",
 			build: func(tn *tnv1.Tailnet, defaults []string) *appsv1.Deployment {
 				in := &tnv1.TailnetIngress{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "tenant-app"}}
-				return ingressAgentDeployment(in, tn, in.Namespace, "selected-image", defaults)
+				return ingressAgentDeployment(in, tn, in.Namespace, "selected-image", defaults, corev1.ResourceRequirements{})
 			},
 		},
 	} {

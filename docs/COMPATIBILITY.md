@@ -24,6 +24,16 @@ Check `Tailnet.spec.proxy.image` and `TailnetIngress.spec.image` overrides durin
 | Existing L4 | Legacy array | None |
 | Existing HTTP without extensions | Version 1 | `http-v1` |
 | Any backend TLS or timeout settings | Version 2 | `http-v2` |
+| Multiple HTTP exposes, a `dnsLabel`, or an `alias` | Version 3 | `http-v3` |
+
+## Virtual hosts and aliases (v0.6.0)
+
+Several `mode: http` exposes per ingress, per-expose `dnsLabel`, and the optional short `alias`
+require v0.6.0 CRDs, controller and agent images. The version-3 agent envelope adds a
+`certificateDNSNames` policy and per-target `dnsAliases`; an old agent rejects it outright rather
+than serving a subset. DNS names (including egress aliases) are arbitrated oldest-owner-wins across
+one Tailnet; the losing CR reports `DNSNameConflict` and is withdrawn — replacing the previous purely
+lexical hosts-file de-duplication. `ingressAliasTemplate` must share the zone of `ingressNameTemplate`.
 
 Old agents reject the new envelope rather than silently ignoring security settings.
 The `Recreate` strategy and changed `tsunaro.io/agent-config-protocol` annotation retire the old process on a protocol transition.

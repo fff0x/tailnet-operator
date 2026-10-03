@@ -4,6 +4,32 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- Virtual hosts: a `TailnetIngress` may publish several `mode: http` exposes behind one node. Each
+  expose gets its own DNS name (`spec.exposes[].dnsLabel`, rendered through
+  `Tailnet.spec.dns.ingressNameTemplate`); at most one HTTP expose may omit the label. The agent
+  terminates TLS on a single certificate covering every name, routes by SNI, and requires the HTTP
+  `Host` to equal the SNI. Resolved names appear in `status.exposes[].dnsName`.
+- Optional short alias per HTTP expose (`spec.exposes[].alias`) rendered from
+  `Tailnet.spec.dns.ingressAliasTemplate`. The alias must resolve in the same DNS zone as
+  `ingressNameTemplate`; it becomes an extra certificate SAN and SNI route, reported in
+  `status.exposes[].dnsAliases`.
+- DNS names and egress aliases are arbitrated oldest-owner-wins across one Tailnet. A younger CR that
+  claims a name already held by an older one reports `Ready=False/DNSNameConflict` and is not
+  published, replacing the previous lexical hosts-file de-duplication.
+- Chart `agent.resources` defaults for ingress and egress: requests CPU `10m` and memory `32Mi`,
+  memory limit `128Mi`, no CPU limit. Precedence selects one whole block:
+  CR `spec.resources` > `Tailnet.spec.proxy.resources` > chart default, without per-key merging.
+  `agent.resources: null` disables the chart fallback; `{}` retains Helm's merged defaults.
+  Direct binary runs without `AGENT_RESOURCES` retain the zero default.
+
+### Changed
+
+- Agents that inherit the new defaults restart once per CR with `Recreate` when their effective
+  resources change. Ephemeral nodes re-register; expect a brief interruption. Higher-tier overrides
+  are preserved.
+
 ## [0.5.1] - 2026-10-02
 
 ### Fixed

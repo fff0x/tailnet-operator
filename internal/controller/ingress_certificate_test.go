@@ -20,6 +20,7 @@ func TestDesiredIngressCertificate(t *testing.T) {
 			tn := &tnv1.Tailnet{Spec: tnv1.TailnetSpec{Defaults: tnv1.TailnetDefaults{TLS: &tnv1.TLSDefaults{
 				IssuerRef: &tnv1.TLSIssuerReference{Name: "internal", Kind: kind},
 			}}}}
+			tn.Spec.DNS = tlsTestTailnet().Spec.DNS
 			plan, reason := resolveIngressTLS(in, tn)
 			if reason != "" {
 				t.Fatalf("resolve reason=%s", reason)

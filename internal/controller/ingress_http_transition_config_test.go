@@ -187,8 +187,8 @@ func TestIngressHTTPTransitionWaitsForScaleObservation(t *testing.T) {
 
 func TestIngressExtendedDeploymentApplyOwnershipFence(t *testing.T) {
 	ctx := context.Background()
-	r, in, dep, _, _ := transitionFixture(t, false)
-	desired := ingressAgentDeployment(in, &tnv1.Tailnet{}, in.Namespace, "new", nil)
+	r, in, dep, _, pod := transitionFixture(t, false)
+	desired := ingressAgentDeployment(in, &tnv1.Tailnet{}, in.Namespace, "new", nil, corev1.ResourceRequirements{})
 	if err := controllerutil.SetControllerReference(in, desired, r.Scheme); err != nil {
 		t.Fatal(err)
 	}
@@ -200,6 +200,9 @@ func TestIngressExtendedDeploymentApplyOwnershipFence(t *testing.T) {
 		t.Fatalf("adopted Deployment replaced during dependency lookups: %v", err)
 	}
 	if err := r.Delete(ctx, dep); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Delete(ctx, pod); err != nil {
 		t.Fatal(err)
 	}
 	// Simulate another writer creating a foreign Deployment after Get=NotFound.

@@ -38,6 +38,7 @@ type TailnetEgressReconciler struct {
 	OperatorNamespace     string
 	OperatorImage         string
 	AgentImagePullSecrets []string
+	AgentResources        corev1.ResourceRequirements
 }
 
 func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -90,6 +91,21 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	eg.Status.Hostname = hostname
 	eg.Status.Tag = tag
+
+	// DNS aliases are arbitrated oldest-owner-wins across every CR of this Tailnet. Reject invalid
+	// alias derivation and refuse to publish a loser's aliases.
+	if set, reason := desiredEgressDNSClaims(&eg, &tn, r.OperatorNamespace); reason != "" {
+		return r.fail(ctx, &eg, reason, fmt.Errorf("egress DNS alias configuration is invalid"))
+	} else if set != nil {
+		decisions, err := collectDNSClaimDecisions(ctx, r.Client, &tn, r.OperatorNamespace)
+		if err != nil {
+			return r.fail(ctx, &eg, "DNSConflictUnresolved", err)
+		}
+		ownerKey := dnsClaimOwnerKey{Kind: dnsEgressKind, Namespace: eg.Namespace, Name: eg.Name, UID: eg.UID}
+		if d, ok := decisions[ownerKey]; ok && d.Blocked && d.Conflict != nil {
+			return r.fail(ctx, &eg, "DNSNameConflict", dnsConflictError(d.Conflict))
+		}
+	}
 
 	// TagKnown: refuse to mint for a tag the policy never declared. Text search, not HuJSON parsing
 	// — a typo is what we are catching, not a crafted policy. ponytail: substring match; upgrade to
@@ -256,7 +272,7 @@ func (r *TailnetEgressReconciler) applyChildren(ctx context.Context, eg *tnv1.Ta
 	if err != nil {
 		return err
 	}
-	dep := agentDeployment(eg, tn, ns, image, r.AgentImagePullSecrets)
+	dep := agentDeployment(eg, tn, ns, image, r.AgentImagePullSecrets, r.AgentResources)
 	np := egressNetworkPolicy(eg, ns, r.OperatorNamespace)
 	for _, obj := range []client.Object{cm, dep, np} {
 		if err := controllerutil.SetControllerReference(eg, obj, r.Scheme); err != nil {

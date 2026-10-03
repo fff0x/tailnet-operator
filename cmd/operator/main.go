@@ -33,8 +33,13 @@ func main() {
 		l.Error(err, "invalid AGENT_IMAGE_PULL_SECRETS")
 		os.Exit(1)
 	}
+	agentResources, err := parseAgentResources(os.Getenv("AGENT_RESOURCES"))
+	if err != nil {
+		l.Error(err, "invalid AGENT_RESOURCES")
+		os.Exit(1)
+	}
 	mgr, err := manager.New(ctrl.GetConfigOrDie(), manager.Options{
-		Namespace: ns, Image: image, AgentImagePullSecrets: imagePullSecrets,
+		Namespace: ns, Image: image, AgentImagePullSecrets: imagePullSecrets, AgentResources: agentResources,
 		LeaderElection:     *leaderElection,
 		MetricsBindAddress: ":8080", HealthProbeBindAddress: ":8081",
 	})

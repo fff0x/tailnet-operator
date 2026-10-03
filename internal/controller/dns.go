@@ -77,7 +77,7 @@ func (r *TailnetDNSReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	entries, err := r.collect(ctx, tn.Name)
+	entries, err := r.collect(ctx, &tn)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -96,17 +96,33 @@ func (r *TailnetDNSReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-// collect gathers the entries of all CRs bound to the Tailnet tn.
-func (r *TailnetDNSReconciler) collect(ctx context.Context, tn string) ([]hostEntry, error) {
+// collect gathers the entries of all CRs bound to the Tailnet tn. Names are arbitrated
+// oldest-owner-wins across both kinds; only a winner's own names are published, so a loser never
+// resolves even if its Service or node IPs still exist.
+func (r *TailnetDNSReconciler) collect(ctx context.Context, tn *tnv1.Tailnet) ([]hostEntry, error) {
+	decisions, err := collectDNSClaimDecisions(ctx, r.Client, tn, r.OperatorNamespace)
+	if err != nil {
+		return nil, err
+	}
 	var out []hostEntry
 	var egs tnv1.TailnetEgressList
 	if err := r.List(ctx, &egs, client.InNamespace(r.OperatorNamespace)); err != nil {
 		return nil, err
 	}
-	for _, eg := range egs.Items {
-		if eg.Spec.TailnetRef.Name != tn {
+	for i := range egs.Items {
+		eg := &egs.Items[i]
+		if eg.Spec.TailnetRef.Name != tn.Name {
 			continue
 		}
+		d, ok := decisions[dnsClaimOwnerKey{Kind: dnsEgressKind, Namespace: eg.Namespace, Name: eg.Name, UID: eg.UID}]
+		if !ok {
+			continue // invalid derivation or feature off: do not publish
+		}
+		owned := make(map[string]bool, len(d.OwnedNames))
+		for _, n := range d.OwnedNames {
+			owned[n] = true
+		}
+		src := "tailnetegress/" + eg.Namespace + "/" + eg.Name
 		for _, t := range eg.Spec.Targets {
 			if len(t.Aliases) == 0 {
 				continue
@@ -118,8 +134,10 @@ func (r *TailnetDNSReconciler) collect(ctx context.Context, tn string) ([]hostEn
 				}
 				continue // Service not created yet; the egress status update (or the 5m requeue) brings us back
 			}
-			src := "tailnetegress/" + eg.Namespace + "/" + eg.Name
 			for _, a := range t.Aliases {
+				if !owned[a] {
+					continue
+				}
 				for _, ip := range svc.Spec.ClusterIPs {
 					if ip != "" && ip != corev1.ClusterIPNone {
 						out = append(out, hostEntry{Name: a, IP: ip, Source: src})
@@ -132,30 +150,37 @@ func (r *TailnetDNSReconciler) collect(ctx context.Context, tn string) ([]hostEn
 	if err := r.List(ctx, &ins); err != nil {
 		return nil, err
 	}
-	for _, in := range ins.Items {
-		if in.Spec.TailnetRef.Name != tn || in.Status.DNSName == "" {
+	for i := range ins.Items {
+		in := &ins.Items[i]
+		if in.Spec.TailnetRef.Name != tn.Name {
+			continue
+		}
+		d, ok := decisions[dnsClaimOwnerKey{Kind: dnsIngressKind, Namespace: in.Namespace, Name: in.Name, UID: in.UID}]
+		if !ok {
 			continue
 		}
 		src := "tailnetingress/" + in.Namespace + "/" + in.Name
-		for _, ip := range in.Status.TailnetIPs {
-			// ponytail: IPv4 only. Clients prefer AAAA, but tsnet/netstack agents (and pod-hosted
-			// routers) do not accept tailnet IPv6 in the clusters seen so far, and Headscale's own
-			// MagicDNS publishes A records only — an AAAA here turns a working service into a
-			// connect timeout. Upgrade path: a Tailnet.spec.dns switch once IPv6 is verified.
-			if a, err := netip.ParseAddr(ip); err == nil && a.Is6() {
-				continue
+		for _, name := range d.OwnedNames {
+			for _, ip := range in.Status.TailnetIPs {
+				// ponytail: IPv4 only. Clients prefer AAAA, but tsnet/netstack agents (and pod-hosted
+				// routers) do not accept tailnet IPv6 in the clusters seen so far, and Headscale's own
+				// MagicDNS publishes A records only — an AAAA here turns a working service into a
+				// connect timeout. Upgrade path: a Tailnet.spec.dns switch once IPv6 is verified.
+				if a, err := netip.ParseAddr(ip); err == nil && a.Is6() {
+					continue
+				}
+				out = append(out, hostEntry{Name: name, IP: ip, Source: src})
 			}
-			out = append(out, hostEntry{Name: in.Status.DNSName, IP: ip, Source: src})
 		}
 	}
 	return out, nil
 }
 
-// renderHosts writes the CoreDNS hosts file: "IP name" lines sorted by name for a stable diff. A
-// name claimed by two different sources keeps the first source (sorted) and reports the loser via
-// warn — two IPs for one name would otherwise round-robin between unrelated backends.
-// ponytail: first-wins is a heuristic, not a conflict resolution; the upgrade path is a status
-// condition on the losing CR.
+// renderHosts writes the CoreDNS hosts file: "IP name" lines sorted by name for a stable diff.
+// collect already arbitrates names oldest-owner-wins and the losing CR gets a DNSNameConflict
+// status condition, so duplicates should not reach here. The lexical first-source-wins dedup below
+// remains a last-resort guard against a transient cache lag (two IPs for one name would otherwise
+// round-robin between unrelated backends).
 func renderHosts(tailnet string, entries []hostEntry, warn func(msg string, kv ...any)) string {
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].Name != entries[j].Name {
