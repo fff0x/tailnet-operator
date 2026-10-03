@@ -1,4 +1,4 @@
-// httppeer is an independent tsnet peer and strict HTTP backend for the isolated
+// httppeer is an independent tsnet peer and strict HTTP/TCP backend for the isolated
 // p1.8 fixture. The host must release the Pod's separate init gate before startup.
 package main
 
@@ -50,7 +50,7 @@ type dependencies struct {
 	getenv func(string) string
 	setenv func(string, string) error
 	open   func(string) (io.ReadCloser, error)
-	start  func(string, *x509.CertPool) error
+	start  func(string, *x509.CertPool, bool) error
 }
 
 func main() {
@@ -69,7 +69,8 @@ func main() {
 // Tests inject every side effect; there is no runtime endpoint/path override.
 func run(args []string, goos string, euid int, d dependencies) error {
 	separateServingCA := len(args) == 2 && args[1] == "--serving-ca=cert-manager"
-	if goos != "linux" || euid != 65532 || (len(args) != 1 && !separateServingCA) || args[0] != "--fixture=p1.8-http" {
+	denied := len(args) == 2 && args[1] == "--identity=denied"
+	if goos != "linux" || euid != 65532 || (len(args) != 1 && !separateServingCA && !denied) || args[0] != "--fixture=p1.8-http" {
 		return errRejected
 	}
 	key := d.getenv("TS_AUTHKEY")
@@ -93,7 +94,7 @@ func run(args []string, goos string, euid int, d dependencies) error {
 			return errRejected
 		}
 	}
-	if d.start(key, roots) != nil {
+	if d.start(key, roots, denied) != nil {
 		return errRejected
 	}
 	return nil
@@ -129,9 +130,13 @@ func parseRoot(data []byte, now time.Time) (*x509.CertPool, error) {
 	return roots, nil
 }
 
-func peerServer(key string) *tsnet.Server {
+func peerServer(key string, denied bool) *tsnet.Server {
+	hostname := "http-peer"
+	if denied {
+		hostname = "denied-peer"
+	}
 	return &tsnet.Server{
-		Hostname: "http-peer", ControlURL: controlURL, AuthKey: key,
+		Hostname: hostname, ControlURL: controlURL, AuthKey: key,
 		Dir: "/state", Store: new(mem.Store), Ephemeral: true,
 		Logf: func(string, ...any) {}, UserLogf: func(string, ...any) {},
 	}
@@ -148,12 +153,12 @@ func peerIPv4(status *ipnstate.Status) (string, error) {
 	return "", errRejected
 }
 
-func startFixture(key string, roots *x509.CertPool) error {
+func startFixture(key string, roots *x509.CertPool, denied bool) error {
 	log.SetOutput(io.Discard)
 	logtail.Disable() // Never upload raw tsnet logs from the isolated fixture.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	peer := peerServer(key)
+	peer := peerServer(key, denied)
 	defer peer.Close()
 	upCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	status, err := peer.Up(upCtx)
@@ -177,21 +182,39 @@ func startFixture(key string, roots *x509.CertPool) error {
 		return errRejected
 	}
 	defer controlListener.Close()
+	l4Listener, err := net.Listen("tcp", l4BackendAddr)
+	if err != nil {
+		return errRejected
+	}
+	defer l4Listener.Close()
 	backend := boundedServer(backendHandler(ip))
 	control := boundedServer(controlHandler(func(ctx context.Context, input probeInput) probeResult {
 		client, tr := probeClient(roots, peer.Dial, input)
 		defer tr.CloseIdleConnections()
 		return probe(ctx, input, client.Do)
+	}, func(ctx context.Context, input l4ProbeInput) l4ProbeResult {
+		return probeL4(ctx, input, peer.Dial)
 	}))
-	errs := make(chan error, 2)
+	errs := make(chan error, 3)
 	go func() { errs <- backend.Serve(backendListener) }()
 	go func() { errs <- control.Serve(controlListener) }()
+	l4Ctx, cancelL4 := context.WithCancel(ctx)
+	defer cancelL4()
+	l4Done := make(chan struct{})
+	go func() {
+		defer close(l4Done)
+		errs <- serveL4Backend(l4Ctx, l4Listener)
+	}()
 	var result error
 	select {
 	case <-ctx.Done():
-	case <-errs:
-		result = errRejected
+	case err := <-errs:
+		if err != nil {
+			result = errRejected
+		}
 	}
+	cancelL4()
+	<-l4Done // Includes closure of every active TCP backend connection.
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	// Close also terminates connections remaining after the graceful deadline.
@@ -277,7 +300,7 @@ func decodeProbe(reader io.Reader) (probeInput, error) {
 	return input, nil
 }
 
-func controlHandler(doProbe func(context.Context, probeInput) probeResult) http.Handler {
+func controlHandler(doProbe func(context.Context, probeInput) probeResult, doL4Probe func(context.Context, l4ProbeInput) l4ProbeResult) http.Handler {
 	slots := make(chan struct{}, 4)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.RequestURI() {
@@ -287,12 +310,19 @@ func controlHandler(doProbe func(context.Context, probeInput) probeResult) http.
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
-		case "/probe":
+		case "/probe", "/probe-l4":
 			if r.Method != http.MethodPost {
 				http.Error(w, "rejected", http.StatusMethodNotAllowed)
 				return
 			}
-			input, err := decodeProbe(r.Body)
+			var input probeInput
+			var l4Input l4ProbeInput
+			var err error
+			if r.URL.Path == "/probe-l4" {
+				l4Input, err = decodeL4Probe(r.Body)
+			} else {
+				input, err = decodeProbe(r.Body)
+			}
 			if err != nil {
 				http.Error(w, "rejected", http.StatusBadRequest)
 				return
@@ -306,7 +336,11 @@ func controlHandler(doProbe func(context.Context, probeInput) probeResult) http.
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
-			_ = json.NewEncoder(w).Encode(doProbe(r.Context(), input))
+			if r.URL.Path == "/probe-l4" {
+				_ = json.NewEncoder(w).Encode(doL4Probe(r.Context(), l4Input))
+			} else {
+				_ = json.NewEncoder(w).Encode(doProbe(r.Context(), input))
+			}
 		default:
 			http.Error(w, "rejected", http.StatusNotFound)
 		}
