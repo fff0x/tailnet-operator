@@ -111,9 +111,12 @@ prerequisites fail startup before the main containers start. No privileged init
 container, host network namespace or sysctl writer is provided.
 
 Tailscale 1.102.4 source inspection shows that `containerboot` skips sysctl writes
-when forwarding is already enabled. `NET_ADMIN` does not guarantee writable sysctls.
-The deployment environment must provide the device, permissions and network setup;
-the operator must not relax node or namespace security to bypass a failed check.
+when forwarding is already enabled, so the pod network namespace must already have
+`net.ipv4.ip_forward=1`. On a Talos node the pod inherits this from the host
+(`net.core.devconf_inherit_init_net=0`, host forwarding enabled). Where the host
+does not forward, a node that allows the namespaced `net.ipv4.ip_forward` unsafe
+sysctl lets the pod set it through `securityContext.sysctls` with no added capability.
+The operator must not relax node or namespace security to bypass a failed check.
 A later route update that adds a family needs a new runtime prerequisite check.
 
 For fresh state, bootstrap uses `TS_AUTH_ONCE=false`, `--reset` and explicit
@@ -152,23 +155,26 @@ The new selection has a 10-minute test budget. Existing selections and budgets a
 unchanged. Evidence and cleanup results remain under the runner's XDG State directory.
 
 The probe only reads fixed paths. It checks the node's TUN character-device metadata
-and forwarding values in a startup-gated, unprivileged observation pod. It does not
-mount or open TUN, load modules, change sysctls or start gateway containers.
+and the pod forwarding value in a startup-gated, unprivileged observation pod. It does
+not mount or open TUN, load modules, write sysctls or start gateway containers.
 Unknown, unreadable or disabled required observations fail the gate, not skip it.
 
-Both runs on the pinned Kubernetes 1.36.1 Kind node **failed**. Node TUN and IPv4
-forwarding were present; pod IPv4 and IPv6 forwarding were disabled.
-Cleanup succeeded, source manifests matched, and no repair was attempted.
-Node forwarding is therefore not sufficient evidence for pod forwarding.
-Pod TUN was absent because this observation pod intentionally mounts no device.
+The observation pod provisions `net.ipv4.ip_forward=1` through `securityContext.sysctls`,
+which the kind node permits as an allowed unsafe sysctl (`kind-http.yaml`). This mirrors
+the forwarding a Talos node provides to the real gateway pod and adds no capability,
+privilege or host change. The gate then confirms the node TUN character device and the
+pod IPv4 forwarding prerequisite are observable before any gateway container exists.
 
-The existing startup contract remains unchanged: no HostPath, added capabilities,
-UID 0 or multiple application containers. It cannot directly release the modeled
-kernel gateway. A gateway-specific isolation contract and actual supported pod
-prerequisites remain required; do not relax the existing gate to manufacture success.
-Even a successful read-only prerequisite check would not prove image compatibility,
-TUN permissions/ioctls, persistent bootstrap or subnet traffic. IPv6 support is not
-established by this IPv4 prerequisite gate.
+A green result proves only that the IPv4 kernel prerequisites are present in the pod;
+it does not prove image compatibility, TUN permissions/ioctls, persistent bootstrap or
+subnet routing. IPv6 is out of scope: the initial LAN and LB route families are IPv4,
+matching the production gateway.
+
+Releasing the full kernel gateway pod form (UID 0 with only `NET_ADMIN`, one
+`HostPathCharDev /dev/net/tun`, non-root CoreDNS) needs its own fixture contract,
+`AddGatewayNetworkGate`, separate from and as strict as the unchanged `AddNetworkGate`
+used here (UID 65532, no HostPath, no added capabilities). That contract and the
+writer, bootstrap and routing proofs remain open.
 
 ## Fresh DNS rendering: partial implementation
 

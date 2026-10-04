@@ -28,7 +28,10 @@ Do not add broad suppressions to make a failing release pass.
 Use `task e2e-kind` for the disposable pod-level installation/failover suite.
 It requires local rootless Podman, kind and suitable cgroup delegation.
 See [the runner's safety boundaries](test/e2e-kind/README.md).
-Do not point tests at your current kube-context or change host privileges to bypass a failing prerequisite.
+Do not point tests at your current kube-context. The disposable test cluster may provide
+a prerequisite the way the target node does (for example the gateway gate permits the
+namespaced `net.ipv4.ip_forward` unsafe sysctl so a fixture pod forwards like a Talos
+node); do not change host privileges, add capabilities or relax the pod isolation gate.
 The isolated projection runner also offers `--gateway-preflight-only`; see the
 [read-only kernel gate](docs/reference/gateway.md#read-only-kind-prerequisite-gate).
 A failed capability check is not support evidence and must not be silently skipped.
