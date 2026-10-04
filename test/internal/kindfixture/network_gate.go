@@ -76,6 +76,11 @@ func networkGateResources(pod *corev1.Pod, image string) (corev1.Volume, corev1.
 			}
 		}
 	}
+	v, c := newNetworkGateResources(image)
+	return v, c, nil
+}
+
+func newNetworkGateResources(image string) (corev1.Volume, corev1.Container) {
 	yes, no := true, false
 	uid := int64(65532)
 	size := resource.MustParse("4Mi")
@@ -86,5 +91,5 @@ func networkGateResources(pod *corev1.Pod, image string) (corev1.Volume, corev1.
 		Resources:       corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("16Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("64Mi")}},
 		VolumeMounts:    []corev1.VolumeMount{{Name: networkGateVolume, MountPath: "/fixture-gate"}},
 	}
-	return v, c, nil
+	return v, c
 }
