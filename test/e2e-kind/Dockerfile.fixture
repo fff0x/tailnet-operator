@@ -1,6 +1,7 @@
 # Only source-built static fixture binaries; never an operator or tsnet image.
 FROM scratch
 COPY --chmod=0755 netprobe /netprobe
+COPY --chmod=0755 kernelcheck /kernelcheck
 COPY --chmod=0755 hold /hold
 COPY --chmod=0755 fixture /fixture
 COPY --chmod=0755 projection /projection

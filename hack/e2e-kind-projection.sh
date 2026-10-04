@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Source-only fixture image; a separate delegated user scope must already exist.
-# Only fixed HTTP-only or L4-only selections are optional; no reuse, route repair,
+# Only fixed test selections are optional; no reuse, route repair,
 # context/image overrides, or sudo fallback.
 set +x
 set -Eeuo pipefail
@@ -10,12 +10,17 @@ exec >/dev/null 2>&1
 reject() { printf 'projection: stage=preflight result=rejected\n' >&3; exit 2; }
 test_pattern='^Test(FixtureCAProjection|PodNetworkGate|HeadscaleHTTPS|AgentHTTPSPeer|IngressHTTP|IngressL4)$'
 test_timeout=26m
+kernel_only=false
 if [[ $# == 1 && $1 == --http-only ]]; then
     test_pattern='^TestIngressHTTP$'
     test_timeout=18m
 elif [[ $# == 1 && $1 == --l4-only ]]; then
     test_pattern='^TestIngressL4$'
     test_timeout=10m
+elif [[ $# == 1 && $1 == --gateway-preflight-only ]]; then
+    test_pattern='^TestGatewayKernelPrerequisites$'
+    test_timeout=10m
+    kernel_only=true
 elif [[ $# != 0 ]]; then
     reject
 fi
@@ -137,8 +142,8 @@ absent() { local rc=0; p "$@" || rc=$?; [[ $rc == 1 ]]; }
 source_manifest() {
     (cd "$src"; sha256sum go.mod go.sum hack/e2e-kind-projection.sh test/e2e-kind/kind-http.yaml \
         test/e2e-kind/network-gate.py test/e2e-kind/Dockerfile.fixture test/e2e-kind/netprobe-pod.json test/e2e-kind/headscale-http.json \
-        test/e2e-kind/cmd/{netprobe,fixture,projection,proofverify,hold,netgate,controlprobe,httppeer}/*.go \
-        test/internal/{netproof,kindfixture}/*.go test/e2e-kind/*.go test/e2e-kind/Dockerfile \
+        test/e2e-kind/cmd/{netprobe,fixture,projection,proofverify,hold,netgate,controlprobe,httppeer,kernelcheck}/*.go \
+        test/internal/{netproof,kindfixture,kernelcheck}/*.go test/e2e-kind/*.go test/e2e-kind/Dockerfile \
         test/e2e-kind/cert-manager-images.json test/e2e-kind/cert-manager-assets*.py;
         find api cmd internal -type f -name '*.go' -print0 | sort -z | xargs -0 sha256sum;
         find charts/tailnet-operator -type f -print0 | sort -z | xargs -0 sha256sum)
@@ -227,7 +232,7 @@ stage=build-source-offline
 source_manifest > "$out/source-before.sha256"
 source_recorded=true
 # Dependency caches must already be populated. No module/auth/network fallback.
-for binary in netprobe fixture projection hold proofverify netgate controlprobe httppeer; do
+for binary in netprobe fixture projection hold proofverify netgate controlprobe httppeer kernelcheck; do
     target=$work/context/$binary
     [[ $binary != proofverify ]] || target=$work/proofverify
     (cd "$src"; run "${bins[go]}" build -trimpath -o "$target" "./test/e2e-kind/cmd/$binary") > "$out/$binary-build.log" 2>&1
@@ -242,11 +247,11 @@ printf '%s  headscale-linux-%s\n' "$hs_sha" "$hs_arch" > "$out/headscale-provena
 (cd "$src"; run "${bins[go]}" test -c -tags=e2e_kind -o "$work/projection.test" ./test/e2e-kind) > "$out/projection-build.log" 2>&1
 chmod 0755 "$work/projection.test"
 run "${bins[file]}" "$work/projection.test" >> "$out/static-binaries.txt"
-run "${bins[python3]}" -B -I -c 'import pathlib,sys; s=pathlib.Path(sys.argv[1]).read_text(); sys.exit(0 if len(s.splitlines())==10 and s.count("statically linked")==10 else 2)' "$out/static-binaries.txt"
+run "${bins[python3]}" -B -I -c 'import pathlib,sys; s=pathlib.Path(sys.argv[1]).read_text(); sys.exit(0 if len(s.splitlines())==11 and s.count("statically linked")==11 else 2)' "$out/static-binaries.txt"
 cp -- "$fixture/Dockerfile.fixture" "$work/context/Dockerfile"
 py render "$fixture/netprobe-pod.json" "$work/pod.json" "$cluster"
 # Keep private provenance hashes, not a second copy of source or tool state.
-sha256sum "$work/context/"{netprobe,fixture,projection,hold,netgate,controlprobe,headscale,httppeer} "$work/proofverify" "$work/projection.test" > "$out/binaries.sha256"
+sha256sum "$work/context/"{netprobe,fixture,projection,hold,netgate,controlprobe,headscale,httppeer,kernelcheck} "$work/proofverify" "$work/projection.test" > "$out/binaries.sha256"
 
 mkdir -m 700 "$work/agent-image"
 for program in operator agent; do
@@ -334,6 +339,9 @@ for component in controller cainjector webhook startupapicheck; do
     run "${bins[python3]}" -B -I "$fixture/cert-manager-assets.py" --check-import "$out/cert-manager-assets.json" "$component" "$out/cm-$component-cri-image.json" "$out/cm-$component-containerd-images.txt" > "$out/cm-$component-import-verified.json"
 done
 p cp "$work/context/netprobe" "$node:/tmp/owned-source-netprobe" > "$out/node-copy.log" 2>&1
+if [[ $kernel_only == true ]]; then
+    p cp "$work/context/kernelcheck" "$node:/tmp/owned-source-kernelcheck" > "$out/kernelcheck-node-copy.log" 2>&1
+fi
 stage=holder-pod
 k create -f "$work/pod.json" > "$out/pod-create.log"
 k wait --for=condition=Ready pod/owned-netproof --timeout=60s > "$out/pod-ready.log" 2>&1
@@ -382,8 +390,11 @@ run "$work/proofverify" "$out/binding.json" "$out/node-capture.json" "$out/pod-c
 {
     # shellcheck disable=SC2016 # Preserve positional parameters for the generated observer.
     printf '#!%s\nset -eu\n[[ $# == 1 ]] || exit 2\ncase "$1" in\n' "${bins[bash]}"
-    for mode in capture inspect network; do
+    modes=(capture inspect network)
+    [[ $kernel_only != true ]] || modes+=(kernel)
+    for mode in "${modes[@]}"; do
         case $mode in
+            kernel) action=(exec --user 65534:65534 "$node" /tmp/owned-source-kernelcheck --capture=node --fixture=p2.1-kernel-prerequisites) ;;
             capture) action=(exec --user 65534:65534 "$node" /tmp/owned-source-netprobe --capture=node --fixture=p1.8-layered-isolation) ;;
             inspect) action=(inspect "$node") ;;
             network) action=(network inspect "$network") ;;
