@@ -96,7 +96,12 @@ any future creation, the writer must verify all of these prerequisites:
 - Source ownership, Tailnet scope, Service addresses, network conflicts and image compatibility are valid.
 
 `internal/gateway.InspectFreshSnapshots` is a disconnected read-only inventory
-check. It requires revisioned Gateway, Tailnet, empty mutable state Secret and an
+check. `InspectFreshFromReader` gathers its Kubernetes snapshots through an
+explicit `client.Reader` (no default kubeconfig): Gateway, selected Tailnet,
+state Secret, owned hosts ConfigMap, scoped Egresses, peer Gateways and all nine
+resource names. It treats any read error as unknown, never as NotFound. Neither
+function is called by the controller, and a cache observation is not an
+exclusive name reservation. It requires revisioned Gateway, Tailnet, empty mutable state Secret and an
 owned hosts ConfigMap whose `hosts` content matches the render input. It checks
 all nine planned names for explicitly observed absence and rejects retained
 objects even if they carry the Gateway UID label. Peer Gateway identity/address
