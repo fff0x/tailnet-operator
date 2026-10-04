@@ -105,8 +105,8 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 ## CRD reference
 
 The development [TailnetGateway API](docs/reference/gateway.md) is experimental and
-admission-only: `suspend: false` is rejected and no gateway controller is registered.
-It does not change existing gateways. Review its [migration boundary](docs/COMPATIBILITY.md#experimental-gateway-api)
+suspended: `suspend: false` is rejected. Its controller reports `Ready=False/Suspended`
+and does not read or change gateway workloads, credentials or Headscale nodes. Review its [migration boundary](docs/COMPATIBILITY.md#experimental-gateway-api)
 before installing the additional CRD.
 
 ### Tailnet

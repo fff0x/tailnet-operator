@@ -1,5 +1,5 @@
 ---
-# Experimental admission example only. No gateway controller is registered yet.
+# Experimental suspended example only. The controller reports status, not runtime.
 # Replace these synthetic digest pins before a future runtime-enabled deployment.
 apiVersion: tsunaro.io/v1alpha1
 kind: TailnetGateway

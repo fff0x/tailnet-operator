@@ -49,10 +49,14 @@ func TestRuntimeOptions(t *testing.T) {
 			if got.Scheme != scheme || got.Metrics.BindAddress != "0" || got.HealthProbeBindAddress != "0" {
 				t.Fatal("scheme or test listeners changed")
 			}
-			if len(got.Cache.ByObject) != 8 || len(got.Cache.DefaultNamespaces) != 0 {
+			if len(got.Cache.ByObject) != 9 || len(got.Cache.DefaultNamespaces) != 0 {
 				t.Fatal("cache object scopes changed")
 			}
+			gatewayCached := false
 			for obj, scope := range got.Cache.ByObject {
+				if _, ok := obj.(*tnv1.TailnetGateway); ok {
+					gatewayCached = true
+				}
 				switch obj.(type) {
 				case *tnv1.TailnetEgress, *corev1.Service:
 					if len(scope.Namespaces) != 1 {
@@ -66,6 +70,9 @@ func TestRuntimeOptions(t *testing.T) {
 						t.Fatalf("%T must remain cluster scoped", obj)
 					}
 				}
+			}
+			if !gatewayCached {
+				t.Fatal("cluster-scoped gateway cache is missing")
 			}
 		})
 	}

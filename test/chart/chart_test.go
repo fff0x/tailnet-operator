@@ -338,8 +338,8 @@ func TestRBACPrivilegesExact(t *testing.T) {
 			}
 			expected := map[string][]grant{
 				"ClusterRole/tailnet-operator-crds": {
-					{"tsunaro.io", "tailnets tailnetingresses", read},
-					{"tsunaro.io", "tailnets/status tailnetingresses/status", status},
+					{"tsunaro.io", "tailnets tailnetingresses tailnetgateways", read},
+					{"tsunaro.io", "tailnets/status tailnetingresses/status tailnetgateways/status", status},
 					{"tsunaro.io", "tailnets/finalizers tailnetingresses/finalizers", "update"},
 				},
 				"ClusterRole/tailnet-operator-workloads": append(append([]grant{}, workloads...),
