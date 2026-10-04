@@ -126,8 +126,20 @@ production manager has no path to call it. `ReadGatewayAuthReceipt` checks the
 retained Secret's UID/revision, immutability, scope hashes, key presence and
 expiration without returning key bytes. These Kubernetes annotations are **not**
 a Headscale-signed proof of the full credential; restrictive Secret-write RBAC
-and later state-to-node verification remain necessary. A caller
-must not use this diagnostic receipt as a writer authorization. Read snapshots
+and later state-to-node verification remain necessary.
+
+`VerifyGatewayState` is a disconnected post-registration check. For a retained
+state Secret with the inventoried UID, it reads `_machinekey` and the active
+`profile-*`, derives **public** machine and node keys, then requires one unique,
+online Headscale node with matching public keys, name, tags and address; for a
+new mint it can also require the issued key ID. The receipt contains only node
+ID, IPv4 and Secret UID/revision. This reads **private Tailscale key material in
+operator memory**; it never returns or logs it. The Go module pins Tailscale
+1.94.1 while the modeled kernel image is 1.102.4: state-layout compatibility
+needs a real image/Headscale E2E proof before this can affect Ready or adoption.
+It does not establish service, DNS or route health, and the controller still
+does not invoke it. A caller must not use this diagnostic receipt as a writer
+authorization. Read snapshots
 are not an exclusive lock; every absence needs revalidation immediately before
 creation, with conflict handling. DNS serial/hash persistence and CAS, image and
 network compatibility, and a safe creation sequence are also pending. The
