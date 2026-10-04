@@ -170,11 +170,19 @@ it does not prove image compatibility, TUN permissions/ioctls, persistent bootst
 subnet routing. IPv6 is out of scope: the initial LAN and LB route families are IPv4,
 matching the production gateway.
 
-Releasing the full kernel gateway pod form (UID 0 with only `NET_ADMIN`, one
-`HostPathCharDev /dev/net/tun`, non-root CoreDNS) needs its own fixture contract,
-`AddGatewayNetworkGate`, separate from and as strict as the unchanged `AddNetworkGate`
-used here (UID 65532, no HostPath, no added capabilities). That contract and the
-writer, bootstrap and routing proofs remain open.
+`test/internal/kindfixture.AddGatewayNetworkGate` now validates a separate,
+fixture-only kernel pod shape: exactly one Tailscale container (UID 0, only
+`NET_ADMIN`), one non-root CoreDNS container (only `NET_BIND_SERVICE`), and
+exactly one `HostPathCharDev /dev/net/tun` mounted only by Tailscale. It rejects
+extra host paths, privilege escalation, other capabilities, unexpected sysctls,
+shared gate storage and pre-existing init/ephemeral containers before adding the
+same UID-bound unprivileged startup init used by `AddNetworkGate`. The latter's
+UID-65532/no-HostPath/no-added-capabilities contract remains unchanged.
+
+These are offline contract tests, **not** a running kernel gateway or a TUN
+permission proof. A future isolated fixture must still bind and release the
+live Pod with the runner before starting a kernel process. Writer, bootstrap,
+identity and routing proofs remain open.
 
 ## Fresh DNS rendering: partial implementation
 
