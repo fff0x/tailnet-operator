@@ -117,7 +117,12 @@ the selected authenticated Headscale client, then reject a response with the
 wrong flags, tags or expiry. These helpers do not call Headscale, persist a
 Secret or authorize a Pod. If minting succeeds but the Secret write fails, the
 orphaned key expires; the controller must re-read before retrying and must not
-infer ownership from a masked key list. A caller
+infer ownership from a masked key list. A package-private `storeGatewayMint`
+models an exclusive Kubernetes Secret **Create** after validating the response
+and re-reading Gateway/Tailnet revisions. The retained, immutable Secret records
+UID-bound metadata; an existing name is never overwritten. This disconnected
+helper does not mint, verify a later state-to-node binding, or start a Pod; the
+production manager has no path to call it. A caller
 must not use this diagnostic receipt as a writer authorization. Read snapshots
 are not an exclusive lock; every absence needs revalidation immediately before
 creation, with conflict handling. DNS serial/hash persistence and CAS, image and
