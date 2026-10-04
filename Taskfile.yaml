@@ -41,6 +41,13 @@ tasks:
     cmds:
       - go test -tags=integration ./test/validation -count=1 -v
 
+  test-gateway-dns:
+    desc: Check experimental gateway DNS with an explicit CoreDNS binary (loopback only)
+    requires:
+      vars: [COREDNS_BINARY]
+    cmds:
+      - go test -mod=readonly -tags=gatewaydns ./test/gateway-dns -count=1 -v -timeout=90s
+
   validate-examples:
     desc: Check invalid fixtures against the current kube-context (server dry-run only)
     cmds:

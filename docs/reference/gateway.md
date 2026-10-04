@@ -65,6 +65,65 @@ The pure planner preserves explicit prefix granularity and waits for a 30-second
 quiet period before making a route update eligible. Status must acknowledge a
 successful write, not merely elapsed time. No running router is changed yet.
 
+## Fresh DNS rendering: partial implementation
+
+`internal/gateway.RenderDNS` compiles a primary authoritative zone into `Corefile`
+and `zone.db`. This pure renderer is **not connected to the controller**. It does
+not render a pod or authorize adoption of an existing CoreDNS configuration.
+
+The caller supplies a snapshot of the selected Tailnet's owned hosts ConfigMap.
+Dynamic names replace the entire static address set for the same name, not just
+one address family. Dynamic and static records share one file zone: a known name's
+missing record type returns NODATA, without falling through to a wildcard or upstream.
+Wildcards follow normal DNS closest-encloser semantics; they are not catch-all templates.
+The primary apex is reserved for the gateway nameserver/address. Host snapshots that
+claim it are rejected. Names outside the primary zone are not served.
+
+**Additional forward zones are deliberately unsupported by this renderer.** Any
+nonempty `extraZones` returns an error and no partial output. With CoreDNS 1.14.6,
+`hosts` followed by `forward` keeps missing A/AAAA local, but forwards TXT for a
+known name. That does not satisfy the required strict-local contract. Admission
+still accepts the future API field; it does not activate this weaker behavior.
+
+Before runtime integration, the caller must:
+
+- Verify Tailnet/namespace scope and hosts-ConfigMap ownership.
+- Render every source-host change into the derived zone ConfigMap; mounting the
+  source hosts file alone does not update this file-zone design.
+- Advance the nonzero SOA serial for every zone-data change, including hosts-only
+  changes. Gateway generation alone is insufficient. Persist serial/hash state
+  and use conflict-safe updates; do not reset the serial on controller restart.
+- Project the configuration directory without `subPath` and set CoreDNS's working
+  directory to `/etc/coredns`. The file plugin checks for zone updates each second.
+- Select supported bind addresses explicitly and verify the actual image, Service
+  allocation and DNS reachability. No management/metrics ports are rendered yet.
+
+The renderer rejects malformed input with fixed errors and no partial files.
+Like `GatewayIP`, snapshot addresses must be canonical unicast literals, excluding
+loopback, link-local and IPv4-mapped addresses. Hosts input is bounded to 1 MiB and 16,384 distinct names. Combined ConfigMap output
+is also limited to 1 MiB; the renderer never silently truncates either.
+Clients can cache answers for the rendered 30-second TTL. File-reload evidence does
+not establish Kubernetes ConfigMap propagation time or client-cache freshness.
+
+### Local DNS behavior gate
+
+```sh
+COREDNS_BINARY=/absolute/path/to/coredns task test-gateway-dns
+```
+
+Supply a trusted binary explicitly. The gate starts only owned loopback listeners,
+requires IPv4 and IPv6 loopback, and uses no Kubernetes context. CoreDNS **1.14.6**
+was checked over UDP/TCP. Cases cover A/AAAA, negative record types (including
+HTTPS/SVCB), wildcards, closest-encloser behavior, NXDOMAIN, refused zones and
+dynamic/static priority. Atomic directory-projection reloads were also checked.
+An intentionally unsafe hosts+forward
+control reproduces TXT fallthrough against an owned loopback upstream.
+
+This does not verify the lab's CoreDNS 1.14.7 image, a running Kubernetes sidecar,
+external forwarding support, kernel subnet routing or interruption-free adoption.
+The StatefulSet/Service renderer, source watches, serial persistence and writer are
+still pending. The controller remains suspended and does not call this renderer.
+
 ## Adoption and retention
 
 `adoption` is optional but immutable once the CR is created. It contains:

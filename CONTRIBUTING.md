@@ -17,6 +17,8 @@ task security
 task e2e
 # With explicitly selected local envtest assets:
 KUBEBUILDER_ASSETS=/path/to/envtest task test-validation
+# Experimental gateway DNS files against a trusted local binary (loopback only):
+COREDNS_BINARY=/absolute/path/to/coredns task test-gateway-dns
 ```
 
 `task security` uses a pinned `govulncheck` version and the current public database.
