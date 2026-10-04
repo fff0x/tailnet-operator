@@ -3,6 +3,7 @@ module tsunaro.io/tailnet-operator
 go 1.26.6
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/prometheus/client_golang v1.24.0
 	github.com/tailscale/hujson v0.0.0-20260302212456-ecc657c15afd
 	k8s.io/api v0.37.0
@@ -31,7 +32,6 @@ require (
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/coder/websocket v1.8.14 // indirect
 	github.com/creachadair/msync v0.8.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect

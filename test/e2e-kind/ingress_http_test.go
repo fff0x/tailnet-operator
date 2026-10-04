@@ -20,17 +20,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/certificates"
 	"tsunaro.io/tailnet-operator/test/internal/kindfixture"
 )
-
-// The renderer deliberately rejects empty ACL/grant bases. This inert
-// documentation-address rule satisfies that guard without granting the peer
-// access to an agent; only the reconciled ingress rule can grant that access.
-const ingressHTTPBasePolicy = `{"tagOwners":{},"acls":[{"action":"accept","src":["autogroup:member"],"dst":["192.0.2.1:443"]}]}`
 
 // TestIngressHTTP uses the actual chart, ServiceAccounts, reconcilers and
 // cert-manager issuance. Fixture-only mounts trust the private control server;
@@ -135,22 +131,36 @@ func TestIngressHTTP(t *testing.T) {
 		t.Fatal("private control API credential missing")
 	}
 	x.create(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "headscale-bootstrap", Namespace: namespace}, StringData: map[string]string{"apiKey": key}})
-	x.create(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "headscale-policy", Namespace: namespace}, Data: map[string]string{"policy": ingressHTTPBasePolicy}})
+	x.create(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "headscale-policy", Namespace: namespace}, Data: map[string]string{"policy": ingressHTTPBasePolicy(false)}})
 	tn = &tnv1.Tailnet{ObjectMeta: metav1.ObjectMeta{Name: "fixture"}, Spec: tnv1.TailnetSpec{
 		Server: "https://fixture-headscale.tailnet-system.svc:8443", APIURL: "https://fixture-headscale.tailnet-system.svc:8443",
 		APISecretRef: tnv1.SecretKeyRef{Name: "headscale-bootstrap", Key: "apiKey"}, APIKeyLifetime: metav1.Duration{Duration: time.Hour}, AuthKeyLifetime: metav1.Duration{Duration: time.Hour},
 		Proxy:  tnv1.ProxySpec{ProbeInterval: metav1.Duration{Duration: 2 * time.Second}},
 		DNS:    tnv1.DNSSpec{IngressNameTemplate: "{name}.fixture.test", IngressAliasTemplate: "{name}-{namespace}.fixture.test"},
-		Policy: tnv1.PolicySpec{BaseConfigMap: "headscale-policy", Mode: "Apply", TagOwners: []string{httpFixtureUser + "@"}, RouteApprovers: []string{httpFixtureUser + "@"}, IngressSourceAllowlist: []string{"autogroup:member"}},
+		Policy: tnv1.PolicySpec{BaseConfigMap: "headscale-policy", Mode: "Apply", TagOwners: []string{httpFixtureUser + "@"}, RouteApprovers: []string{httpFixtureUser + "@"}, IngressSourceAllowlist: []string{"group:http-allowed"}},
 	}}
 	x.create(tn)
 	eventually(t, "real Tailnet compatibility and policy applied", func() bool {
 		return f.kube.Get(t.Context(), client.ObjectKeyFromObject(tn), tn) == nil && meta.IsStatusConditionTrue(tn.Status.Conditions, "HeadscaleCompatible") && meta.IsStatusConditionTrue(tn.Status.Conditions, "PolicyApplied")
 	})
+	// The peer already serves the fixed nonce/hash TCP backend. Publish it beside
+	// HTTP so one reconciled agent must run both listeners throughout this test.
+	var backend corev1.Service
+	if f.kube.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: "fixture-backend"}, &backend) != nil {
+		t.Fatal("mixed ingress backend missing")
+	}
+	beforeBackend := backend.DeepCopy()
+	backend.Spec.Ports = append(backend.Spec.Ports, corev1.ServicePort{Name: "l4", Port: 8081, TargetPort: intstr.FromInt32(8081)})
+	if f.kube.Patch(t.Context(), &backend, client.MergeFromWithOptions(beforeBackend, client.MergeFromWithOptimisticLock{})) != nil {
+		t.Fatal("mixed ingress backend port failed")
+	}
 	ingress = &tnv1.TailnetIngress{ObjectMeta: metav1.ObjectMeta{Name: "http-agent", Namespace: namespace}, Spec: tnv1.TailnetIngressSpec{
-		TailnetRef: tnv1.TailnetRef{Name: tn.Name}, Hostname: "http-agent", AllowFrom: []string{"autogroup:member"},
-		TLS:     &tnv1.IngressTLS{IssuerRef: &tnv1.TLSIssuerReference{Name: "fixture-serving", Kind: "ClusterIssuer", Group: "cert-manager.io"}},
-		Exposes: []tnv1.Expose{{Name: "http", Mode: "http", Port: 443, Backend: tnv1.Backend{Service: "fixture-backend", Port: 8080}}},
+		TailnetRef: tnv1.TailnetRef{Name: tn.Name}, Hostname: "http-agent", AllowFrom: []string{"group:http-allowed"},
+		TLS: &tnv1.IngressTLS{IssuerRef: &tnv1.TLSIssuerReference{Name: "fixture-serving", Kind: "ClusterIssuer", Group: "cert-manager.io"}},
+		Exposes: []tnv1.Expose{
+			{Name: "http", Mode: "http", Port: 443, Backend: tnv1.Backend{Service: "fixture-backend", Port: 8080}},
+			{Name: "tcp", Mode: "l4", Port: 8443, Backend: tnv1.Backend{Service: "fixture-backend", Port: 8081}},
+		},
 	}}
 	x.create(ingress)
 	var agent corev1.Pod
@@ -274,7 +284,9 @@ func TestIngressHTTP(t *testing.T) {
 		}
 		return results
 	}
+	checkIngressL4Coexistence(t, x, ingress, "initial")
 	beforeResults := probes(initialLeaf.hash)
+	checkIngressWebSocket(t, x, ingress, initialLeaf.hash, "initial")
 	x.save("initial-http.private.json", beforeResults)
 	// Preserve cert-manager-managed renewal fields. A previously omitted
 	// duration does not trigger RequestChanged on nil -> 1h in cert-manager;
@@ -298,6 +310,8 @@ func TestIngressHTTP(t *testing.T) {
 		return err == nil && found && revision > initialRevision && rotatedLeaf.hash != initialLeaf.hash
 	})
 	afterResults := probes(rotatedLeaf.hash)
+	checkIngressL4Coexistence(t, x, ingress, "rotated")
+	checkIngressWebSocket(t, x, ingress, rotatedLeaf.hash, "rotated")
 	x.save("rotated-http.private.json", afterResults)
 	eventually(t, "reconciler refreshed issued certificate status", func() bool {
 		return ready() && ingress.Status.TLSNotAfter.Time.Equal(rotatedLeaf.notAfter) && !rotatedLeaf.notAfter.Equal(initialLeaf.notAfter)
@@ -325,15 +339,20 @@ func TestIngressHTTP(t *testing.T) {
 	x.save("issued-certificate-final.json", cert)
 	x.save("reconciled-ingress-final.json", ingress)
 	x.save("agent-final.json", &agent)
-	x.save("result.json", map[string]any{"realChartAndReconciler": true, "realCertManagerIssuance": true, "webhookAdmittedAgentGateExecuted": true, "initialHTTP": beforeResults, "rotatedHTTP": afterResults, "sameAgentAcrossRotation": true, "aclNegativeTested": false, "webSocketsTested": false, "l4Tested": false})
+	x.save("result.json", map[string]any{"realChartAndReconciler": true, "realCertManagerIssuance": true, "webhookAdmittedAgentGateExecuted": true, "initialHTTP": beforeResults, "rotatedHTTP": afterResults, "sameAgentAcrossRotation": true, "aclNegativeTested": false, "webSocketsTested": true, "l4CoexistenceTested": true})
 	t.Log("gate: real chart/reconciler/cert-manager, generated agent gate, peer HTTP1+HTTP2 and actual issued-certificate rotation without agent restart")
 	if !t.Run("BackendTLS", func(t *testing.T) {
 		testIngressBackendTLS(t, x, ingress, &agent, rotatedLeaf.hash, servingCA)
 	}) {
 		return // The v3 gate requires the proven, recovered v2 predecessor.
 	}
-	t.Run("VirtualHosts", func(t *testing.T) {
+	if !t.Run("VirtualHosts", func(t *testing.T) {
 		testIngressVirtualHosts(t, x, ingress, &agent, initialCertificateUID, rotatedLeaf.hash)
+	}) {
+		return // ACL acceptance needs both proven v3 backends and current serving SANs.
+	}
+	t.Run("HTTPACL", func(t *testing.T) {
+		testIngressHTTPACL(t, x, tn, ingress, &agent)
 	})
 }
 
@@ -434,9 +453,18 @@ func testIngressBackendTLS(t *testing.T, x *httpPeerFixture, ingress *tnv1.Tailn
 	eventually(t, "kubelet projects the new backend CA digest", func() bool {
 		b, err := x.proxy(agent.Name, 9080, "targets", "")
 		var probes []struct {
+			Name string `json:"name"`
 			Hash string `json:"backendCAHash"`
 		}
-		return err == nil && json.Unmarshal(b, &probes) == nil && len(probes) == 1 && probes[0].Hash == hex.EncodeToString(expectedHash[:])
+		if err != nil || json.Unmarshal(b, &probes) != nil || len(probes) != 2 {
+			return false
+		}
+		for _, p := range probes {
+			if p.Name == "http" && p.Hash == hex.EncodeToString(expectedHash[:]) {
+				return true
+			}
+		}
+		return false
 	})
 	eventually(t, "overlap trust ready", func() bool { return ready(true) })
 	peerStatus(404)
@@ -464,12 +492,13 @@ func testIngressBackendTLS(t *testing.T, x *httpPeerFixture, ingress *tnv1.Tailn
 	}
 	eventually(t, "recreated CA restores verified upstream", func() bool { return ready(true) })
 	peerStatus(404)
+	checkIngressL4Coexistence(t, x, ingress, "backend-tls-recovered")
 	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(agent), agent) != nil || agent.UID != initialPod.UID || len(agent.Status.ContainerStatuses) != 1 || agent.Status.ContainerStatuses[0].ContainerID != initialPod.Status.ContainerStatuses[0].ContainerID || agent.Status.ContainerStatuses[0].RestartCount != 0 {
 		t.Fatal("backend trust changes replaced or restarted the agent")
 	}
 	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(&dep), &dep) != nil || dep.Generation != initialGeneration {
 		t.Fatal("backend CA rotation changed the Pod template")
 	}
-	x.save("backend-tls-result.json", map[string]any{"verifiedUpstream": true, "peerHTTP1AndHTTP2": true, "protocolRecreate": true, "projectedCARotation": true, "wrongCARejected": true, "invalidCARejected": true, "deletedCARejected": true, "recoveredWithoutRestart": true})
+	x.save("backend-tls-result.json", map[string]any{"verifiedUpstream": true, "peerHTTP1AndHTTP2": true, "protocolRecreate": true, "projectedCARotation": true, "wrongCARejected": true, "invalidCARejected": true, "deletedCARejected": true, "recoveredWithoutRestart": true, "l4CoexistenceTested": true})
 	t.Log("gate: v2 rollout, real peer HTTPS over verified upstream, projected CA change/rejection/deletion/recovery without agent restart; reused existing HTTPS fixture")
 }

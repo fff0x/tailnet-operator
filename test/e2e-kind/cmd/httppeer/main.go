@@ -70,8 +70,10 @@ func main() {
 // No file, environment, signal, tsnet or listener operation precedes the guard.
 // Tests inject every side effect; there is no runtime endpoint/path override.
 func run(args []string, goos string, euid int, d dependencies) error {
-	separateServingCA := len(args) == 2 && args[1] == "--serving-ca=cert-manager"
-	denied := len(args) == 2 && args[1] == "--identity=denied"
+	// Only these fixed combinations are supported; no arbitrary identity or CA path.
+	both := len(args) == 3 && args[1] == "--identity=denied" && args[2] == "--serving-ca=cert-manager"
+	separateServingCA := both || (len(args) == 2 && args[1] == "--serving-ca=cert-manager")
+	denied := both || (len(args) == 2 && args[1] == "--identity=denied")
 	if goos != "linux" || euid != 65532 || (len(args) != 1 && !separateServingCA && !denied) || args[0] != "--fixture=p1.8-http" {
 		return errRejected
 	}
@@ -189,13 +191,20 @@ func startFixture(key string, roots *x509.CertPool, denied bool) error {
 		return errRejected
 	}
 	defer l4Listener.Close()
-	backend := boundedServer(backendHandler(ip))
+	backendMux := http.NewServeMux()
+	backendMux.Handle("/socket", webSocketBackendHandler(ip))
+	backendMux.Handle("/", backendHandler(ip))
+	backend := boundedServer(backendMux)
 	control := boundedServer(controlHandler(func(ctx context.Context, input probeInput) probeResult {
 		client, tr := probeClient(roots, peer.Dial, input)
 		defer tr.CloseIdleConnections()
 		return probe(ctx, input, client.Do)
 	}, func(ctx context.Context, input l4ProbeInput) l4ProbeResult {
 		return probeL4(ctx, input, peer.Dial)
+	}, func(ctx context.Context, input l4ProbeInput) webSocketProbeResult {
+		return probeWebSocket(ctx, input, roots, peer.Dial)
+	}, func(ctx context.Context, input probeInput) httpACLProbeResult {
+		return probeHTTPACL(ctx, input, roots, peer.Dial)
 	}))
 	errs := make(chan error, 3)
 	go func() { errs <- backend.Serve(backendListener) }()
@@ -326,7 +335,7 @@ func decodeProbe(reader io.Reader) (probeInput, error) {
 	return input, nil
 }
 
-func controlHandler(doProbe func(context.Context, probeInput) probeResult, doL4Probe func(context.Context, l4ProbeInput) l4ProbeResult) http.Handler {
+func controlHandler(doProbe func(context.Context, probeInput) probeResult, doL4Probe func(context.Context, l4ProbeInput) l4ProbeResult, doWebSocketProbe func(context.Context, l4ProbeInput) webSocketProbeResult, doACLProbe func(context.Context, probeInput) httpACLProbeResult) http.Handler {
 	slots := make(chan struct{}, 4)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.RequestURI() {
@@ -336,7 +345,7 @@ func controlHandler(doProbe func(context.Context, probeInput) probeResult, doL4P
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
-		case "/probe", "/probe-l4":
+		case "/probe", "/probe-l4", "/probe-websocket", "/probe-http-acl":
 			if r.Method != http.MethodPost {
 				http.Error(w, "rejected", http.StatusMethodNotAllowed)
 				return
@@ -344,7 +353,7 @@ func controlHandler(doProbe func(context.Context, probeInput) probeResult, doL4P
 			var input probeInput
 			var l4Input l4ProbeInput
 			var err error
-			if r.URL.Path == "/probe-l4" {
+			if r.URL.Path == "/probe-l4" || r.URL.Path == "/probe-websocket" {
 				l4Input, err = decodeL4Probe(r.Body)
 			} else {
 				input, err = decodeProbe(r.Body)
@@ -362,9 +371,14 @@ func controlHandler(doProbe func(context.Context, probeInput) probeResult, doL4P
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
-			if r.URL.Path == "/probe-l4" {
+			switch r.URL.Path {
+			case "/probe-l4":
 				_ = json.NewEncoder(w).Encode(doL4Probe(r.Context(), l4Input))
-			} else {
+			case "/probe-websocket":
+				_ = json.NewEncoder(w).Encode(doWebSocketProbe(r.Context(), l4Input))
+			case "/probe-http-acl":
+				_ = json.NewEncoder(w).Encode(doACLProbe(r.Context(), input))
+			default:
 				_ = json.NewEncoder(w).Encode(doProbe(r.Context(), input))
 			}
 		default:

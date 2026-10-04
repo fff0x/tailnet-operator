@@ -153,7 +153,7 @@ func TestDeniedIdentityGuardBeforeIO(t *testing.T) {
 		{"--fixture=p1.8-http", "--identity", "denied"},
 		{"--fixture=p1.8-http", "--identity=arbitrary-host"},
 		{"--fixture=p1.8-http", "--identity=denied", "--identity=denied"},
-		{"--fixture=p1.8-http", "--identity=denied", "--serving-ca=cert-manager"},
+		{"--fixture=p1.8-http", "--identity=denied", "--serving-ca=cert-manager", "extra"},
 		{"--fixture=p1.8-http", "--serving-ca=cert-manager", "--identity=denied"},
 		{"--identity=denied", "--fixture=p1.8-http"},
 		{"--fixture=wrong", "--identity=denied"},
@@ -440,7 +440,7 @@ func TestControlRoutesAndBoundedErrors(t *testing.T) {
 		return probe(ctx, input, func(*http.Request) (*http.Response, error) {
 			return nil, errors.New(strings.Repeat("private 100.64.0.9 ", 1000))
 		})
-	}, nil)
+	}, nil, nil, nil)
 	for _, tc := range []struct {
 		method, path, body string
 		status             int
