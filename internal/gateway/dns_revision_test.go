@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
@@ -48,6 +50,70 @@ func TestDNSRevisionTransitions(t *testing.T) {
 	advance, err := PlanDNSRevision(in, &persisted)
 	if err != nil || advance.Serial != 3 || advance.ExpectedResourceVersion != "rv-11" {
 		t.Fatal("second change used stale CAS receipt")
+	}
+}
+
+func TestReadDNSRevisionChecksPersistedPayload(t *testing.T) {
+	in := dnsFixture()
+	plan, err := PlanDNSRevision(in, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Serial = plan.Serial
+	payload, err := RenderDNS(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := func() *corev1.ConfigMap {
+		return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{UID: "config-uid", ResourceVersion: "rv-42", Annotations: map[string]string{
+			DNSSerialAnnotation: "1", DNSHashAnnotation: plan.ContentHash,
+		}}, Data: map[string]string{"Corefile": payload.Corefile, DNSZoneFile: payload.ZoneFile}}
+	}
+	if got, err := ReadDNSRevision(fixture(), "tail.example"); err != nil || got != (DNSRevision{Serial: 1, ContentHash: plan.ContentHash, ResourceVersion: "rv-42"}) {
+		t.Fatal("persisted revision not recovered")
+	}
+	changed := in
+	changed.Hosts = "192.0.2.12\tnew.tail.example\n"
+	prev := plan.DNSRevision
+	prev.ResourceVersion = "rv-42"
+	next, err := PlanDNSRevision(changed, &prev)
+	if err != nil || next.Serial != 2 {
+		t.Fatal("cannot plan hosts-only update")
+	}
+	changed.Serial = next.Serial
+	updated, err := RenderDNS(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := fixture()
+	cm.ResourceVersion = "rv-43"
+	cm.Annotations[DNSSerialAnnotation] = "2"
+	cm.Annotations[DNSHashAnnotation] = next.ContentHash
+	cm.Data[DNSZoneFile] = updated.ZoneFile
+	if got, err := ReadDNSRevision(cm, "tail.example"); err != nil || got.Serial != 2 || got.ContentHash != next.ContentHash || got.ResourceVersion != "rv-43" {
+		t.Fatal("persisted advanced serial not recovered")
+	}
+	for name, change := range map[string]func(*corev1.ConfigMap){
+		"missing hash":     func(cm *corev1.ConfigMap) { delete(cm.Annotations, DNSHashAnnotation) },
+		"reset serial":     func(cm *corev1.ConfigMap) { cm.Annotations[DNSSerialAnnotation] = "0" },
+		"leading zero":     func(cm *corev1.ConfigMap) { cm.Annotations[DNSSerialAnnotation] = "01" },
+		"wrong serial":     func(cm *corev1.ConfigMap) { cm.Annotations[DNSSerialAnnotation] = "2" },
+		"wrong digest":     func(cm *corev1.ConfigMap) { cm.Annotations[DNSHashAnnotation] = strings.Repeat("0", 64) },
+		"changed records":  func(cm *corev1.ConfigMap) { cm.Data[DNSZoneFile] += "other.tail.example. 30 IN A 192.0.2.8\n" },
+		"changed corefile": func(cm *corev1.ConfigMap) { cm.Data["Corefile"] += "forward . 192.0.2.53\n" },
+		"unversioned":      func(cm *corev1.ConfigMap) { cm.ResourceVersion = "" },
+		"extra payload":    func(cm *corev1.ConfigMap) { cm.Data["private"] = "unexpected" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cm := fixture()
+			change(cm)
+			if got, err := ReadDNSRevision(cm, "tail.example"); !errors.Is(err, ErrDNSRevisionInvalid) || got != (DNSRevision{}) {
+				t.Fatal("inconsistent prior state accepted")
+			}
+		})
+	}
+	if got, err := ReadDNSRevision(fixture(), "other.example"); !errors.Is(err, ErrDNSRevisionInvalid) || got != (DNSRevision{}) {
+		t.Fatal("wrong zone accepted")
 	}
 }
 
