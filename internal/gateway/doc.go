@@ -21,6 +21,12 @@
 // persist SOA serial progression and publish complete configuration snapshots.
 // This renderer is not a projection for adopting an existing CoreDNS instance.
 //
+// Fresh resource rendering models initial retained Kubernetes objects only. It
+// scopes automatic routes, limits state access and checks kernel prerequisites
+// without changing sysctls. A future writer must independently prove fresh state,
+// persistent auth provenance, exclusive names, image and network compatibility.
+// Neither the suspension controller nor the adoption planner invokes this model.
+//
 // The ephemeral ingress/egress lifecycle (key minting, duplicate deletion, node
 // renaming) is not suitable for these persistent gateways and must not be reused.
 package gateway
