@@ -29,6 +29,9 @@ Use `task e2e-kind` for the disposable pod-level installation/failover suite.
 It requires local rootless Podman, kind and suitable cgroup delegation.
 See [the runner's safety boundaries](test/e2e-kind/README.md).
 Do not point tests at your current kube-context or change host privileges to bypass a failing prerequisite.
+The isolated projection runner also offers `--gateway-preflight-only`; see the
+[read-only kernel gate](docs/reference/gateway.md#read-only-kind-prerequisite-gate).
+A failed capability check is not support evidence and must not be silently skipped.
 
 An integration bug needs a regression test that fails before the correction when a safe reproduction is possible.
 Distinguish unit assertions, envtest API behavior, live pods, data-plane traffic and long-running acceptance.
