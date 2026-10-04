@@ -110,7 +110,14 @@ only UIDs and resource versions; errors have fixed, non-secret text.
 
 **A passing inventory still returns `ErrFreshProvenance`.** The current Headscale
 client cannot verify an external auth key's non-ephemeral status, tags and
-server binding; an absent node and an empty Secret are not such proof. A caller
+server binding; an absent node and an empty Secret are not such proof.
+`PlanGatewayMint` and `ValidateGatewayMint` model the alternative: request a
+reusable, **non-ephemeral** key with exact tags and a bounded 24-hour expiry from
+the selected authenticated Headscale client, then reject a response with the
+wrong flags, tags or expiry. These helpers do not call Headscale, persist a
+Secret or authorize a Pod. If minting succeeds but the Secret write fails, the
+orphaned key expires; the controller must re-read before retrying and must not
+infer ownership from a masked key list. A caller
 must not use this diagnostic receipt as a writer authorization. Read snapshots
 are not an exclusive lock; every absence needs revalidation immediately before
 creation, with conflict handling. DNS serial/hash persistence and CAS, image and
