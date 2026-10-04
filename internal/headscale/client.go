@@ -48,16 +48,26 @@ func New(baseURL, token string, observers ...Observer) *Client {
 
 // Node is the subset of a Headscale node the operator reads.
 type Node struct {
-	ID              string     `json:"id"`
-	Name            string     `json:"name"`
-	GivenName       string     `json:"givenName"`
-	Online          bool       `json:"online"`
-	LastSeen        *time.Time `json:"lastSeen"`
-	IPAddresses     []string   `json:"ipAddresses"`
-	AvailableRoutes []string   `json:"availableRoutes"`
-	ApprovedRoutes  []string   `json:"approvedRoutes"`
-	SubnetRoutes    []string   `json:"subnetRoutes"`
-	Tags            []string   `json:"tags"`
+	ID              string       `json:"id"`
+	MachineKey      string       `json:"machineKey"`
+	NodeKey         string       `json:"nodeKey"`
+	Name            string       `json:"name"`
+	GivenName       string       `json:"givenName"`
+	Online          bool         `json:"online"`
+	LastSeen        *time.Time   `json:"lastSeen"`
+	IPAddresses     []string     `json:"ipAddresses"`
+	AvailableRoutes []string     `json:"availableRoutes"`
+	ApprovedRoutes  []string     `json:"approvedRoutes"`
+	SubnetRoutes    []string     `json:"subnetRoutes"`
+	Tags            []string     `json:"tags"`
+	PreAuthKey      *NodeAuthKey `json:"preAuthKey"`
+}
+
+// NodeAuthKey contains only read-only metadata; the API may mask Key.
+// Never use a listed key prefix to prove possession of the full credential.
+type NodeAuthKey struct {
+	ID        string `json:"id"`
+	Ephemeral bool   `json:"ephemeral"`
 }
 
 // PreAuthKey is a minted pre-auth key. Key carries the secret used to register a node.
