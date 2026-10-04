@@ -4,8 +4,13 @@ import (
 	"reflect"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/gateway"
 )
 
 func gatewayFixturePod() *corev1.Pod {
@@ -40,6 +45,72 @@ func TestGatewayNetworkGatePreservesApplications(t *testing.T) {
 	// The old contract must not accept this privileged kernel form.
 	if AddNetworkGate(original, ownedGateImage) != ErrAgentCA {
 		t.Fatal("unprivileged gate was relaxed")
+	}
+}
+
+func TestGatewayNetworkGateAcceptsFreshPodPreflightFirst(t *testing.T) {
+	in := gateway.FreshInputs{Namespace: "operator", DNSSerial: 1,
+		Gateway: &tnv1.TailnetGateway{ObjectMeta: metav1.ObjectMeta{Name: "router", UID: "fixture-uid"}, Spec: tnv1.TailnetGatewaySpec{
+			TailnetRef: tnv1.GatewayLocalReference{Name: "tailnet"}, Hostname: "router", Replicas: 1, DeletionPolicy: "Retain",
+			StateSecretRef: tnv1.GatewayLocalReference{Name: "router-state"}, AuthKeySecretRef: &tnv1.GatewayAuthKeyReference{Name: "router-auth", Key: "TS_AUTHKEY"},
+			Image: "ghcr.io/tailscale/tailscale:v1.102.4", Tags: []string{"tag:fabric"},
+			Routes:  tnv1.GatewayRoutes{LAN: []tnv1.GatewayPrefix{"192.0.2.0/24"}},
+			Service: tnv1.GatewayService{LoadBalancerIP: "198.51.100.1", TailnetLBCIDR: "198.51.100.0/24"},
+			DNS:     tnv1.GatewayDNS{Zone: "tail.example", ServiceName: "router-dns", ServiceClusterIP: "10.96.0.53", Image: "coredns/coredns:1.14.6"},
+		}}, Tailnet: &tnv1.Tailnet{ObjectMeta: metav1.ObjectMeta{Name: "tailnet"}, Spec: tnv1.TailnetSpec{Server: "https://headscale.example"}}}
+	plan, err := gateway.RenderFresh(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obj := range plan.Objects {
+		sts, ok := obj.(*appsv1.StatefulSet)
+		if !ok {
+			continue
+		}
+		p := &corev1.Pod{Spec: *sts.Spec.Template.Spec.DeepCopy()}
+		before := p.DeepCopy()
+		if err := AddGatewayNetworkGate(p, ownedGateImage); err != nil || len(p.Spec.InitContainers) != 2 || p.Spec.InitContainers[0].Name != NetworkGateContainer || p.Spec.InitContainers[1].Name != "kernel-preflight" {
+			t.Fatal("fresh pod preflight cannot run after fixture gate")
+		}
+		p.Spec.InitContainers = p.Spec.InitContainers[1:]
+		p.Spec.Volumes = p.Spec.Volumes[:len(p.Spec.Volumes)-1]
+		if !reflect.DeepEqual(p, before) {
+			t.Fatal("gate changed the fresh pod or its preflight")
+		}
+		return
+	}
+	t.Fatal("fresh plan has no StatefulSet")
+}
+
+func TestGatewayNetworkGateRejectsUnsafePreflight(t *testing.T) {
+	baseline := func() *corev1.Pod {
+		p := gatewayFixturePod()
+		p.Spec.Containers[0].Image = "pinned-kernel-image"
+		p.Spec.InitContainers = []corev1.Container{{Name: "kernel-preflight", Image: "pinned-kernel-image",
+			SecurityContext: &corev1.SecurityContext{RunAsUser: ptr.To(int64(65532)), RunAsGroup: ptr.To(int64(65532)), RunAsNonRoot: ptr.To(true), Privileged: ptr.To(false), AllowPrivilegeEscalation: ptr.To(false), ReadOnlyRootFilesystem: ptr.To(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
+			VolumeMounts:    []corev1.VolumeMount{{Name: "tun", MountPath: "/dev/net/tun", ReadOnly: true}},
+		}}
+		return p
+	}
+	for name, mutate := range map[string]func(*corev1.Pod){
+		"root": func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.RunAsUser = ptr.To(int64(0)) },
+		"extra cap": func(p *corev1.Pod) {
+			p.Spec.InitContainers[0].SecurityContext.Capabilities.Add = []corev1.Capability{"NET_ADMIN"}
+		},
+		"writable tun": func(p *corev1.Pod) { p.Spec.InitContainers[0].VolumeMounts[0].ReadOnly = false },
+		"token mount": func(p *corev1.Pod) {
+			p.Spec.InitContainers[0].VolumeMounts = append(p.Spec.InitContainers[0].VolumeMounts, corev1.VolumeMount{Name: "token", MountPath: "/token"})
+		},
+		"foreign image": func(p *corev1.Pod) { p.Spec.InitContainers[0].Image = "foreign-image" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := baseline()
+			mutate(p)
+			before := p.DeepCopy()
+			if AddGatewayNetworkGate(p, ownedGateImage) != ErrAgentCA || !reflect.DeepEqual(p, before) {
+				t.Fatal("unsafe preflight accepted or changed")
+			}
+		})
 	}
 }
 
