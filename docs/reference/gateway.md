@@ -227,8 +227,12 @@ Before runtime integration, the caller must:
 - Render every source-host change into the derived zone ConfigMap; mounting the
   source hosts file alone does not update this file-zone design.
 - Advance the nonzero SOA serial for every zone-data change, including hosts-only
-  changes. Gateway generation alone is insufficient. Persist serial/hash state
-  and use conflict-safe updates; do not reset the serial on controller restart.
+  changes. Gateway generation alone is insufficient. `PlanDNSRevision` now computes
+  a canonical zone-data hash and a transition with the expected target resourceVersion;
+  unchanged data keep their serial after restart, while wraparound fails closed.
+  **It does not persist or compare-and-swap anything.** A writer must store serial/hash
+  with the rendered ConfigMap, verify the stored payload, and retry from fresh source
+  and target snapshots on conflict; it must never reset the serial on restart.
 - Project the configuration directory without `subPath` and set CoreDNS's working
   directory to `/etc/coredns`. The file plugin checks for zone updates each second.
 - Select supported bind addresses explicitly and verify the actual image, Service

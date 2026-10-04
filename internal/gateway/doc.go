@@ -19,6 +19,8 @@
 // one authoritative file zone, preserving NODATA for known names. Forward zones
 // are not implemented; they fail closed. Callers must verify source ownership,
 // persist SOA serial progression and publish complete configuration snapshots.
+// The pure DNS revision transition computes a canonical content hash and expected
+// target resourceVersion, but neither persists them nor performs an API CAS.
 // This renderer is not a projection for adopting an existing CoreDNS instance.
 //
 // Fresh resource rendering models initial retained Kubernetes objects only. It
