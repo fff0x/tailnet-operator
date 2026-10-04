@@ -69,7 +69,11 @@ func TestGatewayKernelPrerequisites(t *testing.T) {
 	})
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "kernel-observer", Namespace: namespace}, Spec: corev1.PodSpec{
 		AutomountServiceAccountToken: ptr.To(false), EnableServiceLinks: ptr.To(false), TerminationGracePeriodSeconds: ptr.To(int64(1)),
-		SecurityContext: &corev1.PodSecurityContext{RunAsUser: ptr.To(int64(65532)), RunAsGroup: ptr.To(int64(65532)), RunAsNonRoot: ptr.To(true), FSGroup: ptr.To(int64(65532)), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}},
+		// net.ipv4.ip_forward is a namespaced unsafe sysctl: the kind node allows it
+		// (kind-http.yaml KubeletConfiguration), so the fixture pod provisions forwarding
+		// itself, mirroring the forwarding the real gateway pod inherits from a Talos node.
+		// No host sysctl and no added capability or privilege are involved.
+		SecurityContext: &corev1.PodSecurityContext{RunAsUser: ptr.To(int64(65532)), RunAsGroup: ptr.To(int64(65532)), RunAsNonRoot: ptr.To(true), FSGroup: ptr.To(int64(65532)), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}, Sysctls: []corev1.Sysctl{{Name: "net.ipv4.ip_forward", Value: "1"}}},
 		Containers:      []corev1.Container{{Name: "application", Image: image, ImagePullPolicy: corev1.PullNever, Command: []string{"/hold"}, Args: []string{"--fixture=p1.8-layered-isolation"}, SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr.To(false), ReadOnlyRootFilesystem: ptr.To(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}}},
 	}}
 	if kindfixture.AddNetworkGate(pod, image) != nil {

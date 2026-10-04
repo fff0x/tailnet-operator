@@ -15,3 +15,12 @@ kubeadmConfigPatches:
       extraArgs:
         - name: enable-aggregator-routing
           value: "true"
+  # Let the gateway kernel-prerequisite fixture pod request net.ipv4.ip_forward via
+  # securityContext.sysctls — the test-environment equivalent of the Talos node's
+  # enabled forwarding that the real gateway pod inherits. This only PERMITS the
+  # namespaced unsafe sysctl; pods that do not request it are unaffected, and the
+  # HTTP/L4 fixtures set no sysctls. No host sysctl is changed.
+  - |
+    kind: KubeletConfiguration
+    allowedUnsafeSysctls:
+      - "net.ipv4.ip_forward"
