@@ -62,6 +62,29 @@ func TestStoreGatewayMintCreatesExclusiveRetainedSecret(t *testing.T) {
 	}
 }
 
+func TestStoreGatewayMintRejectsForgedSnapshotsWithMatchingVersions(t *testing.T) {
+	for _, change := range []string{"gateway", "tailnet"} {
+		t.Run(change, func(t *testing.T) {
+			c, g, tn, req, key, now := authStoreFixture(t)
+			if change == "gateway" {
+				// The supplied object can be mutated without changing its RV;
+				// Kubernetes' stored CR still requests the original tags.
+				g.Spec.Tags = []string{"tag:foreign"}
+				req.ACLTags = []string{"tag:foreign"}
+				key.ACLTags = []string{"tag:foreign"}
+			} else {
+				tn.Spec.Server = "https://foreign.example"
+			}
+			if err := storeGatewayMint(t.Context(), c, "operator", g, tn, req, key, now); !errors.Is(err, ErrGatewayAuthStore) {
+				t.Fatal("forged snapshot accepted")
+			}
+			if err := c.Get(t.Context(), types.NamespacedName{Name: "router-auth", Namespace: "operator"}, &corev1.Secret{}); err == nil {
+				t.Fatal("credential for forged scope stored")
+			}
+		})
+	}
+}
+
 func TestStoreGatewayMintRejectsUnverifiedInputs(t *testing.T) {
 	for name, change := range map[string]func(client.Client, *tnv1.TailnetGateway, *tnv1.Tailnet, *headscale.PreAuthKey){
 		"suspended": func(_ client.Client, g *tnv1.TailnetGateway, _ *tnv1.Tailnet, _ *headscale.PreAuthKey) {
