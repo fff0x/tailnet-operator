@@ -4,14 +4,24 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math"
 	"regexp"
+	"strconv"
+	"strings"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 var (
 	ErrDNSRevisionInvalid   = errors.New("gateway DNS revision: missing or invalid persisted state")
 	ErrDNSRevisionExhausted = errors.New("gateway DNS revision: SOA serial exhausted")
 	dnsRevisionHash         = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
+
+const (
+	DNSSerialAnnotation = "tsunaro.io/dns-serial"
+	DNSHashAnnotation   = "tsunaro.io/dns-content-sha256"
 )
 
 // DNSRevision is the minimal state a future writer must persist *alongside*
@@ -46,8 +56,7 @@ func PlanDNSRevision(in DNSInputs, previous *DNSRevision) (DNSRevisionPlan, erro
 	if err != nil {
 		return DNSRevisionPlan{}, err
 	}
-	b := sha256.Sum256([]byte(canonical.Corefile + "\x00" + canonical.ZoneFile))
-	hash := hex.EncodeToString(b[:])
+	hash := dnsContentHash(canonical.Corefile, canonical.ZoneFile)
 	if previous == nil {
 		return DNSRevisionPlan{DNSRevision: DNSRevision{Serial: 1, ContentHash: hash}, Changed: true}, nil
 	}
@@ -64,4 +73,37 @@ func PlanDNSRevision(in DNSInputs, previous *DNSRevision) (DNSRevisionPlan, erro
 	plan.Serial++
 	plan.Changed = true
 	return plan, nil
+}
+
+func dnsContentHash(corefile, zoneFile string) string {
+	b := sha256.Sum256([]byte(corefile + "\x00" + zoneFile))
+	return hex.EncodeToString(b[:])
+}
+
+// ReadDNSRevision validates that the persisted serial and hash describe the
+// target ConfigMap's *actual* payload. It does not prove ownership, trusted
+// origin, freshness of the hosts source, or that the Corefile is safe; a writer
+// must verify all of those separately before treating this as prior state.
+// Missing annotations must NEVER be interpreted as a fresh serial 1.
+func ReadDNSRevision(cm *corev1.ConfigMap, zone string) (DNSRevision, error) {
+	if cm == nil || !dnsZone(zone) || cm.UID == "" || cm.ResourceVersion == "" ||
+		len(cm.Data) != 2 || len(cm.BinaryData) != 0 || cm.Data["Corefile"] == "" || cm.Data[DNSZoneFile] == "" {
+		return DNSRevision{}, ErrDNSRevisionInvalid
+	}
+	serialText, hash := cm.Annotations[DNSSerialAnnotation], cm.Annotations[DNSHashAnnotation]
+	serial, err := strconv.ParseUint(serialText, 10, 32)
+	if err != nil || serial == 0 || serialText != strconv.FormatUint(serial, 10) || !dnsRevisionHash.MatchString(hash) {
+		return DNSRevision{}, ErrDNSRevisionInvalid
+	}
+	prefix := fmt.Sprintf("%s. 30 IN SOA %s. hostmaster.invalid. ", zone, zone)
+	first, remainder, found := strings.Cut(cm.Data[DNSZoneFile], "\n")
+	soa := prefix + serialText + " 7200 3600 1209600 30"
+	if !found || first != soa || remainder == "" {
+		return DNSRevision{}, ErrDNSRevisionInvalid
+	}
+	canonical := prefix + "1 7200 3600 1209600 30\n" + remainder
+	if dnsContentHash(cm.Data["Corefile"], canonical) != hash {
+		return DNSRevision{}, ErrDNSRevisionInvalid
+	}
+	return DNSRevision{Serial: uint32(serial), ContentHash: hash, ResourceVersion: cm.ResourceVersion}, nil
 }

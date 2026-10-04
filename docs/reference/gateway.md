@@ -237,8 +237,10 @@ Before runtime integration, the caller must:
   changes. Gateway generation alone is insufficient. `PlanDNSRevision` now computes
   a canonical zone-data hash and a transition with the expected target resourceVersion;
   unchanged data keep their serial after restart, while wraparound fails closed.
-  **It does not persist or compare-and-swap anything.** A writer must store serial/hash
-  with the rendered ConfigMap, verify the stored payload, and retry from fresh source
+  `ReadDNSRevision` rejects a missing, reset or payload-inconsistent persisted
+  serial/hash pair; it does not establish ownership or freshness. **Neither function
+  persists or compare-and-swaps anything.** A writer must store serial/hash with
+  the rendered ConfigMap, verify the stored payload, and retry from fresh source
   and target snapshots on conflict; it must never reset the serial on restart.
 - Project the configuration directory without `subPath` and set CoreDNS's working
   directory to `/etc/coredns`. The file plugin checks for zone updates each second.
