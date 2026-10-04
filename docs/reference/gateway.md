@@ -242,6 +242,13 @@ Before runtime integration, the caller must:
   persists or compare-and-swaps anything.** A writer must store serial/hash with
   the rendered ConfigMap, verify the stored payload, and retry from fresh source
   and target snapshots on conflict; it must never reset the serial on restart.
+  A package-private `updateDNSRevision` now exercises that CAS for an **existing,
+  revisioned, UID-labelled** ConfigMap through an explicit client. It re-reads
+  Gateway, Tailnet and owned hosts source before updating, retries conflicts
+  from a fresh snapshot and refuses to create/adopt a target. It is unreachable
+  from the suspend-only controller and the installed admission contract. Cross-
+  object source/target writes are not atomic; source watches, initial creation,
+  proven field ownership and live DNS checks are still required.
 - Project the configuration directory without `subPath` and set CoreDNS's working
   directory to `/etc/coredns`. The file plugin checks for zone updates each second.
 - Select supported bind addresses explicitly and verify the actual image, Service
