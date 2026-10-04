@@ -122,7 +122,11 @@ models an exclusive Kubernetes Secret **Create** after validating the response
 and re-reading Gateway/Tailnet revisions. The retained, immutable Secret records
 UID-bound metadata; an existing name is never overwritten. This disconnected
 helper does not mint, verify a later state-to-node binding, or start a Pod; the
-production manager has no path to call it. A caller
+production manager has no path to call it. `ReadGatewayAuthReceipt` checks the
+retained Secret's UID/revision, immutability, scope hashes, key presence and
+expiration without returning key bytes. These Kubernetes annotations are **not**
+a Headscale-signed proof of the full credential; restrictive Secret-write RBAC
+and later state-to-node verification remain necessary. A caller
 must not use this diagnostic receipt as a writer authorization. Read snapshots
 are not an exclusive lock; every absence needs revalidation immediately before
 creation, with conflict handling. DNS serial/hash persistence and CAS, image and
