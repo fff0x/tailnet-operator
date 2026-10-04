@@ -39,13 +39,12 @@ func TestMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := filepath.Glob(filepath.Join(root, "*.yaml"))
-	if err != nil || len(files) != 3 {
-		t.Fatal("expected three source CRDs")
-	}
-	var legacy []*apiextensionsv1.CustomResourceDefinition
-	for _, file := range files {
-		data, err := os.ReadFile(file)
+	// This suite models only the reviewed three-kind legacy-group handover.
+	// New kinds must not be cloned into a fictitious historical API. Discovery
+	// deliberately rejects an installed gateway kind (see the unit regression).
+	var definitions []*apiextensionsv1.CustomResourceDefinition
+	for _, file := range []string{"tsunaro.io_tailnets.yaml", "tsunaro.io_tailnetegresses.yaml", "tsunaro.io_tailnetingresses.yaml"} {
+		data, err := os.ReadFile(filepath.Join(root, file))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -53,6 +52,7 @@ func TestMigration(t *testing.T) {
 		if err := yaml.Unmarshal(data, &crd); err != nil {
 			t.Fatal(err)
 		}
+		definitions = append(definitions, crd.DeepCopy())
 		clone := crd.DeepCopy()
 		clone.Spec.Group = strings.Split(migration.LegacyAPIVersion, "/")[0]
 		clone.Name = clone.Spec.Names.Plural + "." + clone.Spec.Group
@@ -77,13 +77,12 @@ func TestMigration(t *testing.T) {
 				root.Properties["spec"] = spec
 			}
 		}
-		legacy = append(legacy, clone)
+		definitions = append(definitions, clone)
 	}
 	useExisting := false
 	env := &envtest.Environment{
 		UseExistingCluster: &useExisting, BinaryAssetsDirectory: assets,
-		CRDDirectoryPaths: []string{root}, ErrorIfCRDPathMissing: true,
-		CRDs: legacy,
+		CRDs: definitions,
 	}
 	t.Cleanup(func() {
 		if err := env.Stop(); err != nil {

@@ -1,0 +1,661 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: tailnetgateways.tsunaro.io
+spec:
+  group: tsunaro.io
+  names:
+    kind: TailnetGateway
+    listKind: TailnetGatewayList
+    plural: tailnetgateways
+    shortNames:
+    - tngw
+    singular: tailnetgateway
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.hostname
+      name: Hostname
+      type: string
+    - jsonPath: .spec.suspend
+      name: Suspended
+      type: boolean
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          TailnetGateway describes a persistent kernel router in the operator namespace.
+          The current implementation provides admission only; suspend=false is rejected.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              TailnetGatewaySpec is an experimental, suspended API contract. No controller
+              is registered yet. Retention is the only deletion policy; adoption never implies
+              consent to replace a pod, reset state, rename nodes or remove stale nodes.
+            properties:
+              adoption:
+                description: |-
+                  GatewayAdoption binds the inventoried node and resources. Admission cannot
+                  establish that a Secret belongs to this node or that a live template is identical.
+                properties:
+                  nodeId:
+                    description: Expected numeric Headscale node ID; never inferred
+                      from hostname alone.
+                    maxLength: 20
+                    pattern: ^[1-9][0-9]*$
+                    type: string
+                  objects:
+                    items:
+                      description: |-
+                        GatewayAdoptionObject inventories an existing object. The runtime must also
+                        verify UID-bound tsunaro.io/adopt-gateway consent on that object.
+                      properties:
+                        apiVersion:
+                          maxLength: 64
+                          type: string
+                        kind:
+                          maxLength: 32
+                          type: string
+                        name:
+                          description: GatewayName is a namespace-local Kubernetes
+                            object name.
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
+                          type: string
+                        uid:
+                          maxLength: 128
+                          minLength: 1
+                          pattern: ^[a-zA-Z0-9][a-zA-Z0-9._-]*$
+                          type: string
+                      required:
+                      - apiVersion
+                      - kind
+                      - name
+                      - uid
+                      type: object
+                      x-kubernetes-validations:
+                      - message: unsupported adoption object kind or version
+                        rule: (self.apiVersion == 'v1' && self.kind in ['Secret',
+                          'Service', 'ConfigMap', 'ServiceAccount']) || (self.apiVersion
+                          == 'apps/v1' && self.kind == 'StatefulSet') || (self.apiVersion
+                          == 'policy/v1' && self.kind == 'PodDisruptionBudget') ||
+                          (self.apiVersion == 'rbac.authorization.k8s.io/v1' && self.kind
+                          in ['Role', 'RoleBinding'])
+                    maxItems: 16
+                    minItems: 2
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - kind
+                    - name
+                    x-kubernetes-list-type: map
+                required:
+                - nodeId
+                - objects
+                type: object
+                x-kubernetes-validations:
+                - message: adoption object UIDs must be unique
+                  rule: self.objects.all(a, self.objects.filter(b, b.uid == a.uid).size()
+                    == 1)
+              authKeySecretRef:
+                description: |-
+                  Omitted selects persistent key minting in a future controller, never an
+                  ephemeral key. An adopted StatefulSet must retain its existing auth source.
+                properties:
+                  key:
+                    default: TS_AUTHKEY
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-zA-Z0-9._-]+$
+                    type: string
+                  name:
+                    description: GatewayName is a namespace-local Kubernetes object
+                      name.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
+                    type: string
+                required:
+                - name
+                type: object
+              deletionPolicy:
+                default: Retain
+                enum:
+                - Retain
+                type: string
+              dns:
+                description: |-
+                  GatewayDNS leaves the cluster CoreDNS Corefile and Headscale split-DNS config
+                  externally managed. Dynamic hosts remain owned by the existing DNS reconciler.
+                properties:
+                  extraZones:
+                    items:
+                      description: |-
+                        GatewayExtraZone falls through from dynamic hosts to explicit DNS upstream IPs.
+                        No arbitrary Corefile text or resolver URLs are accepted.
+                      properties:
+                        upstreams:
+                          items:
+                            description: GatewayIP is an unzoned unicast IP literal,
+                              not a hostname or a prefix.
+                            maxLength: 45
+                            type: string
+                            x-kubernetes-validations:
+                            - message: address must be a canonical unicast IP literal
+                              rule: isIP(self) && ip(self).isGlobalUnicast() && !ip(self).isLinkLocalUnicast()
+                                && string(ip(self)) == self
+                          maxItems: 8
+                          minItems: 1
+                          type: array
+                          x-kubernetes-list-type: set
+                        zone:
+                          description: GatewayName is a namespace-local Kubernetes
+                            object name.
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
+                          type: string
+                      required:
+                      - upstreams
+                      - zone
+                      type: object
+                    maxItems: 16
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - zone
+                    x-kubernetes-list-type: map
+                  image:
+                    description: |-
+                      GatewayImage requires a version tag or immutable digest. Version tags permit
+                      identical adoption of existing pod templates; runtime must not rewrite them.
+                      Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
+                    maxLength: 512
+                    pattern: ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(:[0-9]+)?/)?[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})?@sha256:[a-f0-9]{64}|:v?[0-9]+(\.[0-9]+){2,3}(-[a-zA-Z0-9._-]+)?)$
+                    type: string
+                    x-kubernetes-validations:
+                    - message: image repository name or tag is too long
+                      rule: '[self.split(''@'')[0]].all(n, [n.split(''/'')[n.split(''/'').size()-1]].all(p,
+                        !p.contains('':'') ? n.size() <= 255 : p.split('':'')[1].size()
+                        <= 128 && n.size()-p.split('':'')[1].size()-1 <= 255))'
+                  serviceClusterIP:
+                    description: GatewayIP is an unzoned unicast IP literal, not a
+                      hostname or a prefix.
+                    maxLength: 45
+                    type: string
+                    x-kubernetes-validations:
+                    - message: DNS serviceClusterIP is immutable
+                      rule: self == oldSelf
+                    - message: address must be a canonical unicast IP literal
+                      rule: isIP(self) && ip(self).isGlobalUnicast() && !ip(self).isLinkLocalUnicast()
+                        && string(ip(self)) == self
+                  serviceName:
+                    description: Explicit name permits adoption of an existing tailnet-dns
+                      Service.
+                    maxLength: 63
+                    pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                    x-kubernetes-validations:
+                    - message: DNS serviceName is immutable
+                      rule: self == oldSelf
+                  staticRecords:
+                    items:
+                      description: |-
+                        GatewayStaticRecord is an explicit A/AAAA record beneath dns.zone. Empty or
+                        wildcard labels are not accepted; wildcard fallback is a separate optional IP.
+                      properties:
+                        address:
+                          description: GatewayIP is an unzoned unicast IP literal,
+                            not a hostname or a prefix.
+                          maxLength: 45
+                          type: string
+                          x-kubernetes-validations:
+                          - message: address must be a canonical unicast IP literal
+                            rule: isIP(self) && ip(self).isGlobalUnicast() && !ip(self).isLinkLocalUnicast()
+                              && string(ip(self)) == self
+                        name:
+                          description: Relative single label below dns.zone.
+                          maxLength: 63
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                      required:
+                      - address
+                      - name
+                      type: object
+                    maxItems: 128
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  wildcardAddress:
+                    description: Optional file-zone fallback, never a template plugin
+                      that shadows hosts.
+                    maxLength: 45
+                    type: string
+                    x-kubernetes-validations:
+                    - message: address must be a canonical unicast IP literal
+                      rule: isIP(self) && ip(self).isGlobalUnicast() && !ip(self).isLinkLocalUnicast()
+                        && string(ip(self)) == self
+                  zone:
+                    description: GatewayName is a namespace-local Kubernetes object
+                      name.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
+                    type: string
+                required:
+                - image
+                - serviceClusterIP
+                - serviceName
+                - zone
+                type: object
+                x-kubernetes-validations:
+                - message: extraZones must not overlap the primary zone
+                  rule: '!has(self.extraZones) || self.extraZones.all(z, z.zone !=
+                    self.zone && !z.zone.endsWith(''.'' + self.zone) && !self.zone.endsWith(''.''
+                    + z.zone))'
+                - message: extraZones must not overlap each other
+                  rule: '!has(self.extraZones) || self.extraZones.all(a, self.extraZones.all(b,
+                    a.zone == b.zone || (!a.zone.endsWith(''.'' + b.zone) && !b.zone.endsWith(''.''
+                    + a.zone))))'
+                - message: static record name exceeds the DNS wire limit
+                  rule: '!has(self.staticRecords) || self.staticRecords.all(r, r.name.size()
+                    + 1 + self.zone.size() <= 253)'
+                - message: wildcard record name exceeds the DNS wire limit
+                  rule: '!has(self.wildcardAddress) || self.zone.size() + 2 <= 253'
+              forwardImage:
+                description: |-
+                  GatewayImage requires a version tag or immutable digest. Version tags permit
+                  identical adoption of existing pod templates; runtime must not rewrite them.
+                  Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
+                maxLength: 512
+                pattern: ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(:[0-9]+)?/)?[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})?@sha256:[a-f0-9]{64}|:v?[0-9]+(\.[0-9]+){2,3}(-[a-zA-Z0-9._-]+)?)$
+                type: string
+                x-kubernetes-validations:
+                - message: image repository name or tag is too long
+                  rule: '[self.split(''@'')[0]].all(n, [n.split(''/'')[n.split(''/'').size()-1]].all(p,
+                    !p.contains('':'') ? n.size() <= 255 : p.split('':'')[1].size()
+                    <= 128 && n.size()-p.split('':'')[1].size()-1 <= 255))'
+              forwards:
+                items:
+                  description: GatewayForward is a TCP forward rendered without shell
+                    interpolation.
+                  properties:
+                    name:
+                      maxLength: 50
+                      pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    port:
+                      description: DNS, health, readiness and metrics ports are reserved
+                        by the sidecar.
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                      x-kubernetes-validations:
+                      - message: forward port is reserved
+                        rule: '!(self in [53, 8080, 8181, 9153])'
+                    targetAddress:
+                      description: IP literal avoids DNS/SNI ambiguity and arbitrary
+                        socat address expressions.
+                      maxLength: 45
+                      type: string
+                      x-kubernetes-validations:
+                      - message: address must be a canonical unicast IP literal
+                        rule: isIP(self) && ip(self).isGlobalUnicast() && !ip(self).isLinkLocalUnicast()
+                          && string(ip(self)) == self
+                    targetPort:
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                  required:
+                  - name
+                  - port
+                  - targetAddress
+                  - targetPort
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              hostname:
+                description: Explicit until a cluster-name convention is introduced;
+                  no inferred identity.
+                maxLength: 63
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              image:
+                description: |-
+                  GatewayImage requires a version tag or immutable digest. Version tags permit
+                  identical adoption of existing pod templates; runtime must not rewrite them.
+                  Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
+                maxLength: 512
+                pattern: ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(:[0-9]+)?/)?[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})?@sha256:[a-f0-9]{64}|:v?[0-9]+(\.[0-9]+){2,3}(-[a-zA-Z0-9._-]+)?)$
+                type: string
+                x-kubernetes-validations:
+                - message: image repository name or tag is too long
+                  rule: '[self.split(''@'')[0]].all(n, [n.split(''/'')[n.split(''/'').size()-1]].all(p,
+                    !p.contains('':'') ? n.size() <= 255 : p.split('':'')[1].size()
+                    <= 128 && n.size()-p.split('':'')[1].size()-1 <= 255))'
+              replicas:
+                default: 1
+                format: int32
+                type: integer
+                x-kubernetes-validations:
+                - message: gateway replicas must equal one
+                  rule: self == 1
+              routes:
+                description: |-
+                  GatewayRoutes adds literal-IP egress destinations from this Tailnet in the
+                  operator namespace. DNS targets are explicitly skipped, not resolved.
+                properties:
+                  advertiseEgressTargets:
+                    default: true
+                    type: boolean
+                  lan:
+                    items:
+                      description: |-
+                        GatewayPrefix is a canonical, non-default subnet route. Network ownership and
+                        reachability still require runtime validation against the selected Tailnet.
+                      maxLength: 49
+                      type: string
+                      x-kubernetes-validations:
+                      - message: route must be a canonical masked non-default CIDR
+                        rule: isCIDR(self) && cidr(self).prefixLength() > 0 && string(cidr(self).masked())
+                          == self
+                      - message: route must not overlap unspecified loopback or multicast
+                          ranges or use mapped IPv4
+                        rule: isCIDR(self) && !self.startsWith('::ffff:') && ['0.0.0.0/32',
+                          '127.0.0.0/8', '224.0.0.0/4', '::/128', '::1/128', 'ff00::/8'].all(r,
+                          !cidr(self).containsIP(cidr(r).ip()) && !cidr(r).containsCIDR(cidr(self)))
+                    maxItems: 32
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                required:
+                - lan
+                type: object
+              service:
+                description: GatewayService preserves the gateway's stable split-DNS
+                  LoadBalancer address.
+                properties:
+                  loadBalancerClass:
+                    description: GatewayClass is a Kubernetes qualified load-balancer
+                      class name.
+                    maxLength: 317
+                    pattern: ^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/)?[a-zA-Z0-9]([a-zA-Z0-9_.-]{0,61}[a-zA-Z0-9])?$
+                    type: string
+                    x-kubernetes-validations:
+                    - message: loadBalancerClass prefix is too long
+                      rule: '!self.contains(''/'') || self.split(''/'')[0].size()
+                        <= 253'
+                  loadBalancerIP:
+                    description: GatewayIP is an unzoned unicast IP literal, not a
+                      hostname or a prefix.
+                    maxLength: 45
+                    type: string
+                    x-kubernetes-validations:
+                    - message: loadBalancerIP is immutable
+                      rule: self == oldSelf
+                    - message: address must be a canonical unicast IP literal
+                      rule: isIP(self) && ip(self).isGlobalUnicast() && !ip(self).isLinkLocalUnicast()
+                        && string(ip(self)) == self
+                  poolLabels:
+                    additionalProperties:
+                      description: GatewayLabelValue is a Kubernetes label value.
+                      maxLength: 63
+                      pattern: ^([a-zA-Z0-9]([a-zA-Z0-9_.-]*[a-zA-Z0-9])?)?$
+                      type: string
+                    description: Labels used by the LoadBalancer IP-pool selector,
+                      not pod selectors.
+                    maxProperties: 16
+                    type: object
+                    x-kubernetes-validations:
+                    - message: poolLabels keys must be Kubernetes qualified names
+                      rule: self.all(k, k.size() <= 317 && k.matches('^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?([.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/)?[a-zA-Z0-9]([a-zA-Z0-9_.-]{0,61}[a-zA-Z0-9])?$')
+                        && (!k.contains('/') || k.split('/')[0].size() <= 253))
+                  tailnetLBCIDR:
+                    description: |-
+                      GatewayPrefix is a canonical, non-default subnet route. Network ownership and
+                      reachability still require runtime validation against the selected Tailnet.
+                    maxLength: 49
+                    type: string
+                    x-kubernetes-validations:
+                    - message: route must be a canonical masked non-default CIDR
+                      rule: isCIDR(self) && cidr(self).prefixLength() > 0 && string(cidr(self).masked())
+                        == self
+                    - message: route must not overlap unspecified loopback or multicast
+                        ranges or use mapped IPv4
+                      rule: isCIDR(self) && !self.startsWith('::ffff:') && ['0.0.0.0/32',
+                        '127.0.0.0/8', '224.0.0.0/4', '::/128', '::1/128', 'ff00::/8'].all(r,
+                        !cidr(self).containsIP(cidr(r).ip()) && !cidr(r).containsCIDR(cidr(self)))
+                required:
+                - loadBalancerIP
+                - tailnetLBCIDR
+                type: object
+                x-kubernetes-validations:
+                - message: loadBalancerIP must be inside tailnetLBCIDR
+                  rule: cidr(self.tailnetLBCIDR).containsIP(ip(self.loadBalancerIP))
+                - message: loadBalancerClass is immutable
+                  rule: has(self.loadBalancerClass) == has(oldSelf.loadBalancerClass)
+                    && (!has(self.loadBalancerClass) || self.loadBalancerClass ==
+                    oldSelf.loadBalancerClass)
+              stateSecretRef:
+                description: GatewayLocalReference is always resolved in the operator
+                  namespace.
+                properties:
+                  name:
+                    description: GatewayName is a namespace-local Kubernetes object
+                      name.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
+                    type: string
+                required:
+                - name
+                type: object
+              suspend:
+                default: true
+                type: boolean
+                x-kubernetes-validations:
+                - message: gateway runtime is not implemented; suspend must remain
+                    true
+                  rule: self
+              tags:
+                default:
+                - tag:fabric
+                description: Bootstrap tags do not authorize dropping existing tags
+                  on an adopted node.
+                items:
+                  maxLength: 63
+                  pattern: ^tag:[a-z][a-z0-9-]*$
+                  type: string
+                maxItems: 16
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: set
+              tailnetRef:
+                description: GatewayLocalReference is always resolved in the operator
+                  namespace.
+                properties:
+                  name:
+                    description: GatewayName is a namespace-local Kubernetes object
+                      name.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - dns
+            - hostname
+            - image
+            - routes
+            - service
+            - stateSecretRef
+            - tailnetRef
+            type: object
+            x-kubernetes-validations:
+            - message: gateway identity references are immutable
+              rule: self.tailnetRef == oldSelf.tailnetRef && self.hostname == oldSelf.hostname
+                && self.stateSecretRef == oldSelf.stateSecretRef
+            - message: adoption inventory is immutable
+              rule: has(self.adoption) == has(oldSelf.adoption) && (!has(self.adoption)
+                || self.adoption == oldSelf.adoption)
+            - message: auth key and state must use separate Secrets
+              rule: '!has(self.authKeySecretRef) || self.authKeySecretRef.name !=
+                self.stateSecretRef.name'
+            - message: forwardImage is required for forwards
+              rule: '!has(self.forwards) || self.forwards.size() == 0 || has(self.forwardImage)'
+            - message: forward ports must be unique
+              rule: '!has(self.forwards) || self.forwards.all(a, self.forwards.filter(b,
+                b.port == a.port).size() == 1)'
+            - message: adoption requires one StatefulSet and the referenced state
+                Secret
+              rule: '!has(self.adoption) || (self.adoption.objects.filter(o, o.kind
+                == ''StatefulSet'').size() == 1 && self.adoption.objects.filter(o,
+                o.kind == ''Secret'').size() == 1 && self.adoption.objects.exists(o,
+                o.kind == ''Secret'' && o.name == self.stateSecretRef.name))'
+          status:
+            description: TailnetGatewayStatus records observations, not desired-state
+              success claims.
+            properties:
+              conditions:
+                description: Registered, RoutesInSync, DNSReady, StaleNodes, ClusterDNSForward
+                  and Ready.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              ipv4:
+                type: string
+              nodeId:
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              routePlan:
+                description: GatewayRouteStatus persists the quiet-period planner
+                  without process-local timers.
+                properties:
+                  appliedHash:
+                    type: string
+                  pendingHash:
+                    type: string
+                  pendingSince:
+                    description: UTC RFC3339Nano; malformed timestamps cause the planner
+                      to restart its wait.
+                    type: string
+                type: object
+              routesAdvertised:
+                items:
+                  type: string
+                type: array
+              routesApproved:
+                items:
+                  type: string
+                type: array
+              serviceIP:
+                type: string
+              staleNodes:
+                description: IDs of stale nodes to report only, never delete automatically.
+                items:
+                  type: string
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: name must be a DNS-1035 label of at most 40 characters
+          rule: size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z]([-a-z0-9]*[a-z0-9])?$')
+        - message: adopted StatefulSet must have the gateway CR name
+          rule: '!has(self.spec.adoption) || self.spec.adoption.objects.exists(o,
+            o.kind == ''StatefulSet'' && o.name == self.metadata.name)'
+        - message: DNS serviceName must not collide with the gateway or headless Service
+          rule: self.spec.dns.serviceName != self.metadata.name && self.spec.dns.serviceName
+            != self.metadata.name + '-headless'
+    served: true
+    storage: true
+    subresources:
+      status: {}

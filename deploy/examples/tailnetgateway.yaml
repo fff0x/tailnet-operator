@@ -1,0 +1,26 @@
+---
+# Experimental admission example only. No gateway controller is registered yet.
+# Replace these synthetic digest pins before a future runtime-enabled deployment.
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetGateway
+metadata:
+  name: router
+spec:
+  suspend: true
+  tailnetRef:
+    name: corp
+  hostname: prod-router
+  stateSecretRef:
+    name: router-state
+  image: example.invalid/tailscale@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  routes:
+    lan: [192.0.2.0/24]
+    advertiseEgressTargets: true
+  service:
+    loadBalancerIP: 198.51.100.17
+    tailnetLBCIDR: 198.51.100.0/24
+  dns:
+    zone: prod.example.internal
+    serviceName: router-dns
+    serviceClusterIP: 10.96.0.54
+    image: example.invalid/coredns@sha256:0000000000000000000000000000000000000000000000000000000000000000

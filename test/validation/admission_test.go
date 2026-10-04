@@ -62,7 +62,7 @@ func TestAdmission(t *testing.T) {
 	namespaces := map[string]bool{}
 	prepare := func(t *testing.T, obj *unstructured.Unstructured) {
 		t.Helper()
-		if obj.GetKind() == "Tailnet" {
+		if obj.GetKind() == "Tailnet" || obj.GetKind() == "TailnetGateway" {
 			return
 		}
 		if obj.GetNamespace() == "" {
@@ -97,7 +97,7 @@ func TestAdmission(t *testing.T) {
 	}
 
 	templates := map[string]*unstructured.Unstructured{}
-	for _, kind := range []string{"tailnet", "tailnetegress", "tailnetingress"} {
+	for _, kind := range []string{"tailnet", "tailnetegress", "tailnetingress", "tailnetgateway"} {
 		obj := load(t, filepath.Join(root, "deploy", "examples", kind+".yaml"))
 		templates[kind] = obj
 		t.Run("example/"+kind, func(t *testing.T) { accept(t, obj) })
@@ -535,7 +535,7 @@ func TestAdmission(t *testing.T) {
 	})
 
 	// All CR operations are dry-runs except the storage roundtrip tests, which clean up their CRs.
-	for _, kind := range []string{"TailnetList", "TailnetEgressList", "TailnetIngressList"} {
+	for _, kind := range []string{"TailnetList", "TailnetEgressList", "TailnetIngressList", "TailnetGatewayList"} {
 		list := &unstructured.UnstructuredList{}
 		list.SetAPIVersion("tsunaro.io/v1alpha1")
 		list.SetKind(kind)
