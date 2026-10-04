@@ -26,6 +26,9 @@
 // without changing sysctls. A future writer must independently prove fresh state,
 // persistent auth provenance, exclusive names, image and network compatibility.
 // Neither the suspension controller nor the adoption planner invokes this model.
+// The separate read-only fresh snapshot inspection validates necessary state,
+// hosts ownership and inventory, but always blocks on unverified auth/node
+// provenance; it is not permission to create anything.
 //
 // The ephemeral ingress/egress lifecycle (key minting, duplicate deletion, node
 // renaming) is not suitable for these persistent gateways and must not be reused.

@@ -95,6 +95,23 @@ any future creation, the writer must verify all of these prerequisites:
 - The separate auth Secret contains a verified non-ephemeral key for the selected Headscale instance and tags.
 - Source ownership, Tailnet scope, Service addresses, network conflicts and image compatibility are valid.
 
+`internal/gateway.InspectFreshSnapshots` is a disconnected read-only inventory
+check. It requires revisioned Gateway, Tailnet, empty mutable state Secret and an
+owned hosts ConfigMap whose `hosts` content matches the render input. It checks
+all nine planned names for explicitly observed absence and rejects retained
+objects even if they carry the Gateway UID label. Peer Gateway identity/address
+collisions and supplied Headscale node names also block. Its receipt contains
+only UIDs and resource versions; errors have fixed, non-secret text.
+
+**A passing inventory still returns `ErrFreshProvenance`.** The current Headscale
+client cannot verify an external auth key's non-ephemeral status, tags and
+server binding; an absent node and an empty Secret are not such proof. A caller
+must not use this diagnostic receipt as a writer authorization. Read snapshots
+are not an exclusive lock; every absence needs revalidation immediately before
+creation, with conflict handling. DNS serial/hash persistence and CAS, image and
+network compatibility, and a safe creation sequence are also pending. The
+suspended controller never invokes this inspection or `RenderFresh`.
+
 The pod Role permits only `get`, `update` and `patch` of the exact state Secret.
 It cannot create missing state, read the auth Secret through the API, or list Secrets.
 Only Tailscale mounts the rotating service-account token and state-cache directory.
