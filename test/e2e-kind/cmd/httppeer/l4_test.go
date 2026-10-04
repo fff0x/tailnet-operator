@@ -297,7 +297,7 @@ func TestL4ControlRoutesAndBoundedResult(t *testing.T) {
 		return probeL4(ctx, input, func(context.Context, string, string) (net.Conn, error) {
 			return nil, errors.New(strings.Repeat("private 100.64.0.1 nonce", 1000))
 		})
-	})
+	}, nil, nil)
 	for _, tc := range []struct {
 		method, path, body string
 		status             int
@@ -321,7 +321,7 @@ func TestL4ControlRoutesAndBoundedResult(t *testing.T) {
 	}
 }
 
-func TestL4AndHTTPShareControlConcurrencyLimit(t *testing.T) {
+func TestAllProbesShareControlConcurrencyLimit(t *testing.T) {
 	entered, release := make(chan struct{}, 4), make(chan struct{})
 	defer close(release)
 	block := func() { entered <- struct{}{}; <-release }
@@ -331,11 +331,18 @@ func TestL4AndHTTPShareControlConcurrencyLimit(t *testing.T) {
 	}, func(context.Context, l4ProbeInput) l4ProbeResult {
 		block()
 		return l4ProbeResult{}
+	}, func(context.Context, l4ProbeInput) webSocketProbeResult {
+		block()
+		return webSocketProbeResult{}
+	}, func(context.Context, probeInput) httpACLProbeResult {
+		block()
+		return httpACLProbeResult{}
 	})
-	for i := range 4 {
-		path, body := "/probe-l4", `{"target":"100.64.0.1"}`
-		if i%2 == 0 {
-			path, body = "/probe", `{"target":"100.64.0.1","http2":false}`
+	paths := []string{"/probe", "/probe-l4", "/probe-websocket", "/probe-http-acl"}
+	for _, path := range paths {
+		body := `{"target":"100.64.0.1"}`
+		if path == "/probe" || path == "/probe-http-acl" {
+			body = `{"target":"100.64.0.1","http2":false}`
 		}
 		done := make(chan struct{})
 		go func() {
@@ -349,9 +356,9 @@ func TestL4AndHTTPShareControlConcurrencyLimit(t *testing.T) {
 			t.Fatal("control did not start")
 		}
 	}
-	for _, path := range []string{"/probe", "/probe-l4"} {
+	for _, path := range paths {
 		body := `{"target":"100.64.0.1"}`
-		if path == "/probe" {
+		if path == "/probe" || path == "/probe-http-acl" {
 			body = `{"target":"100.64.0.1","http2":false}`
 		}
 		w := httptest.NewRecorder()

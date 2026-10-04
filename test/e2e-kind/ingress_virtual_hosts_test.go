@@ -63,9 +63,10 @@ func testIngressVirtualHosts(t *testing.T, x *httpPeerFixture, ingress *tnv1.Tai
 	ingress.Spec.Exposes = []tnv1.Expose{
 		{Name: "http", Mode: "http", Port: 443, Backend: tnv1.Backend{Service: "fixture-backend", Port: 8080}},
 		verifiedBackend,
+		{Name: "tcp", Mode: "l4", Port: 8443, Backend: tnv1.Backend{Service: "fixture-backend", Port: 8081}},
 	}
 	if f.kube.Patch(t.Context(), ingress, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})) != nil {
-		t.Fatal("two-expose configuration rejected")
+		t.Fatal("two HTTP exposes plus L4 configuration rejected")
 	}
 	drained := false
 	var observations []*appsv1.Deployment
@@ -134,8 +135,8 @@ watchTransition:
 	x.save("virtual-host-agent-admitted.json", agent)
 	releaseFixturePod(t, f, agent)
 	started := agent.DeepCopy()
-	eventually(t, "two-expose current-generation Ready", func() bool {
-		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), ingress) != nil || ingress.UID != ingressUID || ingress.Status.ObservedGeneration != ingress.Generation || len(ingress.Status.Exposes) != 2 {
+	eventually(t, "two HTTP exposes plus L4 current-generation Ready", func() bool {
+		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), ingress) != nil || ingress.UID != ingressUID || ingress.Status.ObservedGeneration != ingress.Generation || len(ingress.Status.Exposes) != 3 {
 			return false
 		}
 		for _, name := range []string{"TLSReady", "BackendsReachable", "Ready"} {
@@ -226,6 +227,7 @@ watchTransition:
 		results = append(results, got)
 	}
 	defer func() { x.save("virtual-host-http.private.json", results) }()
+	checkIngressL4Coexistence(t, x, ingress, "virtual-hosts-before")
 	for _, h2 := range []bool{false, true} {
 		check(primary, primary, h2, 200, true, true)
 		check(second, second, h2, 404, false, true)
@@ -236,11 +238,13 @@ watchTransition:
 		check(second, primary, h2, 421, false, false)
 		check(alias, primary, h2, 421, false, false)
 	}
+	checkIngressL4Coexistence(t, x, ingress, "virtual-hosts-after")
+	checkIngressWebSocket(t, x, ingress, leaf, "virtual-hosts")
 	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(agent), agent) != nil || agent.UID != started.UID || len(agent.Status.ContainerStatuses) != 1 || agent.Status.ContainerStatuses[0].ContainerID != started.Status.ContainerStatuses[0].ContainerID || agent.Status.ContainerStatuses[0].RestartCount != 0 {
 		t.Fatal("v3 agent restarted during routing checks")
 	}
 	x.save("virtual-host-ingress.json", ingress)
 	x.save("virtual-host-agent-final.json", agent)
-	x.save("virtual-host-result.json", map[string]any{"realV2ScaleZeroObserved": drained, "oldPodAbsentBeforeV3GateRelease": true, "singleOwnedCertificate": true, "issuedSANs": sans, "http1AndHTTP2": true, "distinctBackends": true, "aliasRouted": true, "hostSNIMismatchRejected": true})
+	x.save("virtual-host-result.json", map[string]any{"realV2ScaleZeroObserved": drained, "oldPodAbsentBeforeV3GateRelease": true, "singleOwnedCertificate": true, "issuedSANs": sans, "http1AndHTTP2": true, "distinctBackends": true, "aliasRouted": true, "hostSNIMismatchRejected": true, "l4CoexistenceTested": true, "webSocketsTested": true})
 	t.Log("gate: observed real v2 scale-zero retirement, gated v3 replacement, two SNI backends + alias, HTTP1/HTTP2 Host!=SNI rejection, one owned Certificate and issued SAN union")
 }

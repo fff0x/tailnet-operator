@@ -107,6 +107,35 @@ wrong/invalid/deleted CA rejection and recovery without another agent restart.
 The existing endpoint returns 404 for the peer's fixed path; a proxy-generated 502 is a failure,
 not successful upstream acceptance. No new fixture binary, listener or mode is introduced.
 
+The virtual-host phase observes the real v2 scale-zero acknowledgement before the gated v3 replacement starts.
+It checks two HTTP backends, a short alias, and HTTP/1.1 and HTTP/2 Host/SNI mismatch rejection (421).
+One owned Certificate must contain the issued SAN union.
+
+The same CR also exposes L4 TCP 8443 to the fixture's existing nonce/hash backend on 8081.
+Fresh byte exchanges through tailnet IPv4 and MagicDNS bracket the HTTP checks across certificate rotation.
+They also run after backend-TLS recovery and before/after virtual-host routing checks, on the same agent as HTTPS.
+Per-phase `l4-coexistence-*.json` files retain every attempt, including convergence and failed observations.
+This checks L4+HTTP coexistence in stable phases, not uninterrupted traffic during protocol retirement or concurrent long-lived streams.
+
+WebSocket probes use the same plain-HTTP backend before/after certificate renewal and after the v3 virtual-host transition.
+Each fresh connection verifies TLS and the expected leaf, then upgrades HTTP/1.1.
+It receives a server greeting and exchanges a random nonce for its SHA256 digest.
+Both tailnet IPv4 and MagicDNS must pass. The backend checks sanitized forwarding headers and bounds active upgrades, message sizes and connection lifetimes.
+Evidence is retained in `websocket-*.json`. This does not test HTTP/2 extended CONNECT or an established WebSocket surviving rotation or retirement.
+
+The `HTTPACL` phase adds a separately authenticated user, initially outside the CR's allowed group.
+It probes the proven `admin` virtual host through deny → allow → deny membership changes in the operator-owned base policy.
+Allowed probes require verified TLS, the expected leaf and the upstream's known 404 response under both HTTP/1.1 and HTTP/2.
+The original user remains allowed as a positive control; the primary backend's stricter forwarding-header checks remain unchanged.
+Each denial requires three fresh IPv4 TCP failures per requested HTTP protocol, with no accepted connection or HTTP response.
+Only `timeout`, `noRoute` and `unreachable` are accepted; refused/reset/canceled, DNS/TLS errors and unknown failures are not denial evidence.
+The fixture emits a fixed `dialError` category, never raw errors; its nine-field decoder rejects missing, duplicate, unknown or contradictory fields.
+Native errors use typed classification. The pinned gonet wrapper additionally needs exact inner-message matching under `net.OpError{Op: "connect", Net: "tcp"}`.
+Both initial denial and revocation have separate bounded convergence before each fixed sample set.
+Malformed/unavailable control responses fail immediately; contradictory fixed-sample observations fail without retries.
+The test requires unchanged agent/peer identities and restart counts, unchanged agent Deployment generation, and Ready ingress/policy status.
+`http-acl-observations.json` retains all attempts; `http-acl-result.json` records acceptance and its limits.
+
 **`TestIngressL4`** (`--l4-only` for a focused run) uses the real chart/reconciler, a generated L4 ingress
 and two separately authenticated tsnet peers. TCP 8443 forwards to a fixed fixture backend on 8081.
 A random nonce and hash response verify byte forwarding through both tailnet IPv4 and MagicDNS.
@@ -123,12 +152,14 @@ and a Ready ingress. `probe-observations.json` retains every attempt, including 
 Probe results expose only bounded booleans and fixed phase/address-kind labels, not credentials or raw network errors.
 
 The peer helper has fixed ports and framing, bounded deadlines/concurrency, strict control JSON and no arbitrary dial mode.
-Its optional `--identity=denied` selects one fixed second hostname; it cannot be combined with the serving-CA override.
+Its optional `--identity=denied` selects one fixed second hostname.
+The HTTP ACL fixture combines it with `--serving-ca=cert-manager`; control-server trust remains separate and unchanged.
 This runner still preloads verified cert-manager assets for L4-only mode, but that test does not install cert-manager.
 
 Not covered here: NetworkPolicy semantics of production CNIs, DERP/STUN traffic, L4 egress/subnet routing,
-L4 coexistence with HTTP, HTTP-specific ACL-negative cases, WebSockets, published images, arm64 execution,
-long-running operation, DNS-specific ACL denial, or immediate revocation of new/established connections.
+published images, arm64 execution, or long-running operation.
+Other gaps: DNS-specific ACL denial, immediate revocation of new/established connections, HTTP/2 extended CONNECT,
+and long-lived WebSockets across rotation/retirement.
 Bounded negative observations are not exhaustive ACL coverage.
 
 ## Offline checks

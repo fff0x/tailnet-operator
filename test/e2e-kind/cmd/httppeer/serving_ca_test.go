@@ -20,6 +20,7 @@ func TestSeparateServingTrustDoesNotReplaceControlTrust(t *testing.T) {
 	var opened []string
 	env := map[string]string{}
 	started := false
+	wantDenied := false
 	d := dependencies{
 		getenv: func(string) string { return "fixture-auth" },
 		setenv: func(k, v string) error { env[k] = v; return nil },
@@ -37,7 +38,7 @@ func TestSeparateServingTrustDoesNotReplaceControlTrust(t *testing.T) {
 		},
 		start: func(_ string, pool *x509.CertPool, denied bool) error {
 			started = true
-			if !pool.Equal(want) || denied {
+			if !pool.Equal(want) || denied != wantDenied {
 				t.Fatal("serving roots not isolated")
 			}
 			return nil
@@ -49,6 +50,15 @@ func TestSeparateServingTrustDoesNotReplaceControlTrust(t *testing.T) {
 	if !reflect.DeepEqual(opened, []string{rootPath, servingRootPath}) || !reflect.DeepEqual(env, map[string]string{"SSL_CERT_FILE": rootPath, "SSL_CERT_DIR": "/control-ca"}) {
 		t.Fatal("control trust changed")
 	}
+	wantDenied = true
+	opened = nil
+	started = false
+	if run([]string{"--fixture=p1.8-http", "--identity=denied", "--serving-ca=cert-manager"}, "linux", 65532, d) != nil || !started || !reflect.DeepEqual(opened, []string{rootPath, servingRootPath}) {
+		t.Fatal("denied identity with separate serving CA rejected")
+	}
+	if !reflect.DeepEqual(env, map[string]string{"SSL_CERT_FILE": rootPath, "SSL_CERT_DIR": "/control-ca"}) {
+		t.Fatal("combined mode replaced control trust")
+	}
 	for _, badPath := range []string{rootPath, servingRootPath} {
 		started = false
 		d.open = func(path string) (io.ReadCloser, error) {
@@ -57,8 +67,10 @@ func TestSeparateServingTrustDoesNotReplaceControlTrust(t *testing.T) {
 			}
 			return io.NopCloser(bytes.NewReader(control)), nil
 		}
-		if run([]string{"--fixture=p1.8-http", "--serving-ca=cert-manager"}, "linux", 65532, d) != errRejected || started {
-			t.Fatal("invalid CA reached startup")
+		for _, args := range [][]string{{"--fixture=p1.8-http", "--serving-ca=cert-manager"}, {"--fixture=p1.8-http", "--identity=denied", "--serving-ca=cert-manager"}} {
+			if run(args, "linux", 65532, d) != errRejected || started {
+				t.Fatal("invalid CA reached startup")
+			}
 		}
 	}
 }
@@ -74,9 +86,14 @@ func TestServingTrustModeGuardBeforeIO(t *testing.T) {
 			t.Fatal("invalid trust mode accepted")
 		}
 	}
-	for _, uid := range []int{0, 65534} {
-		if run([]string{"--fixture=p1.8-http", "--serving-ca=cert-manager"}, "linux", uid, dependencies{}) != errRejected {
-			t.Fatal("trust mode bypassed uid guard")
+	for _, args := range [][]string{{"--fixture=p1.8-http", "--serving-ca=cert-manager"}, {"--fixture=p1.8-http", "--identity=denied", "--serving-ca=cert-manager"}} {
+		for _, uid := range []int{0, 65534} {
+			if run(args, "linux", uid, dependencies{}) != errRejected {
+				t.Fatal("trust mode bypassed uid guard")
+			}
+		}
+		if run(args, "darwin", 65532, dependencies{}) != errRejected {
+			t.Fatal("trust mode bypassed platform guard")
 		}
 	}
 }
