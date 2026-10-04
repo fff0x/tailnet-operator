@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/utils/ptr"
@@ -52,8 +53,8 @@ func storeGatewayMint(ctx context.Context, c client.Client, namespace string, g 
 	// different gateway/Tailnet; this is still not a cross-object transaction.
 	liveG, liveTN := &tnv1.TailnetGateway{}, &tnv1.Tailnet{}
 	if c.Get(ctx, client.ObjectKey{Name: g.Name}, liveG) != nil || c.Get(ctx, client.ObjectKey{Name: tn.Name}, liveTN) != nil ||
-		liveG.UID != g.UID || liveG.ResourceVersion != g.ResourceVersion ||
-		liveTN.UID != tn.UID || liveTN.ResourceVersion != tn.ResourceVersion {
+		liveG.UID != g.UID || liveG.ResourceVersion != g.ResourceVersion || !equality.Semantic.DeepEqual(liveG.Spec, g.Spec) ||
+		liveTN.UID != tn.UID || liveTN.ResourceVersion != tn.ResourceVersion || !equality.Semantic.DeepEqual(liveTN.Spec, tn.Spec) {
 		return ErrGatewayAuthStore
 	}
 	serverHash := sha256.Sum256([]byte(tn.Spec.Server))

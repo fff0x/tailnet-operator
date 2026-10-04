@@ -124,7 +124,10 @@ UID-bound metadata; an existing name is never overwritten. This disconnected
 helper does not mint, verify a later state-to-node binding, or start a Pod; the
 production manager has no path to call it. `ReadGatewayAuthReceipt` checks the
 retained Secret's UID/revision, immutability, scope hashes, key presence and
-expiration without returning key bytes. These Kubernetes annotations are **not**
+expiration without returning key bytes. The caller must supply an independently
+captured, durable Create-time Secret UID; using the read Secret's own UID is
+not a recreation check. No crash-safe UID receipt or cross-object transaction
+exists yet. These Kubernetes annotations are **not**
 a Headscale-signed proof of the full credential; restrictive Secret-write RBAC
 and later state-to-node verification remain necessary.
 

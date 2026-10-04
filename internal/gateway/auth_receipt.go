@@ -33,11 +33,13 @@ type GatewayAuthReceipt struct {
 // gateway/Tailnet scope, missing credential, and expiry. Trust in this receipt
 // relies on restricting Kubernetes Secret writes to the operator; annotations
 // are NOT Headscale-signed attestations and do not verify the full key remotely.
-func ReadGatewayAuthReceipt(secret *corev1.Secret, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, namespace string, now time.Time) (GatewayAuthReceipt, error) {
+// expectedUID must be independently captured at Create and durably retained
+// before recovery. Passing secret.UID as the expectation proves nothing.
+func ReadGatewayAuthReceipt(secret *corev1.Secret, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, namespace string, expectedUID types.UID, now time.Time) (GatewayAuthReceipt, error) {
 	bad := func() (GatewayAuthReceipt, error) { return GatewayAuthReceipt{}, ErrGatewayAuthReceipt }
 	if secret == nil || g == nil || tn == nil || g.UID == "" || tn.UID == "" || now.IsZero() ||
 		g.Spec.AuthKeySecretRef != nil || g.Spec.Adoption != nil || string(g.Spec.TailnetRef.Name) != tn.Name ||
-		secret.Name != g.Name+"-auth" || secret.Namespace != namespace || secret.UID == "" || secret.ResourceVersion == "" ||
+		secret.Name != g.Name+"-auth" || secret.Namespace != namespace || expectedUID == "" || secret.UID != expectedUID || secret.ResourceVersion == "" ||
 		secret.DeletionTimestamp != nil || secret.Immutable == nil || !*secret.Immutable ||
 		secret.Type != corev1.SecretTypeOpaque || len(secret.OwnerReferences) != 0 || len(secret.StringData) != 0 ||
 		len(secret.Data) != 1 || len(secret.Data[gatewayAuthKeyField]) == 0 || len(secret.Data[gatewayAuthKeyField]) > 4096 ||
