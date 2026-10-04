@@ -137,6 +137,39 @@ including refusal to recreate missing state. They run no kubelet or data plane.
 Tailscale source inspection and these checks **do not verify an OCI image, TUN
 ioctls, packet routing, bootstrap or identity retention across restart**.
 
+### Read-only Kind prerequisite gate
+
+Run the fixed selection through the existing delegated, rootless runner:
+
+```sh
+systemd-run --user --scope -p Delegate=yes -- \
+  bash hack/e2e-kind-projection.sh --gateway-preflight-only
+```
+
+The runner requires its usual tools and cached assets, including Kind 0.32.0 and
+Helm 3. It creates a disposable isolated cluster; it never uses the current context.
+The new selection has a 10-minute test budget. Existing selections and budgets are
+unchanged. Evidence and cleanup results remain under the runner's XDG State directory.
+
+The probe only reads fixed paths. It checks the node's TUN character-device metadata
+and forwarding values in a startup-gated, unprivileged observation pod. It does not
+mount or open TUN, load modules, change sysctls or start gateway containers.
+Unknown, unreadable or disabled required observations fail the gate, not skip it.
+
+Both runs on the pinned Kubernetes 1.36.1 Kind node **failed**. Node TUN and IPv4
+forwarding were present; pod IPv4 and IPv6 forwarding were disabled.
+Cleanup succeeded, source manifests matched, and no repair was attempted.
+Node forwarding is therefore not sufficient evidence for pod forwarding.
+Pod TUN was absent because this observation pod intentionally mounts no device.
+
+The existing startup contract remains unchanged: no HostPath, added capabilities,
+UID 0 or multiple application containers. It cannot directly release the modeled
+kernel gateway. A gateway-specific isolation contract and actual supported pod
+prerequisites remain required; do not relax the existing gate to manufacture success.
+Even a successful read-only prerequisite check would not prove image compatibility,
+TUN permissions/ioctls, persistent bootstrap or subnet traffic. IPv6 support is not
+established by this IPv4 prerequisite gate.
+
 ## Fresh DNS rendering: partial implementation
 
 `internal/gateway.RenderDNS` compiles a primary authoritative zone into `Corefile`
