@@ -192,12 +192,14 @@ fixture-only kernel pod shape: exactly one Tailscale container (UID 0, only
 `NET_ADMIN`), one non-root CoreDNS container (only `NET_BIND_SERVICE`), and
 exactly one `HostPathCharDev /dev/net/tun` mounted only by Tailscale. It rejects
 extra host paths, privilege escalation, other capabilities, unexpected sysctls,
-shared gate storage and pre-existing init/ephemeral containers before adding the
-same UID-bound unprivileged startup init used by `AddNetworkGate`. The latter's
+shared gate storage and foreign init/ephemeral containers before prepending the
+same UID-bound unprivileged startup init used by `AddNetworkGate`. The one
+pre-existing, constrained, read-only `kernel-preflight` remains second, after
+fixture release. The latter's
 UID-65532/no-HostPath/no-added-capabilities contract remains unchanged.
 
-These are offline contract tests, **not** a running kernel gateway or a TUN
-permission proof. A future isolated fixture must still bind and release the
+Offline contract tests also check the actual `RenderFresh` pod shape, but are
+**not** a running kernel gateway or a TUN permission proof. A future isolated fixture must still bind and release the
 live Pod with the runner before starting a kernel process. Writer, bootstrap,
 identity and routing proofs remain open.
 

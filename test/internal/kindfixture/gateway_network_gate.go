@@ -14,7 +14,7 @@ func AddGatewayNetworkGate(pod *corev1.Pod, image string) error {
 	}
 	v, c := newNetworkGateResources(image)
 	pod.Spec.Volumes = append(pod.Spec.Volumes, v)
-	pod.Spec.InitContainers = []corev1.Container{c}
+	pod.Spec.InitContainers = append([]corev1.Container{c}, pod.Spec.InitContainers...)
 	return nil
 }
 
@@ -23,7 +23,7 @@ func gatewayNetworkPod(p *corev1.Pod) bool {
 		return false
 	}
 	s := &p.Spec
-	if len(s.Containers) != 2 || len(s.InitContainers) != 0 || len(s.EphemeralContainers) != 0 ||
+	if len(s.Containers) != 2 || len(s.InitContainers) > 1 || len(s.EphemeralContainers) != 0 ||
 		s.HostNetwork || s.HostPID || s.HostIPC || s.ShareProcessNamespace != nil && *s.ShareProcessNamespace ||
 		s.AutomountServiceAccountToken == nil || *s.AutomountServiceAccountToken ||
 		s.OS != nil && s.OS.Name != corev1.Linux ||
@@ -57,6 +57,9 @@ func gatewayNetworkPod(p *corev1.Pod) bool {
 		}
 	}
 	if tunCount != 1 {
+		return false
+	}
+	if len(s.InitContainers) == 1 && !gatewayKernelPreflight(s.InitContainers[0], s.Containers[0].Image) {
 		return false
 	}
 	for i, c := range s.Containers {
@@ -96,6 +99,25 @@ func gatewayNetworkPod(p *corev1.Pod) bool {
 		if i == 0 && tunMounts != 1 || i == 1 && tunMounts != 0 {
 			return false
 		}
+	}
+	return true
+}
+
+// The unprivileged kernel check must remain after the fixture gate. Its only
+// mount is read-only TUN, with no token or state. This validates the existing
+// init's privilege boundary, not its image contents or shell script semantics.
+func gatewayKernelPreflight(c corev1.Container, image string) bool {
+	sc := c.SecurityContext
+	if c.Name != "kernel-preflight" || c.Image != image || sc == nil ||
+		sc.RunAsUser == nil || *sc.RunAsUser != 65532 || sc.RunAsGroup == nil || *sc.RunAsGroup != 65532 ||
+		sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot || sc.Privileged != nil && *sc.Privileged ||
+		sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation ||
+		sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem ||
+		sc.Capabilities == nil || len(sc.Capabilities.Drop) != 1 || sc.Capabilities.Drop[0] != "ALL" || len(sc.Capabilities.Add) != 0 ||
+		sc.SeccompProfile != nil && sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault ||
+		len(c.VolumeMounts) != 1 || c.VolumeMounts[0].Name != "tun" || c.VolumeMounts[0].MountPath != "/dev/net/tun" || !c.VolumeMounts[0].ReadOnly ||
+		c.VolumeMounts[0].SubPath != "" || c.VolumeMounts[0].SubPathExpr != "" || c.VolumeMounts[0].MountPropagation != nil {
+		return false
 	}
 	return true
 }
