@@ -185,8 +185,8 @@ type GatewayAdoption struct {
 	Objects []GatewayAdoptionObject `json:"objects"`
 }
 
-// TailnetGatewaySpec is an experimental, suspended API contract. No controller
-// is registered yet. Retention is the only deletion policy; adoption never implies
+// TailnetGatewaySpec is an experimental, suspended API contract. The controller
+// reports suspension only. Retention is the only deletion policy; adoption never implies
 // consent to replace a pod, reset state, rename nodes or remove stale nodes.
 // +kubebuilder:validation:XValidation:rule="self.tailnetRef == oldSelf.tailnetRef && self.hostname == oldSelf.hostname && self.stateSecretRef == oldSelf.stateSecretRef",message="gateway identity references are immutable"
 // +kubebuilder:validation:XValidation:rule="has(self.adoption) == has(oldSelf.adoption) && (!has(self.adoption) || self.adoption == oldSelf.adoption)",message="adoption inventory is immutable"
@@ -288,7 +288,7 @@ type TailnetGatewayStatus struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.spec.adoption) || self.spec.adoption.objects.exists(o, o.kind == 'StatefulSet' && o.name == self.metadata.name)",message="adopted StatefulSet must have the gateway CR name"
 // +kubebuilder:validation:XValidation:rule="self.spec.dns.serviceName != self.metadata.name && self.spec.dns.serviceName != self.metadata.name + '-headless'",message="DNS serviceName must not collide with the gateway or headless Service"
 // TailnetGateway describes a persistent kernel router in the operator namespace.
-// The current implementation provides admission only; suspend=false is rejected.
+// The current controller reports suspension only; suspend=false is rejected.
 type TailnetGateway struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

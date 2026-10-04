@@ -31,7 +31,7 @@ spec:
       openAPIV3Schema:
         description: |-
           TailnetGateway describes a persistent kernel router in the operator namespace.
-          The current implementation provides admission only; suspend=false is rejected.
+          The current controller reports suspension only; suspend=false is rejected.
         properties:
           apiVersion:
             description: |-
@@ -52,8 +52,8 @@ spec:
             type: object
           spec:
             description: |-
-              TailnetGatewaySpec is an experimental, suspended API contract. No controller
-              is registered yet. Retention is the only deletion policy; adoption never implies
+              TailnetGatewaySpec is an experimental, suspended API contract. The controller
+              reports suspension only. Retention is the only deletion policy; adoption never implies
               consent to replace a pod, reset state, rename nodes or remove stale nodes.
             properties:
               adoption:

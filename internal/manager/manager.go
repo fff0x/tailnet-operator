@@ -90,6 +90,9 @@ func New(cfg *rest.Config, opts Options) (ctrl.Manager, error) {
 			Certificates: certificateClient, SecretReader: mgr.GetAPIReader(),
 			OperatorImage: opts.Image, AgentImagePullSecrets: append([]string(nil), opts.AgentImagePullSecrets...),
 		}).SetupWithManager},
+		{"TailnetGateway", (&controller.TailnetGatewayReconciler{
+			Client: mgr.GetClient(),
+		}).SetupWithManager},
 		{"TailnetDNS", (&controller.TailnetDNSReconciler{
 			Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
 		}).SetupWithManager},
@@ -120,6 +123,7 @@ func runtimeOptions(opts Options, scheme *runtime.Scheme) ctrl.Options {
 		&tnv1.TailnetEgress{}:         {Namespaces: nsCfg},
 		&corev1.Service{}:             {Namespaces: nsCfg},
 		&tnv1.TailnetIngress{}:        {},
+		&tnv1.TailnetGateway{}:        {},
 		&corev1.Secret{}:              {},
 		&corev1.ConfigMap{}:           {},
 		&corev1.Pod{}:                 {},

@@ -1,13 +1,19 @@
-# TailnetGateway: experimental admission contract
+# TailnetGateway: experimental suspended contract
 
-**There is no gateway controller in this implementation yet.** The cluster-scoped
+**The gateway controller reports suspension only.** The cluster-scoped
 `tsunaro.io/v1alpha1` CRD validates configuration, but creates no workloads, keys,
 routes, policy entries or DNS records. `spec.suspend` defaults to `true`; admission
 rejects `false`. An accepted CR is not a working gateway or an adoption proof.
 Existing ingress and egress controllers do not reconcile this resource.
 
+The registered gateway controller reads only the gateway CR and patches its status.
+It does not resolve the Tailnet, read Secrets, invoke a resource renderer, call
+Headscale or watch child resources. Missing dependencies do not prevent suspension.
+It adds no owner references or finalizers and performs no deletion cleanup.
+
 This API is a development foundation, not a release or migration instruction.
-The operator has no additional gateway workload/RBAC permissions in this step.
+The only additional permissions are gateway get/list/watch and status get/update/patch.
+Gateway spec/lifecycle, finalizer, StatefulSet and RBAC management remain unauthorized.
 Do not remove an existing gateway, move its Secret, or change Headscale split-DNS
 because this CRD is installed. See [compatibility](../COMPATIBILITY.md#experimental-gateway-api).
 
@@ -91,7 +97,22 @@ The status subresource reserves `nodeId`, `ipv4`, `serviceIP`, advertised/approv
 route lists, stale node IDs, route-planner hashes/timestamp and conditions.
 Intended conditions include `Registered`, `RoutesInSync`, `DNSReady`, `StaleNodes`,
 `ClusterDNSForward`, and `Ready`. Stale nodes are reported, not automatically deleted.
-No controller currently populates these fields, so absence of conditions is not success.
+The controller sets `Ready=False/Suspended` and the other listed conditions to
+`Unknown/Suspended`. It preserves last-known identity, routes and debounce fields;
+these are not fresh observations. `observedGeneration` means the suspension was
+processed, not that configuration was applied. Unrelated conditions are preserved.
+A nil suspend value is treated as true. If admission is bypassed to set false,
+the controller still performs no runtime work and reports `RuntimeUnavailable`.
+
+Status patches use resource-version preconditions. Conflicts retry through the
+work queue, unchanged status is not rewritten, and status-only events withdraw
+stale success conditions. API errors retain machine-readable classification but
+expose only fixed, non-sensitive text. There are no gateway-specific operational
+metrics or alerts yet; generic Ready gauges do not include suspended gateways.
+
+Isolated API-server tests exercise the production manager with generated RBAC,
+status events and deletion without state mutation. No kubelet or garbage collector
+runs there: these tests do not prove live pod retention or interruption-free adoption.
 
 The [example](../../deploy/examples/tailnetgateway.yaml) uses synthetic digest pins
 and is suitable only for admission validation in a disposable API server.

@@ -19,6 +19,13 @@ rules:
   - apiGroups: ["tsunaro.io"]
     resources: [tailnetingresses/status]
     verbs: [get, update, patch]
+  # Gateway controller only reports suspension; no workload/finalizer rights.
+  - apiGroups: ["tsunaro.io"]
+    resources: [tailnetgateways]
+    verbs: [get, list, watch]
+  - apiGroups: ["tsunaro.io"]
+    resources: [tailnetgateways/status]
+    verbs: [get, update, patch]
   # OwnerReferencesPermissionEnforcement checks this authorization, including
   # when a child is created. Preserve foreground-GC behavior without CR spec writes.
   - apiGroups: ["tsunaro.io"]

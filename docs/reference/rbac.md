@@ -23,6 +23,8 @@ bindings: a RoleBinding limits its role to that namespace, a ClusterRoleBinding 
 
 | Role | Role namespace | Effective namespace(s) | API groups | Resources | Verbs | Resource names | Non-resource URLs |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetgateways/status` | `get`, `patch`, `update` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetgateways` | `get`, `list`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses/finalizers`, `tailnets/finalizers` | `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses/status` | `get`, `patch`, `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses` | `get`, `list`, `watch` | all names | — |

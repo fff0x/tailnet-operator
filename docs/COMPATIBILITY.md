@@ -54,9 +54,11 @@ The two timeout fields do not reproduce Envoy connection-idle or stream-idle pol
 
 ## Experimental gateway API
 
-The development `TailnetGateway` CRD is an admission-only contract. It accepts only
-`suspend: true` and has no registered controller. Installing it does not adopt or
-replace a gateway. Do not treat CR acceptance as runtime, DNS or identity evidence.
+The development `TailnetGateway` CRD accepts only `suspend: true`. Its registered
+controller writes suspension status only; it does not adopt or replace a gateway.
+The operator/chart require this fourth CRD and gateway read/status authorization.
+No gateway workload or finalizer permissions are added. Do not treat CR acceptance
+or observed generation as runtime, DNS or identity evidence.
 See the [gateway reference](reference/gateway.md).
 
 The legacy `tailnet.this-is-fine.io` → `tsunaro.io` ownership-inventory helper supports
