@@ -65,6 +65,78 @@ The pure planner preserves explicit prefix granularity and waits for a 30-second
 quiet period before making a route update eligible. Status must acknowledge a
 successful write, not merely elapsed time. No running router is changed yet.
 
+## Fresh resource model: not a runtime
+
+`internal/gateway.RenderFresh` models initial resources without reading or writing
+Kubernetes or Headscale. The suspension controller does not call it. Rendering
+success is not permission to create resources or evidence of a runnable gateway.
+
+The model requires admitted, defaulted CRs and the operator namespace. It rejects
+adoption, historical identity signals, implicit bootstrap, TCP forwards and extra
+DNS zones. Losing status does not authorize treating retained resources as fresh.
+
+It returns nine resources:
+
+- A singleton StatefulSet with `OnDelete` updates and a matching headless Service.
+- A DNS ClusterIP Service and a LoadBalancer Service, each with an explicit IP family.
+  The DNS ClusterIP and requested LB IP remain explicit. NodePorts are disabled.
+- A derived CoreDNS ConfigMap, ServiceAccount, Role, RoleBinding and singleton PDB.
+
+UID-bound selectors isolate gateways. Pool labels affect only the LB Service and
+cannot overwrite identity labels. No resource receives a gateway GC owner reference
+or finalizer. This models retention; it does not prove live deletion behavior.
+The PDB blocks voluntary eviction of the singleton and can therefore block drains.
+
+State and auth Secrets are deliberately absent from the returned objects. Before
+any future creation, the writer must verify all of these prerequisites:
+
+- Every resource name is available, with no retained or foreign object to overwrite.
+- The referenced state Secret already exists, is mutable and contains no retained identity.
+- The separate auth Secret contains a verified non-ephemeral key for the selected Headscale instance and tags.
+- Source ownership, Tailnet scope, Service addresses, network conflicts and image compatibility are valid.
+
+The pod Role permits only `get`, `update` and `patch` of the exact state Secret.
+It cannot create missing state, read the auth Secret through the API, or list Secrets.
+Only Tailscale mounts the rotating service-account token and state-cache directory.
+The kubelet supplies the auth key through a Secret reference; the plan contains no key value.
+Operator RBAC is unchanged and still cannot create the modeled workloads or roles.
+
+### Kernel prerequisites and startup boundary
+
+The model uses kernel Tailscale with only `NET_ADMIN`, no privilege escalation and
+a read-only root filesystem. CoreDNS is non-root with only `NET_BIND_SERVICE`.
+An unprivileged init container checks the TUN character device and the forwarding
+sysctls required by the initial route families. It only reads; missing or disabled
+prerequisites fail startup before the main containers start. No privileged init
+container, host network namespace or sysctl writer is provided.
+
+Tailscale 1.102.4 source inspection shows that `containerboot` skips sysctl writes
+when forwarding is already enabled. `NET_ADMIN` does not guarantee writable sysctls.
+The deployment environment must provide the device, permissions and network setup;
+the operator must not relax node or namespace security to bypass a failed check.
+A later route update that adds a family needs a new runtime prerequisite check.
+
+For fresh state, bootstrap uses `TS_AUTH_ONCE=false`, `--reset` and explicit
+`--accept-routes=false`. Tailscale 1.102.4 does not apply all `TS_EXTRA_ARGS` through
+its `TS_AUTH_ONCE=true` restart path. This model never resets an adopted node.
+There is no `--force-reauth`, ephemeral-key minting or offline-node deletion.
+
+Routes include mandatory LAN and LB prefixes plus optional scoped literal egress
+addresses. DNS targets are not resolved. Only non-deleting egress CRs from the
+operator namespace and selected Tailnet contribute. These are **initial** pod
+settings; later route writes must not reuse this template as an update plan.
+
+Tailscale's health endpoint and CoreDNS's TCP listener are only pod-readiness inputs.
+They do not establish persistent identity, route approval, DNS answers or Gateway Ready.
+No liveness probe restarts the identity on a transient control-plane failure.
+
+Unit tests check the model and execute the read-only preflight against synthetic
+files. Isolated Kubernetes 1.31 tests admit the resources and dry-run the pod.
+They verify IPv4/IPv6 Service allocation and real service-account authorization,
+including refusal to recreate missing state. They run no kubelet or data plane.
+Tailscale source inspection and these checks **do not verify an OCI image, TUN
+ioctls, packet routing, bootstrap or identity retention across restart**.
+
 ## Fresh DNS rendering: partial implementation
 
 `internal/gateway.RenderDNS` compiles a primary authoritative zone into `Corefile`
@@ -121,8 +193,9 @@ control reproduces TXT fallthrough against an owned loopback upstream.
 
 This does not verify the lab's CoreDNS 1.14.7 image, a running Kubernetes sidecar,
 external forwarding support, kernel subnet routing or interruption-free adoption.
-The StatefulSet/Service renderer, source watches, serial persistence and writer are
-still pending. The controller remains suspended and does not call this renderer.
+The fresh resource model above includes a StatefulSet and Services, but source
+watches, serial persistence and the writer remain pending. The controller remains
+suspended and does not call either renderer.
 
 ## Adoption and retention
 
