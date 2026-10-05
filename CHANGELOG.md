@@ -4,6 +4,25 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Changed
+
+- The `TailnetGateway` completion receipt is now format 2 and pins identity fields
+  instead of generations and full spec hashes. `deletionPolicy`, `suspend` (including
+  a suspend/resume round trip), `dns.staticRecords`, `dns.wildcardAddress`, container
+  images and Tailnet fields other than `server` and `dns.hostsConfigMap` no longer
+  block a running gateway. A changed identity field reports
+  `Ready=False/IdentityChanged` instead of `FreshBlocked`. Gateways created by 0.8.0
+  or earlier must be deleted (`deletionPolicy: Delete`) and recreated.
+- The operator Role gains `update` on `statefulsets` (operator namespace only).
+  The StatefulSet digest in the receipt now excludes container images.
+
+### Added
+
+- `image` and `dns.image` changes are written into the StatefulSet Pod template.
+  The `OnDelete` strategy is kept, so the operator never restarts the Pod; the new
+  `WorkloadCurrent` condition reports `PodCurrent` or `PodTemplateStale` (delete
+  Pod `<gateway>-0` to apply).
+
 ## [0.8.0] - 2026-10-05
 
 ### Release notes
