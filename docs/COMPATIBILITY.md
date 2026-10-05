@@ -54,11 +54,15 @@ The two timeout fields do not reproduce Envoy connection-idle or stream-idle pol
 
 ## Experimental gateway API
 
-The development `TailnetGateway` CRD accepts only `suspend: true`. Its registered
-controller writes suspension status only; it does not adopt or replace a gateway.
-The operator/chart require this fourth CRD and gateway read/status authorization.
-No gateway workload or finalizer permissions are added. Do not treat CR acceptance
-or observed generation as runtime, DNS or identity evidence.
+The development `TailnetGateway` CRD defaults to `suspend: true`. Explicit `false`
+activates fresh-only IPv4 creation; existing gateways are never adopted or replaced.
+The operator/chart require this fourth CRD, gateway read/status authorization and
+operator-namespace get/create for StatefulSets, PDBs, ServiceAccounts, Roles and
+RoleBindings. No update/delete rights for those resources or Gateway finalizer
+permissions are added. Suspension freezes reconciliation, not the running Pod.
+CR deletion retains resources. Partial creation remains blocked without automatic
+remint or rollback. Do not treat CR acceptance or observed generation as runtime,
+DNS or identity evidence.
 See the [gateway reference](reference/gateway.md).
 
 The legacy `tailnet.this-is-fine.io` → `tsunaro.io` ownership-inventory helper supports

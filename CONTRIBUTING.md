@@ -34,8 +34,9 @@ namespaced `net.ipv4.ip_forward` unsafe sysctl so a fixture pod forwards like a 
 node); do not change host privileges, add capabilities or relax the pod isolation gate.
 The isolated projection runner also offers `--gateway-preflight-only` and
 `--gateway-fresh-only`; see the [gateway gates](docs/reference/gateway.md#read-only-kind-prerequisite-gate).
-The fresh-Pod selection verifies real image bootstrap and identity across Pod recreation,
-not route forwarding or adoption.
+The fresh-Pod selection runs the production fresh controller and verifies bootstrap,
+identity across StatefulSet Pod recreation, IPv4 TCP forwarding and known-local DNS
+through the gateway tailnet IP. It does not prove adoption, DNS reload or general crash recovery.
 A failed capability check is not support evidence and must not be silently skipped.
 
 An integration bug needs a regression test that fails before the correction when a safe reproduction is possible.

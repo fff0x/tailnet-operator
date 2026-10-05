@@ -20,6 +20,7 @@ are published in the release notes and as Radicle issues labelled `security`.
 | Headscale administrator | Node identities, grants, route approvals, API keys | API keys are bearer credentials with full control-server access, not per-controller capabilities. |
 | `Tailnet` writer | Control endpoints, bootstrap Secret reference, policy inputs | Administrative. Do not delegate cluster-scoped `Tailnet` writes to tenants. |
 | `TailnetEgress` / `TailnetIngress` writer | Agent identity, tag, backends, `allowFrom` | Not a hostile-tenant boundary: custom tags and cross-namespace backends require trusted writers; `allowFrom` is an allowlist, not isolation. |
+| `TailnetGateway` writer | Persistent kernel identity, image pins, routes and retained resources | Administrative. Explicit activation creates a NET_ADMIN workload; never delegate this cluster-scoped CR to tenants. |
 | Agent pod | Ephemeral tsnet identity, reusable preauth key, no Kubernetes client | Container compromise exposes the key and that identity's network access until the key expires. |
 | Operator pod | Credentials, workloads, status, Headscale policy | Needs broad namespace access by design; a compromised operator is a cluster and tailnet incident. |
 | Tailnet peer | Access per Headscale policy and per-CR identity | The operator authenticates nodes, not application users. |
@@ -47,6 +48,14 @@ Service references can still resolve to administrator-controlled endpoints or Ex
 Operator and agent pods run as non-root numeric users with `RuntimeDefault` seccomp, no privilege
 escalation, all capabilities dropped and a read-only root filesystem. Agents keep a writable `/state`
 and do not mount a ServiceAccount token.
+
+The experimental kernel Gateway is different: Tailscale uses UID 0, only NET_ADMIN,
+and `/dev/net/tun`; CoreDNS uses UID 65532 and only NET_BIND_SERVICE. Its projected
+API token can get/update/patch only its pre-created State Secret. It cannot create
+state or list Secrets. The operator reads private state keys in memory to verify
+public identity. Auth/completion receipt ConfigMaps are privileged trust anchors:
+protect their create/update/delete rights as strictly as Secrets. Replacing all
+retained evidence can forge provenance; immutability alone does not prevent this.
 
 The operator holds cluster-wide permissions on the workloads and Secrets it manages for tenant
 agents, plus cert-manager `Certificate` get/create/patch/delete for `issuerRef` ingresses. Kubernetes

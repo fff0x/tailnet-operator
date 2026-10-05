@@ -311,7 +311,7 @@ func TestDefaultRender(t *testing.T) {
 	equal(t, "default agent resources", envVar(t, c, "AGENT_RESOURCES").Value, `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}`)
 }
 
-// Pin the pre-split permission set, not merely a list of expected grants. This
+// Pin the reviewed permission set, not merely a list of expected grants. This
 // rejects both widening and accidental narrowing, even if rules are regrouped.
 func TestRBACPrivilegesExact(t *testing.T) {
 	read := "get list watch"
@@ -330,6 +330,10 @@ func TestRBACPrivilegesExact(t *testing.T) {
 			m := render(t, fmt.Sprintf("leaderElection: {enabled: %t}", election))
 			local := append([]grant{}, workloads...)
 			local = append(local, grant{"", "services", write},
+				grant{"", "serviceaccounts", "get create"},
+				grant{"apps", "statefulsets", "get create"},
+				grant{"policy", "poddisruptionbudgets", "get create"},
+				grant{"rbac.authorization.k8s.io", "roles rolebindings", "get create"},
 				grant{"tsunaro.io", "tailnetegresses", read},
 				grant{"tsunaro.io", "tailnetegresses/status", status},
 				grant{"tsunaro.io", "tailnetegresses/finalizers", "update"})
