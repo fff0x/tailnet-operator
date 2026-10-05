@@ -100,7 +100,7 @@ func newHTTPPeerFixtureWithServingCA(t *testing.T, servingCA []byte) *httpPeerFi
 
 func newPeerFixture(t *testing.T, servingCA []byte, evidenceScope string) *httpPeerFixture {
 	t.Helper()
-	if evidenceScope != "" && (evidenceScope != "ingress-l4" || servingCA != nil) {
+	if evidenceScope != "" && ((evidenceScope != "ingress-l4" && evidenceScope != "gateway-fresh") || servingCA != nil) {
 		t.Fatal("unsupported peer evidence scope")
 	}
 	if os.Getenv("E2E_KIND_HTTP_NETWORK_GATE") == "" {
@@ -230,7 +230,11 @@ func newPeerFixture(t *testing.T, servingCA []byte, evidenceScope string) *httpP
 	}
 	tlsSecret("headscale-tls", "fixture-headscale.tailnet-system.svc")
 	yes := true
-	create(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "headscale-https-config", Namespace: namespace}, Immutable: &yes, Data: map[string]string{"config.json": headscaleHTTPConfig, "seed-policy.json": `{"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}`}})
+	seedPolicy := `{"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}`
+	if evidenceScope == "gateway-fresh" {
+		seedPolicy = `{"tagOwners":{"tag:fabric":[]},"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}`
+	}
+	create(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "headscale-https-config", Namespace: namespace}, Immutable: &yes, Data: map[string]string{"config.json": headscaleHTTPConfig, "seed-policy.json": seedPolicy}})
 	hs := httpFixturePod("fixture-headscale", image)
 	a := &hs.Spec.Containers[0]
 	a.Command = []string{"/headscale"}
@@ -285,6 +289,12 @@ func newPeerFixture(t *testing.T, servingCA []byte, evidenceScope string) *httpP
 			t.Fatal("fixture auth creation failed")
 		}
 		create(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}, Data: map[string][]byte{"key": []byte(key.Key)}})
+	}
+	// The kernel gateway needs the same verified HTTPS control plane, but no
+	// userspace HTTP peer or agent-only admission webhook. Keep those unchanged
+	// for existing callers and never inject their pod mutation into a gateway.
+	if evidenceScope == "gateway-fresh" {
+		return &httpPeerFixture{f: f, ns: ns, ca: ca, public: public, hs: hs, root: root, image: image, agentImage: agentImage, create: create, save: save, tlsSecret: tlsSecret, cli: cli, auth: auth}
 	}
 	auth("http-peer-auth")
 	keyEnv := func(name string) corev1.EnvVar {

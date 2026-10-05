@@ -65,6 +65,54 @@ func releaseFixturePod(t *testing.T, f *fixture, pod *corev1.Pod) {
 	if len(pod.Spec.InitContainers) != 1 || pod.Spec.InitContainers[0].Name != kindfixture.NetworkGateContainer || pod.Spec.InitContainers[0].Image != image {
 		t.Fatal("fixture network gate required")
 	}
+	releaseBoundFixturePod(t, f, pod, singleFixtureBlocked, singleFixtureStarted)
+}
+
+// Keep the legacy single-app contract separate from the kernel-gateway shape.
+func singleFixtureBlocked(p *corev1.Pod, gateDigests []string) bool {
+	if len(p.Status.InitContainerStatuses) != 1 {
+		return false
+	}
+	s := p.Status.InitContainerStatuses[0]
+	known := false
+	for _, d := range gateDigests {
+		known = known || s.ImageID == d
+	}
+	if s.Name != kindfixture.NetworkGateContainer || s.RestartCount != 0 || s.State.Running == nil || s.ContainerID == "" || !known {
+		return false
+	}
+	for _, c := range p.Status.ContainerStatuses {
+		if c.State.Running != nil || c.State.Terminated != nil || c.ContainerID != "" || c.RestartCount != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func singleFixtureStarted(p *corev1.Pod, initID string, _ []string) bool {
+	if len(p.Status.InitContainerStatuses) != 1 || len(p.Status.ContainerStatuses) != 1 {
+		return false
+	}
+	i, c := p.Status.InitContainerStatuses[0], p.Status.ContainerStatuses[0]
+	return i.ContainerID == initID && i.RestartCount == 0 && i.State.Terminated != nil && i.State.Terminated.ExitCode == 0 && c.State.Running != nil && c.RestartCount == 0
+}
+
+func fixtureGateID(p *corev1.Pod) string {
+	for _, s := range p.Status.InitContainerStatuses {
+		if s.Name == kindfixture.NetworkGateContainer {
+			return s.ContainerID
+		}
+	}
+	return ""
+}
+
+// Both entrypoints use the same live UID/node/network proof, approval expiry and
+// negative releases. Their status predicates are distinct, fixed test contracts.
+func releaseBoundFixturePod(t *testing.T, f *fixture, pod *corev1.Pod, blockedState func(*corev1.Pod, []string) bool, startedState func(*corev1.Pod, string, []string) bool) {
+	t.Helper()
+	if pod == nil || pod.Namespace != namespace || !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`).MatchString(string(pod.UID)) {
+		t.Fatal("created owned fixture Pod required")
+	}
 	root := os.Getenv("E2E_KIND_NET_EVIDENCE")
 	info, err := os.Lstat(root)
 	if err != nil || !filepath.IsAbs(root) || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
@@ -165,28 +213,12 @@ func releaseFixturePod(t *testing.T, f *fixture, pod *corev1.Pod) {
 	}
 	ownedUID := pod.UID
 	blocked := func(p *corev1.Pod) bool {
-		if p.UID != ownedUID || p.DeletionTimestamp != nil || p.Spec.NodeName != f.cluster+"-control-plane" || len(p.Status.InitContainerStatuses) != 1 {
-			return false
-		}
-		s := p.Status.InitContainerStatuses[0]
-		known := false
-		for _, d := range cri.Status.RepoDigests {
-			known = known || s.ImageID == d
-		}
-		if s.Name != kindfixture.NetworkGateContainer || s.RestartCount != 0 || s.State.Running == nil || s.ContainerID == "" || !known {
-			return false
-		}
-		for _, c := range p.Status.ContainerStatuses {
-			if c.State.Running != nil || c.State.Terminated != nil || c.ContainerID != "" || c.RestartCount != 0 {
-				return false
-			}
-		}
-		return true
+		return p.UID == ownedUID && p.DeletionTimestamp == nil && p.Spec.NodeName == f.cluster+"-control-plane" && blockedState(p, cri.Status.RepoDigests)
 	}
 	eventually(t, "blocked init and assigned Pod network", func() bool {
 		return f.kube.Get(t.Context(), client.ObjectKeyFromObject(pod), pod) == nil && pod.Status.PodIP != "" && blocked(pod)
 	})
-	initID := pod.Status.InitContainerStatuses[0].ContainerID
+	initID := fixtureGateID(pod)
 	execGate := func(ctx context.Context, action, input string) ([]byte, error) {
 		return f.command(ctx, input, "kubectl", "--kubeconfig", f.config, "--context", f.context, "--request-timeout=10s", "-n", namespace, "exec", "-i", pod.Name, "-c", kindfixture.NetworkGateContainer, "--", "/netgate", "--action="+action, "--fixture=p1.8-http")
 	}
@@ -270,7 +302,7 @@ func releaseFixturePod(t *testing.T, f *fixture, pod *corev1.Pod) {
 		saveJSON(fmt.Sprintf("init-node-api-after-%d.json", attempt), &after)
 		saveJSON(fmt.Sprintf("init-pod-api-after-%d.json", attempt), pod)
 		saveJSON(fmt.Sprintf("init-bindings-%d.json", attempt), map[string]any{"OuterCIDR": outer.String(), "NodeIP": nodeIP.String(), "PodCIDR": cidr.String(), "PodIP": podIP.String(), "hostProofStartedAtMillis": started.UnixMilli()})
-		if pod.Status.InitContainerStatuses[0].ContainerID != initID {
+		if fixtureGateID(pod) != initID {
 			t.Fatal("init process replaced")
 		}
 		age := time.Since(time.UnixMilli(document.Captured))
@@ -331,11 +363,8 @@ func releaseFixturePod(t *testing.T, f *fixture, pod *corev1.Pod) {
 		t.Fatal("verified init release failed or exceeded host deadline")
 	}
 	eventually(t, "same Pod application startup", func() bool {
-		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(pod), pod) != nil || pod.UID != ownedUID || len(pod.Status.InitContainerStatuses) != 1 || len(pod.Status.ContainerStatuses) != 1 {
-			return false
-		}
-		i, c := pod.Status.InitContainerStatuses[0], pod.Status.ContainerStatuses[0]
-		return i.ContainerID == initID && i.RestartCount == 0 && i.State.Terminated != nil && i.State.Terminated.ExitCode == 0 && c.State.Running != nil && c.RestartCount == 0
+		return f.kube.Get(t.Context(), client.ObjectKeyFromObject(pod), pod) == nil && pod.UID == ownedUID &&
+			pod.DeletionTimestamp == nil && pod.Spec.NodeName == f.cluster+"-control-plane" && startedState(pod, initID, cri.Status.RepoDigests)
 	})
 	saveJSON("init-pod-started.json", pod)
 	saveJSON("init-result.json", map[string]any{"actualNodeAndPodProof": true, "freshStableBindings": true, "nodeENETUNREACH": true, "podIPv4": podIPv4, "podIPv6": netproof.NetworkUnreachable, "wrongHashRejected": true, "expiredHostProofRejected": true, "applicationBlockedUntilRelease": true, "samePodAndInit": true, "zeroRestarts": true})

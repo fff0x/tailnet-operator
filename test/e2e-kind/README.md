@@ -6,7 +6,8 @@ created. Neither touches an existing kube-context, Docker socket or host configu
 | Runner | Tests | Typical duration |
 | --- | --- | --- |
 | `hack/e2e-kind.sh` | `TestInstall`, `TestLeaderFailover` | 3–4 min |
-| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP`, `TestIngressL4` | About 17 min for `--http-only`; full test-process budget 26 min, HTTP-only 18 min, L4-only 10 min (setup/cleanup additional) |
+| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP`, `TestIngressL4`; opt-in gateway gates below | About 17 min for `--http-only`; full test-process budget 26 min, HTTP-only 18 min, L4-only 10 min (setup/cleanup additional) |
+| `hack/e2e-kind-projection.sh --gateway-fresh-only` | `TestGatewayFreshPod` | 10-minute test-process budget; setup/cleanup additional |
 
 ```sh
 # kind must be v0.32.0 (its embedded node image is pinned in kind.yaml / kind-http.yaml)
@@ -35,6 +36,20 @@ nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- bash hack
   ```
 
   `python3 -B -I cert-manager-assets.py <cache-dir> <arch>` validates the cache offline.
+
+- For `--gateway-fresh-only`, also provide `tailscale.tar` and `coredns.tar` under
+  `~/.cache/tailnet-operator-e2e/gateway/v1.102.4-coredns1.14.6/immutable-ref/linux-<arch>/`.
+  Use the platform manifest references from `gateway-images.json`, not its index digests:
+
+  ```sh
+  skopeo copy --src-no-creds --preserve-digests "docker://$repository@$platformDigest" \
+    "oci-archive:$archive:$repository@$platformDigest"
+  python3 -B -I test/e2e-kind/gateway-assets.py /absolute/cache/path amd64
+  ```
+
+  The gateway validator reuses the existing bounded OCI archive parser without
+  changing the cert-manager contract. The runner imports only verified archives;
+  it has no gateway image override or in-cluster download fallback.
 
 `XDG_CACHE_HOME` and `XDG_STATE_HOME` are honoured. Evidence of each run (sanitized logs, proofs,
 timings) is written under `~/.local/state/tailnet-operator/evidence/`; nothing is written into the checkout.
@@ -162,11 +177,26 @@ Other gaps: DNS-specific ACL denial, immediate revocation of new/established con
 and long-lived WebSockets across rotation/retirement.
 Bounded negative observations are not exhaustive ACL coverage.
 
+**`TestGatewayFreshPod`** is a separate opt-in selection with real kernel Tailscale
+1.102.4, CoreDNS 1.14.6 and the same gated HTTPS Headscale 0.29.3 fixture, without
+an HTTP peer or agent admission webhook. It uses the fresh renderer, a precreated
+mutable state Secret and a separate immutable, tagged, non-ephemeral bootstrap key.
+The gateway-specific startup contract admits exactly two apps and two inits;
+the existing single-app gate remains unchanged in shape and approval semantics.
+
+The Linux-amd64 run verifies successful kernel preflight, pinned runtime images,
+state-to-node public identity and advertised LAN/LB routes. A new Pod must retain
+the state Secret UID, Headscale node ID and IPv4 after deleting the first Pod.
+Fixture-only sysctl/fsGroup/CA/pull-policy changes and all proof limits are listed
+in the [gateway reference](../../docs/reference/gateway.md#isolated-fresh-pod-bootstrap-gate).
+No packet forwarding, DNS answers, IPv6 routing, arm64 execution or adoption is proved.
+
 ## Offline checks
 
 ```sh
 bash -n hack/e2e-kind.sh hack/e2e-kind-projection.sh && shellcheck hack/e2e-kind.sh hack/e2e-kind-projection.sh
 python3 -B -I test/e2e-kind/network-gate-test.py && python3 -B -I test/e2e-kind/cert-manager-assets-test.py
+python3 -B -I test/e2e-kind/gateway-assets-test.py
 go test -tags=e2e_kind -count=1 ./test/e2e-kind      # cluster tests skip without a runner-owned environment
 go test ./test/e2e-kind/cmd/... ./test/internal/...
 ```
@@ -184,4 +214,5 @@ config rendering, the certificate renewal patch, command lifecycle and the dial 
 | `cmd/netprobe`, `cmd/netgate`, `network-gate.py` | node/Pod network capture, init-container gate, host-side verifier |
 | `cmd/proofverify`, `cmd/projection`, `cmd/hold`, `cmd/controlprobe`, `cmd/httppeer`, `cmd/fixture` | proof replay, projection observer, placeholder app, TLS probe, tsnet peer, fixture driver |
 | `cert-manager-images.json`, `cert-manager-assets.py` | pinned cert-manager digests and the offline cache validator |
+| `gateway-images.json`, `gateway-assets.py` | pinned gateway images, shared archive verification and CRI import binding |
 | `../internal/{netproof,kindfixture,isolation}` | dial contract, webhook/CA helpers, envtest safety guards |
