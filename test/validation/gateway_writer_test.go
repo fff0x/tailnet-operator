@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -324,6 +325,8 @@ func TestGatewayFreshWriter(t *testing.T) {
 			f.assertMints(wantMints)
 		})
 	}
+
+	gatewayTeardownCases(t, newFixture)
 }
 
 func gatewayWriterMust(t *testing.T, err error, message string) {
@@ -338,6 +341,9 @@ type gatewayWriterHeadscale struct {
 	mu    sync.Mutex
 	mints int
 	nodes []headscale.Node
+	// Teardown observations and fault injection.
+	deletedNodes, expiredKeys []string
+	failDelete                bool
 }
 
 func (h *gatewayWriterHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -368,6 +374,23 @@ func (h *gatewayWriterHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		if err := json.NewEncoder(w).Encode(map[string]any{"preAuthKey": issued}); err != nil {
 			h.t.Error("encode synthetic mint response")
 		}
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/node/"):
+		if h.failDelete {
+			http.Error(w, "synthetic outage", http.StatusInternalServerError)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/api/v1/node/")
+		h.deletedNodes = append(h.deletedNodes, id)
+		h.nodes = slices.DeleteFunc(h.nodes, func(n headscale.Node) bool { return n.ID == id })
+		_, _ = w.Write([]byte("{}"))
+	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/preauthkey/expire":
+		var req map[string]string
+		if json.NewDecoder(r.Body).Decode(&req) != nil || req["id"] == "" {
+			http.Error(w, "invalid synthetic expire", http.StatusBadRequest)
+			return
+		}
+		h.expiredKeys = append(h.expiredKeys, req["id"])
+		_, _ = w.Write([]byte("{}"))
 	default:
 		h.t.Error("unexpected Headscale operation")
 		http.Error(w, "unsupported", http.StatusNotFound)
