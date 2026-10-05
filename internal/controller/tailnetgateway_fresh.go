@@ -11,6 +11,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/gateway"
@@ -154,6 +155,8 @@ func (r *TailnetGatewayReconciler) reconcileTeardown(ctx context.Context, req ct
 		if err := r.RuntimeClient.Patch(ctx, g, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return ctrl.Result{}, &gatewayAPIError{operation: "finalizer removal", cause: err}
 		}
+		// Bounded fields only; the receipt inventory and Headscale IDs stay out of logs.
+		log.FromContext(ctx).Info("gateway teardown finished; finalizer released", "gateway", g.Name, "outcome", reason)
 		return ctrl.Result{}, nil
 	}
 	before := g.DeepCopy()
