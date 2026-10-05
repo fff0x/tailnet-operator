@@ -72,6 +72,11 @@ func New(cfg *rest.Config, opts Options) (ctrl.Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("register operator metrics: %w", err)
 	}
+	// Gateway provenance/exclusivity must never read from informer snapshots.
+	gatewayClient, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("create uncached gateway client: %w", err)
+	}
 	setups := []struct {
 		name  string
 		setup func(ctrl.Manager) error
@@ -91,7 +96,7 @@ func New(cfg *rest.Config, opts Options) (ctrl.Manager, error) {
 			OperatorImage: opts.Image, AgentImagePullSecrets: append([]string(nil), opts.AgentImagePullSecrets...),
 		}).SetupWithManager},
 		{"TailnetGateway", (&controller.TailnetGatewayReconciler{
-			Client: mgr.GetClient(),
+			Client: mgr.GetClient(), RuntimeClient: gatewayClient, OperatorNamespace: opts.Namespace,
 		}).SetupWithManager},
 		{"TailnetDNS", (&controller.TailnetDNSReconciler{
 			Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,

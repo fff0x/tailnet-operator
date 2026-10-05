@@ -1,6 +1,6 @@
-// Package gateway contains side-effect-free planning for a persistent kernel
-// subnet router. It performs no Kubernetes or Headscale operations. The separate
-// gateway controller currently reports suspension only.
+// Package gateway contains planning and a create-only fresh writer for a
+// persistent kernel subnet router. Suspension is the default; explicit activation
+// connects the pure planners to uncached Kubernetes and Headscale operations.
 //
 // Route planning keeps the LAN and LoadBalancer prefixes and can add literal
 // IPv4/IPv6 egress host routes. DNS names are not resolved into advertised routes.
@@ -25,9 +25,9 @@
 //
 // Fresh resource rendering models initial retained Kubernetes objects only. It
 // scopes automatic routes, limits state access and checks kernel prerequisites
-// without changing sysctls. A future writer must independently prove fresh state,
-// persistent auth provenance, exclusive names, image and network compatibility.
-// Neither the suspension controller nor the adoption planner invokes this model.
+// without changing sysctls. The active fresh writer captures independent Create
+// UIDs, persistent auth provenance and exclusive names. Kernel/image compatibility
+// remains a deployment prerequisite. There is no adoption or resource-update path.
 // The separate read-only fresh snapshot inspection validates necessary state,
 // hosts ownership and inventory, but always blocks on unverified auth/node
 // provenance; it is not permission to create anything.

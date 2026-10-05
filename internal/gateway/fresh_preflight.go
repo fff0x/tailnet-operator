@@ -59,8 +59,17 @@ type FreshInspection struct {
 // implemented and independently reviewed; never mint a key to pass this gate.
 // The suspension controller does not call this function.
 func InspectFreshSnapshots(in FreshInspectionInputs) (FreshInspection, error) {
+	if in.Fresh.Gateway != nil && in.Fresh.Gateway.Spec.Suspend != nil && !*in.Fresh.Gateway.Spec.Suspend {
+		return FreshInspection{}, ErrFreshSnapshot
+	}
+	return inspectFreshSnapshots(in)
+}
+
+// The writer supplies its own Create-response provenance after these necessary
+// checks. The public diagnostic above retains its suspension-only contract.
+func inspectFreshSnapshots(in FreshInspectionInputs) (FreshInspection, error) {
 	plan, err := RenderFresh(in.Fresh)
-	if err != nil || in.Fresh.Gateway != nil && in.Fresh.Gateway.Spec.Suspend != nil && !*in.Fresh.Gateway.Spec.Suspend {
+	if err != nil {
 		return FreshInspection{}, ErrFreshSnapshot
 	}
 	g, tn, state, hosts := in.Fresh.Gateway, in.Fresh.Tailnet, in.State, in.Hosts
@@ -76,11 +85,7 @@ func InspectFreshSnapshots(in FreshInspectionInputs) (FreshInspection, error) {
 		state.Type != "" && state.Type != corev1.SecretTypeOpaque {
 		return FreshInspection{}, ErrFreshState
 	}
-	if hosts.DeletionTimestamp != nil || hosts.Labels["app.kubernetes.io/managed-by"] != "tailnet-operator" ||
-		hosts.Labels["tsunaro.io/role"] != "dns-hosts" || len(hosts.OwnerReferences) != 1 ||
-		hosts.OwnerReferences[0].UID != tn.UID || hosts.OwnerReferences[0].Name != tn.Name ||
-		hosts.OwnerReferences[0].Kind != "Tailnet" || hosts.OwnerReferences[0].APIVersion != "tsunaro.io/v1alpha1" ||
-		hosts.OwnerReferences[0].Controller == nil || !*hosts.OwnerReferences[0].Controller {
+	if !freshHostsOwned(hosts, tn) {
 		return FreshInspection{}, ErrFreshHosts
 	}
 	if source, ok := hosts.Data["hosts"]; !ok || source != in.Fresh.Hosts || len(hosts.BinaryData) != 0 {
@@ -141,6 +146,17 @@ func InspectFreshSnapshots(in FreshInspectionInputs) (FreshInspection, error) {
 	}
 	return FreshInspection{GatewayUID: g.UID, TailnetUID: tn.UID, StateUID: state.UID, HostsUID: hosts.UID,
 		GatewayVersion: g.ResourceVersion, TailnetVersion: tn.ResourceVersion, StateVersion: state.ResourceVersion, HostsVersion: hosts.ResourceVersion}, ErrFreshProvenance
+}
+
+func freshHostsOwned(hosts *corev1.ConfigMap, tn *tnv1.Tailnet) bool {
+	_, hasHosts := hosts.Data["hosts"]
+	return hosts.UID != "" && hosts.ResourceVersion != "" && hosts.DeletionTimestamp == nil &&
+		hosts.Labels["app.kubernetes.io/managed-by"] == "tailnet-operator" &&
+		hosts.Labels["tsunaro.io/role"] == "dns-hosts" && len(hosts.OwnerReferences) == 1 &&
+		hosts.OwnerReferences[0].UID == tn.UID && hosts.OwnerReferences[0].Name == tn.Name &&
+		hosts.OwnerReferences[0].Kind == "Tailnet" && hosts.OwnerReferences[0].APIVersion == "tsunaro.io/v1alpha1" &&
+		hosts.OwnerReferences[0].Controller != nil && *hosts.OwnerReferences[0].Controller &&
+		hasHosts && len(hosts.BinaryData) == 0
 }
 
 func freshObjectKind(obj client.Object) string {
