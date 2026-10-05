@@ -1,0 +1,22 @@
+{
+  "images": {
+    "tailscale": {
+      "repository": "ghcr.io/tailscale/tailscale",
+      "version": "v1.102.4",
+      "indexDigest": "sha256:2667499ed87ae29218f292556ba062918402dd5e92e93637af14867e4df12dd3",
+      "platforms": {
+        "amd64": "sha256:9482efa70e5e37180a74ad17e01fb0a43ec4b629cdde1a28a9fb79597bca63e2",
+        "arm64": "sha256:5789311e4ab3bcf6cfb88020def1ce6c8cfebacfd6a369f06b103a8feee0eedc"
+      }
+    },
+    "coredns": {
+      "repository": "docker.io/coredns/coredns",
+      "version": "1.14.6",
+      "indexDigest": "sha256:900f9c109f7a33545d3c811516e8376df9019147b750f5ce3e254468769176ea",
+      "platforms": {
+        "amd64": "sha256:1ba6f47265602e2e50a9c4669e3a955e4298a0d30dc82f39293d4bf1a851e0ff",
+        "arm64": "sha256:d5cc132a34e034ecfd2d4c73c5bf341e5d8af9a0ba46bd7619d9448beb27e7a2"
+      }
+    }
+  }
+}

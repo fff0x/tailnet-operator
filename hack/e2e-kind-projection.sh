@@ -11,6 +11,7 @@ reject() { printf 'projection: stage=preflight result=rejected\n' >&3; exit 2; }
 test_pattern='^Test(FixtureCAProjection|PodNetworkGate|HeadscaleHTTPS|AgentHTTPSPeer|IngressHTTP|IngressL4)$'
 test_timeout=26m
 kernel_only=false
+gateway_only=false
 if [[ $# == 1 && $1 == --http-only ]]; then
     test_pattern='^TestIngressHTTP$'
     test_timeout=18m
@@ -21,6 +22,10 @@ elif [[ $# == 1 && $1 == --gateway-preflight-only ]]; then
     test_pattern='^TestGatewayKernelPrerequisites$'
     test_timeout=10m
     kernel_only=true
+elif [[ $# == 1 && $1 == --gateway-fresh-only ]]; then
+    test_pattern='^TestGatewayFreshPod$'
+    test_timeout=10m
+    gateway_only=true
 elif [[ $# != 0 ]]; then
     reject
 fi
@@ -52,6 +57,7 @@ case $(uname -m) in
     *) reject ;;
 esac
 cm_cache=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/cert-manager/v1.21.2/immutable-ref/linux-$hs_arch
+gateway_cache=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/gateway/v1.102.4-coredns1.14.6/immutable-ref/linux-$hs_arch
 headscale=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/headscale/0.29.3/headscale-linux-$hs_arch
 [[ -f $headscale && $(sha256sum "$headscale") == "$hs_sha  $headscale" ]] || reject
 [[ $state == /* && $data == /* && $modules == /* && $modules != *:* ]] || reject
@@ -144,9 +150,10 @@ source_manifest() {
         test/e2e-kind/network-gate.py test/e2e-kind/Dockerfile.fixture test/e2e-kind/netprobe-pod.json test/e2e-kind/headscale-http.json \
         test/e2e-kind/cmd/{netprobe,fixture,projection,proofverify,hold,netgate,controlprobe,httppeer,kernelcheck}/*.go \
         test/internal/{netproof,kindfixture,kernelcheck}/*.go test/e2e-kind/*.go test/e2e-kind/Dockerfile \
-        test/e2e-kind/cert-manager-images.json test/e2e-kind/cert-manager-assets*.py;
+        test/e2e-kind/cert-manager-images.json test/e2e-kind/cert-manager-assets*.py \
+        test/e2e-kind/gateway-images.json test/e2e-kind/gateway-assets*.py;
         find api cmd internal -type f -name '*.go' -print0 | sort -z | xargs -0 sha256sum;
-        find charts/tailnet-operator -type f -print0 | sort -z | xargs -0 sha256sum)
+        find charts/tailnet-operator deploy/crds -type f -print0 | sort -z | xargs -0 sha256sum)
 }
 cleanup() {
     local result=$? bad=0 ids id rc which owned_image
@@ -274,6 +281,14 @@ for component in controller cainjector webhook startupapicheck; do cp -- "$cm_ca
 cp -- "$cm_cache/chart.tgz" "$work/cert-manager/chart.tgz"
 run "${bins[python3]}" -B -I "$fixture/cert-manager-assets.py" "$work/cert-manager" "$hs_arch" > "$out/cert-manager-assets.json"
 cmp "$out/cert-manager-cache.json" "$out/cert-manager-assets.json"
+if [[ $gateway_only == true ]]; then
+    stage=gateway-asset-preparation
+    run "${bins[python3]}" -B -I "$fixture/gateway-assets.py" "$gateway_cache" "$hs_arch" > "$out/gateway-cache.json"
+    mkdir -m 700 "$work/gateway"
+    for component in tailscale coredns; do cp -- "$gateway_cache/$component.tar" "$work/gateway/$component.tar"; done
+    run "${bins[python3]}" -B -I "$fixture/gateway-assets.py" "$work/gateway" "$hs_arch" > "$out/gateway-assets.json"
+    cmp "$out/gateway-cache.json" "$out/gateway-assets.json"
+fi
 
 stage=public-image-preparation
 run "${bins[timeout]}" 300 "$work/bin/podman" pull --authfile "$work/auth.json" "$pin" > "$out/node-pull.log" 2>&1
@@ -338,6 +353,16 @@ for component in controller cainjector webhook startupapicheck; do
     p exec "$node" crictl inspecti "$ref" > "$out/cm-$component-cri-image.json"
     run "${bins[python3]}" -B -I "$fixture/cert-manager-assets.py" --check-import "$out/cert-manager-assets.json" "$component" "$out/cm-$component-cri-image.json" "$out/cm-$component-containerd-images.txt" > "$out/cm-$component-import-verified.json"
 done
+if [[ $gateway_only == true ]]; then
+    for component in tailscale coredns; do
+        ref=$(run "${bins[python3]}" -B -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["images"][sys.argv[2]]["reference"])' "$out/gateway-assets.json" "$component")
+        repo=${ref%@*}
+        run "${bins[timeout]}" 120 "$work/bin/podman" exec -i "$node" ctr --namespace=k8s.io images import --all-platforms --digests "--snapshotter=$snapshotter" "--base-name=$repo" - < "$work/gateway/$component.tar" > "$out/gateway-$component-load.log" 2>&1
+        p exec "$node" ctr --namespace k8s.io images list --quiet > "$out/gateway-$component-containerd-images.txt"
+        p exec "$node" crictl inspecti "$ref" > "$out/gateway-$component-cri-image.json"
+        run "${bins[python3]}" -B -I "$fixture/gateway-assets.py" --check-import "$out/gateway-assets.json" "$component" "$out/gateway-$component-cri-image.json" "$out/gateway-$component-containerd-images.txt" > "$out/gateway-$component-import-verified.json"
+    done
+fi
 p cp "$work/context/netprobe" "$node:/tmp/owned-source-netprobe" > "$out/node-copy.log" 2>&1
 if [[ $kernel_only == true ]]; then
     p cp "$work/context/kernelcheck" "$node:/tmp/owned-source-kernelcheck" > "$out/kernelcheck-node-copy.log" 2>&1

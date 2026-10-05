@@ -2,6 +2,7 @@ package kindfixture
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 )
 
 // AddGatewayNetworkGate is exclusively for disposable gateway fixtures. It
@@ -15,6 +16,46 @@ func AddGatewayNetworkGate(pod *corev1.Pod, image string) error {
 	v, c := newNetworkGateResources(image)
 	pod.Spec.Volumes = append(pod.Spec.Volumes, v)
 	pod.Spec.InitContainers = append([]corev1.Container{c}, pod.Spec.InitContainers...)
+	return nil
+}
+
+// ValidateGatewayNetworkGate rechecks an API-defaulted, gated fresh Pod before
+// the runner approves it. Only Kubernetes' standard termination-message defaults
+// are tolerated on the gate. The main containers cannot mount its private store.
+// A successful check does not itself prove isolation or authorize release.
+func ValidateGatewayNetworkGate(pod *corev1.Pod, image string) error {
+	if !ValidNetworkGateImage(image) || pod == nil || len(pod.Spec.InitContainers) != 2 {
+		return ErrAgentCA
+	}
+	volume, gate := newNetworkGateResources(image)
+	actual := pod.Spec.InitContainers[0].DeepCopy()
+	if actual.TerminationMessagePath == "/dev/termination-log" {
+		actual.TerminationMessagePath = ""
+	}
+	if actual.TerminationMessagePolicy == corev1.TerminationMessageReadFile {
+		actual.TerminationMessagePolicy = ""
+	}
+	if !equality.Semantic.DeepEqual(*actual, gate) {
+		return ErrAgentCA
+	}
+	ungated := pod.DeepCopy()
+	ungated.Spec.InitContainers = ungated.Spec.InitContainers[1:]
+	found := false
+	volumes := make([]corev1.Volume, 0, len(pod.Spec.Volumes))
+	for _, v := range pod.Spec.Volumes {
+		if v.Name == networkGateVolume {
+			if found || !equality.Semantic.DeepEqual(v, volume) {
+				return ErrAgentCA
+			}
+			found = true
+			continue
+		}
+		volumes = append(volumes, v)
+	}
+	ungated.Spec.Volumes = volumes
+	if !found || ungated.Spec.InitContainers[0].RestartPolicy != nil || !gatewayNetworkPod(ungated) {
+		return ErrAgentCA
+	}
 	return nil
 }
 
