@@ -4,6 +4,18 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-06
+
+### Release notes
+
+A completed fresh `TailnetGateway` now tolerates spec updates: the completion
+receipt (format 2) pins identity fields only, `image`/`dns.image` flow into the
+StatefulSet template without a Pod restart (`WorkloadCurrent` reports staleness),
+and a changed identity field reports `Ready=False/IdentityChanged`. The operator
+Role gains `update` on `statefulsets`. Gateways created by 0.8.0 or earlier carry a
+format-1 receipt and must be deleted (`spec.deletionPolicy: Delete`) and recreated.
+The CRD remains experimental; `spec.suspend` still defaults to `true`.
+
 ### Changed
 
 - The `TailnetGateway` completion receipt is now format 2 and pins identity fields
@@ -22,6 +34,7 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   The `OnDelete` strategy is kept, so the operator never restarts the Pod; the new
   `WorkloadCurrent` condition reports `PodCurrent` or `PodTemplateStale` (delete
   Pod `<gateway>-0` to apply).
+- Teardown completion is logged at `info` level with the gateway name and outcome.
 
 ## [0.8.0] - 2026-10-05
 
