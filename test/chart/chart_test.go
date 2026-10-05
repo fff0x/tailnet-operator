@@ -330,10 +330,12 @@ func TestRBACPrivilegesExact(t *testing.T) {
 			m := render(t, fmt.Sprintf("leaderElection: {enabled: %t}", election))
 			local := append([]grant{}, workloads...)
 			local = append(local, grant{"", "services", write},
-				grant{"", "serviceaccounts", "get create"},
-				grant{"apps", "statefulsets", "get create"},
-				grant{"policy", "poddisruptionbudgets", "get create"},
-				grant{"rbac.authorization.k8s.io", "roles rolebindings", "get create"},
+				// Fresh gateway children: create-only plus UID-preconditioned delete for
+				// deletionPolicy=Delete teardown. Never update/list/watch/escalate/bind.
+				grant{"", "serviceaccounts", "get create delete"},
+				grant{"apps", "statefulsets", "get create delete"},
+				grant{"policy", "poddisruptionbudgets", "get create delete"},
+				grant{"rbac.authorization.k8s.io", "roles rolebindings", "get create delete"},
 				grant{"tsunaro.io", "tailnetegresses", read},
 				grant{"tsunaro.io", "tailnetegresses/status", status},
 				grant{"tsunaro.io", "tailnetegresses/finalizers", "update"})
@@ -342,7 +344,9 @@ func TestRBACPrivilegesExact(t *testing.T) {
 			}
 			expected := map[string][]grant{
 				"ClusterRole/tailnet-operator-crds": {
-					{"tsunaro.io", "tailnets tailnetingresses tailnetgateways", read},
+					{"tsunaro.io", "tailnets tailnetingresses", read},
+					// patch only carries the teardown finalizer; spec is CEL-guarded.
+					{"tsunaro.io", "tailnetgateways", read + " patch"},
 					{"tsunaro.io", "tailnets/status tailnetingresses/status tailnetgateways/status", status},
 					{"tsunaro.io", "tailnets/finalizers tailnetingresses/finalizers", "update"},
 				},

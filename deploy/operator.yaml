@@ -34,10 +34,12 @@ rules:
     resources: [tailnetingresses/status]
     verbs: [get, update, patch]
   # Gateway activation is explicit; fresh child creation is namespaced below.
-  # No Gateway spec or finalizer mutation is granted.
+  # patch exists only to add/remove the deletionPolicy=Delete teardown finalizer;
+  # CEL keeps identity fields immutable for every writer and the code never
+  # patches spec. No update/delete on the CR itself.
   - apiGroups: ["tsunaro.io"]
     resources: [tailnetgateways]
-    verbs: [get, list, watch]
+    verbs: [get, list, watch, patch]
   - apiGroups: ["tsunaro.io"]
     resources: [tailnetgateways/status]
     verbs: [get, update, patch]
@@ -131,19 +133,21 @@ rules:
     resources: [secrets, configmaps, services]
     verbs: [get, list, watch, create, update, patch, delete]
   # Fresh Gateways use direct uncached get/create requests in this namespace.
-  # No child informer, adoption, mutation, deletion or RBAC escalation is granted.
+  # delete serves deletionPolicy=Delete teardown only and is always sent with a
+  # UID precondition against the UID recorded at Create. No child informer,
+  # adoption, update or RBAC escalation (escalate/bind) is granted.
   - apiGroups: [""]
     resources: [serviceaccounts]
-    verbs: [get, create]
+    verbs: [get, create, delete]
   - apiGroups: ["apps"]
     resources: [statefulsets]
-    verbs: [get, create]
+    verbs: [get, create, delete]
   - apiGroups: ["policy"]
     resources: [poddisruptionbudgets]
-    verbs: [get, create]
+    verbs: [get, create, delete]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: [roles, rolebindings]
-    verbs: [get, create]
+    verbs: [get, create, delete]
   # Scraped for /status and /targets to classify missing routes.
   - apiGroups: [""]
     resources: [pods]

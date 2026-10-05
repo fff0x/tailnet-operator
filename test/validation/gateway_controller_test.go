@@ -153,9 +153,13 @@ func TestGatewaySuspendedController(t *testing.T) {
 			t.Fatal("gateway status authorization missing")
 		}
 	}
-	for _, verb := range []string{"create", "update", "patch", "delete", "deletecollection"} {
+	// patch is granted for the teardown finalizer only; the code never patches spec.
+	if !allowed("tsunaro.io", "tailnetgateways", "", "patch", "") {
+		t.Fatal("gateway finalizer patch authorization missing")
+	}
+	for _, verb := range []string{"create", "update", "delete", "deletecollection"} {
 		if allowed("tsunaro.io", "tailnetgateways", "", verb, "") {
-			t.Fatal("operator may mutate gateway specs or lifecycle")
+			t.Fatal("operator may create, replace or delete gateways")
 		}
 	}
 	for _, verb := range []string{"update", "patch"} {
@@ -169,7 +173,7 @@ func TestGatewaySuspendedController(t *testing.T) {
 	} {
 		for _, ns := range []string{namespace, "unrelated-tenant", ""} {
 			for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection", "escalate", "bind"} {
-				want := ns == namespace && (verb == "get" || verb == "create")
+				want := ns == namespace && (verb == "get" || verb == "create" || verb == "delete")
 				if got := allowed(resource.group, resource.name, "", verb, ns); got != want {
 					t.Fatalf("fresh child authorization %s/%s %s in %q: got %t, want %t", resource.group, resource.name, verb, ns, got, want)
 				}
