@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -43,6 +44,8 @@ import (
 	"tsunaro.io/tailnet-operator/test/internal/isolation"
 )
 
+const gatewayWriterServiceCIDR = "10.0.0.0/16"
+
 // These tests exercise the real reconciler and Kubernetes persistence/admission.
 // Headscale is an authenticated REST fixture. Pod status and persistent identity
 // are synthetic: no real Headscale, StatefulSet controller, kubelet, forwarding,
@@ -56,6 +59,11 @@ func TestGatewayFreshWriter(t *testing.T) {
 	gatewayWriterMust(t, err, "resolve repository")
 	useExisting := false
 	env := &envtest.Environment{UseExistingCluster: &useExisting, CRDDirectoryPaths: []string{filepath.Join(root, "deploy/crds")}, ErrorIfCRDPathMissing: true, ControlPlaneStartTimeout: 20 * time.Second, ControlPlaneStopTimeout: 10 * time.Second}
+	// All fixtures share one cluster-wide Service allocator. The default /24
+	// lets an earlier LB Service take a later fixture's fixed DNS IP (.51+).
+	// A /16 keeps those DNS IPs in the low static band; dynamic LB allocations
+	// use the upper band. assertComplete pins this separation without retries.
+	env.ControlPlane.GetAPIServer().Configure().Set("service-cluster-ip-range", gatewayWriterServiceCIDR)
 	t.Cleanup(func() { gatewayWriterMust(t, env.Stop(), "stop isolated API server") })
 	cfg, err := env.Start()
 	gatewayWriterMust(t, err, "start isolated API server")
@@ -513,6 +521,17 @@ func (f *gatewayWriterFixture) assertComplete() {
 		if obj.GetUID() == "" || len(obj.GetOwnerReferences()) != 0 {
 			f.t.Fatal("writer child lacks API identity or has GC ownership")
 		}
+	}
+	// Exercise the real allocator, not a client override of rendered Services.
+	// Reverting to envtest's default /24 fails this check deterministically,
+	// rather than waiting for a random collision with a later fixture's DNS IP.
+	lb := &corev1.Service{}
+	f.get(f.g.Name, lb)
+	dynamicIP, err := netip.ParseAddr(lb.Spec.ClusterIP)
+	dnsRange := netip.MustParsePrefix("10.0.0.0/24")
+	if err != nil || !netip.MustParsePrefix(gatewayWriterServiceCIDR).Contains(dynamicIP) || dnsRange.Contains(dynamicIP) ||
+		!dnsRange.Contains(netip.MustParseAddr(string(f.g.Spec.DNS.ServiceClusterIP))) {
+		f.t.Fatal("fixture Service allocator must separate dynamic LB and fixed DNS addresses")
 	}
 	state := &corev1.Secret{}
 	f.get(string(f.g.Spec.StateSecretRef.Name), state)
