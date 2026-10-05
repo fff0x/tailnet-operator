@@ -31,13 +31,17 @@ const gatewayAuthKeyField = "TS_AUTHKEY"
 // name-exclusivity gate. An orphaned minted key after a crash or failed Create
 // expires within the bounded mint lifetime. This alone is NOT authorization to
 // create a StatefulSet or proof of later node/state binding.
-func storeGatewayMint(ctx context.Context, c client.Client, namespace string, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, req headscale.CreatePreAuthKeyRequest, issued *headscale.PreAuthKey, now time.Time) error {
+func storeGatewayMint(ctx context.Context, c client.Client, namespace string, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, req headscale.CreatePreAuthKeyRequest, issued *headscale.PreAuthKey, now time.Time) (GatewayAuthReceipt, error) {
 	if c == nil || len(validation.IsDNS1123Label(namespace)) != 0 || g == nil || tn == nil || g.UID == "" || g.ResourceVersion == "" || tn.UID == "" || tn.ResourceVersion == "" ||
 		g.Namespace != "" || tn.Namespace != "" || g.Spec.Suspend == nil || *g.Spec.Suspend ||
 		g.DeletionTimestamp != nil || tn.DeletionTimestamp != nil || g.Spec.Adoption != nil || g.Spec.AuthKeySecretRef != nil ||
 		string(g.Spec.TailnetRef.Name) != tn.Name || ValidateGatewayMint(req, issued, now) != nil {
-		return ErrGatewayAuthStore
+		return GatewayAuthReceipt{}, ErrGatewayAuthStore
 	}
+	g, tn = g.DeepCopy(), tn.DeepCopy()
+	req.ACLTags = slices.Clone(req.ACLTags)
+	issuedCopy := *issued
+	issued = &issuedCopy
 	server, parseErr := url.Parse(tn.Spec.Server)
 	name := g.Name + "-auth"
 	if parseErr != nil || server.Scheme != "https" || server.Hostname() == "" || server.User != nil || server.RawQuery != "" || server.Fragment != "" ||
@@ -46,16 +50,13 @@ func storeGatewayMint(ctx context.Context, c client.Client, namespace string, g 
 		name == string(g.Spec.StateSecretRef.Name) ||
 		len(g.Spec.Tags) != len(req.ACLTags) || !sameGatewayTags(g.Spec.Tags, req.ACLTags) ||
 		req.Expiration.After(now.Add(gatewayKeyLifetime+time.Second)) {
-		return ErrGatewayAuthStore
+		return GatewayAuthReceipt{}, ErrGatewayAuthStore
 	}
 	// Re-read the two identity CRs immediately before Create. A concurrent
 	// change or deletion must not leave a newly written key attached to a
 	// different gateway/Tailnet; this is still not a cross-object transaction.
-	liveG, liveTN := &tnv1.TailnetGateway{}, &tnv1.Tailnet{}
-	if c.Get(ctx, client.ObjectKey{Name: g.Name}, liveG) != nil || c.Get(ctx, client.ObjectKey{Name: tn.Name}, liveTN) != nil ||
-		liveG.UID != g.UID || liveG.ResourceVersion != g.ResourceVersion || !equality.Semantic.DeepEqual(liveG.Spec, g.Spec) ||
-		liveTN.UID != tn.UID || liveTN.ResourceVersion != tn.ResourceVersion || !equality.Semantic.DeepEqual(liveTN.Spec, tn.Spec) {
-		return ErrGatewayAuthStore
+	if !mintSnapshotsUnchanged(ctx, c, g, tn) {
+		return GatewayAuthReceipt{}, ErrGatewayAuthStore
 	}
 	serverHash := sha256.Sum256([]byte(tn.Spec.Server))
 	tags := slices.Clone(req.ACLTags)
@@ -71,9 +72,26 @@ func storeGatewayMint(ctx context.Context, c client.Client, namespace string, g 
 	if err := c.Create(ctx, secret); err != nil {
 		// Neither Kubernetes errors nor server responses may contain the key in
 		// an event, status condition or log. Never surface the raw cause.
-		return ErrGatewayAuthStore
+		return GatewayAuthReceipt{}, ErrGatewayAuthStore
 	}
-	return nil
+	// Only the successful Create response may establish the expected UID.
+	// A later Get, an AlreadyExists response or a lost response cannot do so.
+	if string(secret.Data[gatewayAuthKeyField]) != issued.Key {
+		return GatewayAuthReceipt{}, ErrGatewayAuthStore
+	}
+	receipt, err := ReadGatewayAuthReceipt(secret, g, tn, namespace, secret.UID, now)
+	if err != nil || receipt.KeyID != issued.ID || !receipt.Expires.Equal(issued.Expiration.UTC().Truncate(time.Second)) ||
+		!mintSnapshotsUnchanged(ctx, c, g, tn) {
+		return GatewayAuthReceipt{}, ErrGatewayAuthStore
+	}
+	return receipt, nil
+}
+
+func mintSnapshotsUnchanged(ctx context.Context, r client.Reader, g *tnv1.TailnetGateway, tn *tnv1.Tailnet) bool {
+	liveG, liveTN := &tnv1.TailnetGateway{}, &tnv1.Tailnet{}
+	return r.Get(ctx, client.ObjectKeyFromObject(g), liveG) == nil && r.Get(ctx, client.ObjectKeyFromObject(tn), liveTN) == nil &&
+		liveG.UID == g.UID && liveG.ResourceVersion == g.ResourceVersion && liveG.Generation == g.Generation && liveG.DeletionTimestamp == nil && equality.Semantic.DeepEqual(liveG.Spec, g.Spec) &&
+		liveTN.UID == tn.UID && liveTN.ResourceVersion == tn.ResourceVersion && liveTN.Generation == tn.Generation && liveTN.DeletionTimestamp == nil && equality.Semantic.DeepEqual(liveTN.Spec, tn.Spec)
 }
 
 func sameGatewayTags(a, b []string) bool {

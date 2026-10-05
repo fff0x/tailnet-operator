@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,21 @@ import (
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/headscale"
 )
+
+// The fake client assigns RVs but not UIDs. Simulate only server allocation;
+// actual Create identities and persistence are covered by the envtest gate.
+type authFixtureClient struct {
+	client.Client
+	creates int
+}
+
+func (c *authFixtureClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	c.creates++
+	if obj.GetUID() == "" {
+		obj.SetUID(types.UID("created-" + strconv.Itoa(c.creates)))
+	}
+	return c.Client.Create(ctx, obj, opts...)
+}
 
 func authStoreFixture(t *testing.T) (client.Client, *tnv1.TailnetGateway, *tnv1.Tailnet, headscale.CreatePreAuthKeyRequest, *headscale.PreAuthKey, time.Time) {
 	t.Helper()
@@ -36,13 +52,13 @@ func authStoreFixture(t *testing.T) (client.Client, *tnv1.TailnetGateway, *tnv1.
 			t.Fatal(err)
 		}
 	}
-	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(g, tn).Build(), g, tn, req, key, now
+	return &authFixtureClient{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(g, tn).Build()}, g, tn, req, key, now
 }
 
 func TestStoreGatewayMintCreatesExclusiveRetainedSecret(t *testing.T) {
 	ctx := context.Background()
 	c, g, tn, req, key, now := authStoreFixture(t)
-	if err := storeGatewayMint(ctx, c, "operator", g, tn, req, key, now); err != nil {
+	if _, err := storeGatewayMint(ctx, c, "operator", g, tn, req, key, now); err != nil {
 		t.Fatal("minted key not stored")
 	}
 	secret := &corev1.Secret{}
@@ -53,7 +69,7 @@ func TestStoreGatewayMintCreatesExclusiveRetainedSecret(t *testing.T) {
 		len(secret.OwnerReferences) != 0 {
 		t.Fatal("credential receipt or retention boundary incorrect")
 	}
-	if err := storeGatewayMint(ctx, c, "operator", g, tn, req, key, now); !errors.Is(err, ErrGatewayAuthStore) || strings.Contains(err.Error(), key.Key) {
+	if _, err := storeGatewayMint(ctx, c, "operator", g, tn, req, key, now); !errors.Is(err, ErrGatewayAuthStore) || strings.Contains(err.Error(), key.Key) {
 		t.Fatal("existing key overwritten or leaked")
 	}
 	unchanged := &corev1.Secret{}
@@ -75,7 +91,7 @@ func TestStoreGatewayMintRejectsForgedSnapshotsWithMatchingVersions(t *testing.T
 			} else {
 				tn.Spec.Server = "https://foreign.example"
 			}
-			if err := storeGatewayMint(t.Context(), c, "operator", g, tn, req, key, now); !errors.Is(err, ErrGatewayAuthStore) {
+			if _, err := storeGatewayMint(t.Context(), c, "operator", g, tn, req, key, now); !errors.Is(err, ErrGatewayAuthStore) {
 				t.Fatal("forged snapshot accepted")
 			}
 			if err := c.Get(t.Context(), types.NamespacedName{Name: "router-auth", Namespace: "operator"}, &corev1.Secret{}); err == nil {
@@ -115,7 +131,7 @@ func TestStoreGatewayMintRejectsUnverifiedInputs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c, g, tn, req, key, now := authStoreFixture(t)
 			change(c, g, tn, key)
-			if err := storeGatewayMint(context.Background(), c, "operator", g, tn, req, key, now); !errors.Is(err, ErrGatewayAuthStore) || strings.Contains(err.Error(), key.Key) {
+			if _, err := storeGatewayMint(context.Background(), c, "operator", g, tn, req, key, now); !errors.Is(err, ErrGatewayAuthStore) || strings.Contains(err.Error(), key.Key) {
 				t.Fatalf("unverified key stored or disclosed: %v", err)
 			}
 			if err := c.Get(context.Background(), types.NamespacedName{Name: "router-auth", Namespace: "operator"}, &corev1.Secret{}); err == nil {

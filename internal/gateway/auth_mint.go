@@ -3,6 +3,7 @@ package gateway
 import (
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +41,13 @@ func PlanGatewayMint(g *tnv1.TailnetGateway, now time.Time) (headscale.CreatePre
 	return headscale.CreatePreAuthKeyRequest{Reusable: true, Ephemeral: false, Expiration: now.UTC().Truncate(time.Second).Add(gatewayKeyLifetime), ACLTags: tags}, nil
 }
 
+// Headscale key IDs are uint64s. Restrict nonsecret receipts to their canonical
+// decimal representation rather than echoing arbitrary upstream/annotation text.
+func validGatewayKeyID(s string) bool {
+	id, err := strconv.ParseUint(s, 10, 64)
+	return err == nil && id != 0 && strconv.FormatUint(id, 10) == s
+}
+
 // ValidateGatewayMint checks the response to the exact request sent to the
 // selected Headscale instance. It never logs or returns the full key. The
 // response alone cannot bind a node to a later Kubernetes state Secret; the
@@ -51,6 +59,9 @@ func ValidateGatewayMint(req headscale.CreatePreAuthKeyRequest, got *headscale.P
 		got.Expiration.IsZero() || got.Expiration.Before(now.Add(time.Minute)) ||
 		got.Expiration.Before(req.Expiration.Add(-time.Second)) || got.Expiration.After(req.Expiration.Add(time.Second)) ||
 		len(req.ACLTags) != len(got.ACLTags) {
+		return ErrGatewayAuthMint
+	}
+	if !validGatewayKeyID(got.ID) {
 		return ErrGatewayAuthMint
 	}
 	want, actual := slices.Clone(req.ACLTags), slices.Clone(got.ACLTags)

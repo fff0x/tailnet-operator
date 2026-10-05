@@ -28,6 +28,10 @@ func TestGatewayMintPlanAndResponse(t *testing.T) {
 	for name, change := range map[string]func(*headscale.PreAuthKey){
 		"missing key":       func(p *headscale.PreAuthKey) { p.Key = "" },
 		"missing ID":        func(p *headscale.PreAuthKey) { p.ID = "" },
+		"non-numeric ID":    func(p *headscale.PreAuthKey) { p.ID = key.Key },
+		"zero ID":           func(p *headscale.PreAuthKey) { p.ID = "0" },
+		"noncanonical ID":   func(p *headscale.PreAuthKey) { p.ID = "017" },
+		"overflow ID":       func(p *headscale.PreAuthKey) { p.ID = "18446744073709551616" },
 		"ephemeral":         func(p *headscale.PreAuthKey) { p.Ephemeral = true },
 		"one shot":          func(p *headscale.PreAuthKey) { p.Reusable = false },
 		"used":              func(p *headscale.PreAuthKey) { p.Used = true },
