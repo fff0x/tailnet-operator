@@ -19,12 +19,15 @@ var (
 	ErrDNSWriteConflict = errors.New("gateway DNS update: concurrent change, retry later")
 )
 
-// updateDNSRevision is deliberately package-private and NOT called by any
-// controller. It is an isolated CAS exercise for an ALREADY provisioned derived
-// ConfigMap; it cannot create resources, bootstrap identity or adopt old DNS.
-// The current CRD rejects suspend=false, so the production controller cannot
-// reach this path. Real runtime wiring needs a separately reviewed safety gate.
-func updateDNSRevision(ctx context.Context, c client.Client, gatewayName, namespace string) error {
+// UpdateDNSRevision reconciles the derived -coredns ConfigMap for an ALREADY
+// provisioned fresh Gateway: it re-renders the zone from the Tailnet hosts
+// source, advances the SOA serial only on semantic change and writes with a
+// resourceVersion CAS. It never creates resources, bootstraps identity, adopts
+// pre-existing DNS or touches any other receipt child. Callers must have
+// verified a complete fresh set (FreshObservation.Completed); the writer
+// itself re-reads source/target and the Gateway/Tailnet revisions before every
+// Update. A conflict is returned to the controller for a later requeue.
+func UpdateDNSRevision(ctx context.Context, c client.Client, gatewayName, namespace string) error {
 	if c == nil || gatewayName == "" || namespace == "" {
 		return ErrDNSWriteBlocked
 	}

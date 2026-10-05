@@ -39,8 +39,10 @@ type GatewayHeadscale interface {
 }
 
 // FreshObservation reports bootstrap health, not end-to-end route/DNS reachability.
+// Completed is true for every verified completion receipt even before the Pod is
+// Ready; it is the signal that the live DNS reconciler may run.
 type FreshObservation struct {
-	Ready            bool
+	Ready, Completed bool
 	Binding          GatewayStateBinding
 	Routes, Approved []string
 }
@@ -345,6 +347,15 @@ func objectReceipt(obj client.Object) freshObjectReceipt {
 	for _, k := range []string{"apiVersion", "kind", "metadata", "status"} {
 		delete(data, k)
 	}
+	// The derived DNS zone is reconciled live from the Tailnet hosts source via
+	// UpdateDNSRevision. Its integrity rides on the matching annotations and the
+	// DNSReady condition, not on this immutable fingerprint. Every other key of
+	// the -coredns ConfigMap (notably Corefile) remains digest-bound.
+	if cm, ok := obj.(*corev1.ConfigMap); ok && strings.HasSuffix(cm.Name, "-coredns") {
+		if payload, ok := data["data"].(map[string]any); ok {
+			delete(payload, DNSZoneFile)
+		}
+	}
 	b, _ = json.Marshal(data)
 	hash := sha256.Sum256(b)
 	return freshObjectReceipt{Kind: writerObjectKind(obj), Name: obj.GetName(), UID: obj.GetUID(), Digest: hex.EncodeToString(hash[:])}
@@ -404,7 +415,7 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 	if c.Get(ctx, client.ObjectKey{Namespace: ns, Name: string(g.Spec.StateSecretRef.Name)}, state) != nil || state.UID != receipt.StateUID || state.DeletionTimestamp != nil {
 		return bad()
 	}
-	result := FreshObservation{Routes: slices.Clone(receipt.Routes)}
+	result := FreshObservation{Completed: true, Routes: slices.Clone(receipt.Routes)}
 	pod := &corev1.Pod{}
 	err = c.Get(ctx, client.ObjectKey{Namespace: ns, Name: g.Name + "-0"}, pod)
 	if apierrors.IsNotFound(err) {

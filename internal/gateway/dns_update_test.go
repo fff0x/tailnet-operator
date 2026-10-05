@@ -72,7 +72,7 @@ func dnsUpdateFixture(t *testing.T) *dnsUpdateClient {
 func TestDNSUpdateCASAndNoop(t *testing.T) {
 	ctx := context.Background()
 	c := dnsUpdateFixture(t)
-	if err := updateDNSRevision(ctx, c, "router", "operator"); err != nil || c.updates != 0 {
+	if err := UpdateDNSRevision(ctx, c, "router", "operator"); err != nil || c.updates != 0 {
 		t.Fatal("unchanged DNS produced a write")
 	}
 	key := types.NamespacedName{Name: "tailnet-hosts", Namespace: "operator"}
@@ -85,7 +85,7 @@ func TestDNSUpdateCASAndNoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.conflictOnce = true
-	if err := updateDNSRevision(ctx, c, "router", "operator"); err != nil || c.updates != 2 {
+	if err := UpdateDNSRevision(ctx, c, "router", "operator"); err != nil || c.updates != 2 {
 		t.Fatalf("conflict was not recomputed from fresh reads: %v", err)
 	}
 	target := &corev1.ConfigMap{}
@@ -96,7 +96,7 @@ func TestDNSUpdateCASAndNoop(t *testing.T) {
 	if err != nil || got.Serial != 2 || !strings.Contains(target.Data[DNSZoneFile], "new.tail.example. 30 IN A 203.0.113.3") {
 		t.Fatal("hosts-only update lost the serial or zone data")
 	}
-	if err := updateDNSRevision(ctx, c, "router", "operator"); err != nil || c.updates != 2 {
+	if err := UpdateDNSRevision(ctx, c, "router", "operator"); err != nil || c.updates != 2 {
 		t.Fatal("restart churned the persisted revision")
 	}
 }
@@ -137,7 +137,7 @@ func TestDNSUpdateNeverCreatesOrAdopts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := dnsUpdateFixture(t)
 			mutate(ctx, c)
-			if err := updateDNSRevision(ctx, c, "router", "operator"); !errors.Is(err, ErrDNSWriteBlocked) || c.updates != 0 {
+			if err := UpdateDNSRevision(ctx, c, "router", "operator"); !errors.Is(err, ErrDNSWriteBlocked) || c.updates != 0 {
 				t.Fatalf("unsafe DNS update accepted: %v", err)
 			}
 		})
