@@ -6,6 +6,17 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Added
 
+- Live DNS reconcile for a fresh `TailnetGateway`: once the completion receipt is
+  verified, the controller re-renders the derived `-coredns` ConfigMap from the
+  Tailnet hosts source on every reconcile, advancing the SOA serial only on
+  semantic change and writing with a resourceVersion CAS. The initial render
+  carries the `tsunaro.io/dns-serial` and `tsunaro.io/dns-content-sha256`
+  annotations; `zone.db` is excluded from the completion fingerprint while
+  `Corefile` and every other key remain digest-bound. The `DNSReady` condition
+  reports `DNSInSync`, `DNSUpdateBlocked` or `DNSUpdateConflict` and is
+  independent of `Ready`. Gateways rendered by 0.7.x carry no annotations and
+  permanently report `DNSUpdateBlocked` until deleted and recreated with
+  `deletionPolicy: Delete`.
 - `TailnetGateway.spec.deletionPolicy: Delete` tears down the operator-created fresh
   resources on CR deletion: StatefulSet first, then the Headscale node and the minted
   bootstrap key, then the receipt children by recorded UID and the state/auth Secrets
