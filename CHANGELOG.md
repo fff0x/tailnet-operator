@@ -4,6 +4,43 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-05
+
+### Added
+
+- **Experimental, fresh-only `TailnetGateway`** for a persistent IPv4 kernel subnet router
+  with a local authoritative DNS snapshot. `spec.suspend` defaults to `true`; explicit
+  `false` enables create-only reconciliation. Existing gateways are never adopted.
+- Independently retained State/auth/child provenance, exclusive resource creation and
+  runtime Ready checks against the persistent state and online Headscale identity.
+  Partial or uncertain creation is retained and blocked, not reminted or repaired.
+- Namespace-local `get/create` for StatefulSets, PDBs, ServiceAccounts, Roles and
+  RoleBindings. No new update/delete, escalation or binding grants for these resources.
+- Real Kubernetes API tests and a controller-driven Kind proof with Headscale 0.29.3,
+  Tailscale 1.102.4 and CoreDNS 1.14.6 on Linux amd64: fresh TCP /32 forwarding and local
+  UDP/TCP DNS before and after StatefulSet Pod recreation, retaining node/IP/State UID.
+  Backend socket-source checks distinguish forwarding from native Kubernetes reachability.
+  Route absence before approval/after revocation is not packet-level ACL-denial evidence.
+
+### Experimental limits
+
+Deliberately no adoption, IPv6, update or rollback path. Spec/generation changes and
+expired bootstrap keys keep blocking reconciliation.
+
+In detail: no adoption, IPv6 writer, dynamic DNS/route updates, rollback/compensating cleanup, automatic key renewal, arbitrary topology proof, arm64 runtime or live deployment. Initial DNS stays at serial 1 and is never reset/reapplied. Expired auth blocks observation even if a retained router remains running. Spec/generation changes, including suspend/resume, invalidate completion evidence; general resume/lifecycle support is not implemented. Suspension freezes reconciliation, not the running workload. The immutable receipts are privileged Kubernetes trust anchors, not signatures or a transaction. No CR-deletion/GC execution proof is claimed.
+
+Without update/delete permissions for the new workload and RBAC resources, a created
+Gateway is effectively immutable. Even an API-admitted spec change invalidates its
+completion receipt and blocks reconciliation; the controller cannot update or replace
+the retained runtime.
+
+Ready proves bounded bootstrap/runtime health, not route approval, LoadBalancer allocation,
+DNS queries or cluster DNS forwarding. The Kind fixture invokes the production reconciler
+in-process; it does not prove a separately deployed operator or leader failover. Deployment
+compatibility on Talos/Cilium remains unverified. Keep an existing gateway and its state,
+routes and split DNS untouched; this release is not a cutover or migration mechanism.
+See the [gateway reference](docs/reference/gateway.md) for prerequisites and evidence bounds.
+
 ## [0.6.0] - 2026-10-03
 
 ### Added
