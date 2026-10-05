@@ -173,7 +173,7 @@ func TestGatewaySuspendedController(t *testing.T) {
 	} {
 		for _, ns := range []string{namespace, "unrelated-tenant", ""} {
 			for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection", "escalate", "bind"} {
-				want := ns == namespace && (verb == "get" || verb == "create" || verb == "delete")
+				want := ns == namespace && (verb == "get" || verb == "create" || verb == "delete" || resource.name == "statefulsets" && verb == "update")
 				if got := allowed(resource.group, resource.name, "", verb, ns); got != want {
 					t.Fatalf("fresh child authorization %s/%s %s in %q: got %t, want %t", resource.group, resource.name, verb, ns, got, want)
 				}

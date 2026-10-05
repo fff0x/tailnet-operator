@@ -32,6 +32,9 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 	if reason == "Provisioning" {
 		message = "Fresh resources are retained; waiting for a running Pod and verified persistent identity."
 	}
+	if reason == "IdentityChanged" {
+		message = "Identity fields pinned at creation (tailnetRef, hostname, stateSecretRef, tags, routes, service, dns zone/service/extraZones, forwards; Tailnet server and dns.hostsConfigMap) differ from the completion receipt, or the receipt predates format 2. Nothing is written: revert the change, or delete with deletionPolicy=Delete and recreate."
+	}
 	if observation.Ready {
 		reason = "FreshRuntimeReady"
 		ready = metav1.ConditionTrue
@@ -54,6 +57,24 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 		}
 	}
 	meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "DNSReady", Status: dnsStatus, Reason: dnsReason, Message: dnsMessage, ObservedGeneration: g.Generation})
+	// Container images in the Pod template follow image/dns.image. The running Pod is never
+	// restarted by the operator (StatefulSet OnDelete): staleness is reported.
+	if observation.Completed {
+		status, wReason, wMessage := metav1.ConditionUnknown, "Provisioning", "No verified Pod yet."
+		switch err := gateway.UpdateWorkloadRevision(ctx, r.RuntimeClient, r.OperatorNamespace, g, observation); {
+		case errors.Is(err, gateway.ErrWorkloadConflict):
+			status, wReason, wMessage = metav1.ConditionFalse, "WorkloadUpdateConflict", "Concurrent change on the StatefulSet; a later reconcile will retry."
+		case err != nil:
+			status, wReason, wMessage = metav1.ConditionFalse, "WorkloadUpdateBlocked", "StatefulSet or completion receipt is not verified; the Pod template is not updated."
+		case observation.PodCurrent:
+			status, wReason, wMessage = metav1.ConditionTrue, "PodCurrent", "Running Pod matches the template wanted by the spec."
+		case observation.PodPresent:
+			status, wReason, wMessage = metav1.ConditionFalse, "PodTemplateStale", "StatefulSet images follow the spec; delete Pod "+g.Name+"-0 to apply it (OnDelete). The running Pod keeps serving."
+		}
+		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "WorkloadCurrent", Status: status, Reason: wReason, Message: wMessage, ObservedGeneration: g.Generation})
+	} else {
+		meta.RemoveStatusCondition(&g.Status.Conditions, "WorkloadCurrent")
+	}
 	for _, name := range []string{"RoutesInSync", "StaleNodes", "ClusterDNSForward"} {
 		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: name, Status: metav1.ConditionUnknown, Reason: "ExternallyManaged", Message: "Fresh bootstrap does not manage route approvals, stale nodes or cluster DNS forwarding.", ObservedGeneration: g.Generation})
 	}
@@ -75,6 +96,9 @@ func (r *TailnetGatewayReconciler) observeFreshRuntime(ctx context.Context, g *t
 		return gateway.FreshObservation{}, reason
 	}
 	observation, err := gateway.ReconcileFresh(ctx, r.RuntimeClient, r.OperatorNamespace, g, tn, hs, time.Now)
+	if errors.Is(err, gateway.ErrFreshIdentity) {
+		return gateway.FreshObservation{}, "IdentityChanged"
+	}
 	if err != nil {
 		return gateway.FreshObservation{}, "FreshBlocked"
 	}
@@ -138,6 +162,7 @@ func (r *TailnetGatewayReconciler) reconcileTeardown(ctx context.Context, req ct
 	if reason == "TeardownBlocked" {
 		message = "Teardown blocked at step " + progress.Step + "; nothing further is deleted. Set deletionPolicy=Retain to release the finalizer and keep all resources."
 	}
+	meta.RemoveStatusCondition(&g.Status.Conditions, "WorkloadCurrent")
 	for _, name := range []string{"Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "Ready"} {
 		status := metav1.ConditionUnknown
 		if name == "Ready" {

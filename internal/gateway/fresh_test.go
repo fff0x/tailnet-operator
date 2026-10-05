@@ -214,8 +214,8 @@ func TestRenderFreshRejectsUnsupported(t *testing.T) {
 		"namespace": func(i *FreshInputs) { i.Namespace = "bad/value" }, "scope": func(i *FreshInputs) { i.Tailnet.Name = "foreign" },
 		"uid": func(i *FreshInputs) { i.Gateway.UID = "" }, "adoption": func(i *FreshInputs) { i.Gateway.Spec.Adoption = &tnv1.GatewayAdoption{} },
 		"historical": func(i *FreshInputs) { i.Gateway.Status.NodeID = "17" }, "bootstrap missing": func(i *FreshInputs) { i.Gateway.Spec.AuthKeySecretRef = nil },
-		"secrets shared": func(i *FreshInputs) { i.Gateway.Spec.AuthKeySecretRef.Name = i.Gateway.Spec.StateSecretRef.Name },
-		"replicas":       func(i *FreshInputs) { i.Gateway.Spec.Replicas = 2 }, "deletion policy": func(i *FreshInputs) { i.Gateway.Spec.DeletionPolicy = "Delete" },
+		"secrets shared":    func(i *FreshInputs) { i.Gateway.Spec.AuthKeySecretRef.Name = i.Gateway.Spec.StateSecretRef.Name },
+		"replicas":          func(i *FreshInputs) { i.Gateway.Spec.Replicas = 2 },
 		"service collision": func(i *FreshInputs) { i.Gateway.Spec.DNS.ServiceName = "router-headless" }, "outside LB pool": func(i *FreshInputs) { i.Gateway.Spec.Service.LoadBalancerIP = "203.0.113.1" },
 		"label collision": func(i *FreshInputs) { i.Gateway.Spec.Service.PoolLabels[gatewayUIDLabel] = "foreign" },
 		"http control":    func(i *FreshInputs) { i.Tailnet.Spec.Server = "http://headscale.example" },
@@ -235,7 +235,13 @@ func TestRenderFreshRejectsUnsupported(t *testing.T) {
 			}
 		})
 	}
+	// deletionPolicy is consent metadata, not part of the rendered set.
 	in := freshFixture()
+	in.Gateway.Spec.DeletionPolicy = tnv1.GatewayDeletionPolicyDelete
+	if _, err := RenderFresh(in); err != nil {
+		t.Fatal("deletionPolicy=Delete must render")
+	}
+	in = freshFixture()
 	in.Gateway.Spec.DNS.ExtraZones = []tnv1.GatewayExtraZone{{Zone: "site.example"}}
 	if p, err := RenderFresh(in); !errors.Is(err, ErrDNSForwardingUnsupported) || len(p.Objects) != 0 {
 		t.Fatal("extra-zone gate bypassed")

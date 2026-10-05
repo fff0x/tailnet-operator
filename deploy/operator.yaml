@@ -134,14 +134,15 @@ rules:
     verbs: [get, list, watch, create, update, patch, delete]
   # Fresh Gateways use direct uncached get/create requests in this namespace.
   # delete serves deletionPolicy=Delete teardown only and is always sent with a
-  # UID precondition against the UID recorded at Create. No child informer,
-  # adoption, update or RBAC escalation (escalate/bind) is granted.
+  # UID precondition against the UID recorded at Create. Only the StatefulSet
+  # also gets update, to follow image/dns.image in spec.template (OnDelete never
+  # restarts the Pod). No child informer, adoption or RBAC escalation (escalate/bind).
   - apiGroups: [""]
     resources: [serviceaccounts]
     verbs: [get, create, delete]
   - apiGroups: ["apps"]
     resources: [statefulsets]
-    verbs: [get, create, delete]
+    verbs: [get, create, update, delete]
   - apiGroups: ["policy"]
     resources: [poddisruptionbudgets]
     verbs: [get, create, delete]

@@ -41,7 +41,7 @@ bindings: a RoleBinding limits its role to that namespace, a ClusterRoleBinding 
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `pods` | `get`, `list`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `serviceaccounts` | `create`, `delete`, `get` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `apps` | `deployments` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
-| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `apps` | `statefulsets` | `create`, `delete`, `get` | all names | — |
+| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `apps` | `statefulsets` | `create`, `delete`, `get`, `update` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `coordination.k8s.io` | `leases` | `create`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `networking.k8s.io` | `networkpolicies` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `policy` | `poddisruptionbudgets` | `create`, `delete`, `get` | all names | — |
