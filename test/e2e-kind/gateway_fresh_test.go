@@ -403,10 +403,13 @@ func TestGatewayFreshPod(t *testing.T) {
 	create(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: tn.Name + "-apikey", Namespace: namespace}, Data: map[string][]byte{"apiKey": []byte(apiKey)}})
 	hs := headscale.New(apiURL, apiKey)
 	apiKey = ""
-	create(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: tn.Spec.DNS.HostsConfigMap, Namespace: namespace,
+	// Seed with a different address than the probe expects; the DNS live
+	// reconciler must update the derived zone to the probe target below.
+	hosts := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: tn.Spec.DNS.HostsConfigMap, Namespace: namespace,
 		Labels:          map[string]string{"app.kubernetes.io/managed-by": "tailnet-operator", "tsunaro.io/role": "dns-hosts"},
 		OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(tn, tnv1.GroupVersion.WithKind("Tailnet"))}},
-		Data: map[string]string{"hosts": "198.51.100.8 app.tail.example\n"}})
+		Data: map[string]string{"hosts": "198.51.100.7 app.tail.example\n"}}
+	create(hosts)
 	g := &tnv1.TailnetGateway{ObjectMeta: metav1.ObjectMeta{Name: "gateway-fixture"}, Spec: tnv1.TailnetGatewaySpec{
 		TailnetRef: tnv1.GatewayLocalReference{Name: tnv1.GatewayName(tn.Name)}, Hostname: "gateway-fixture", Suspend: ptr.To(false),
 		StateSecretRef: tnv1.GatewayLocalReference{Name: "gateway-state"},
@@ -456,6 +459,42 @@ func TestGatewayFreshPod(t *testing.T) {
 	if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: g.Name}, sts) != nil || !receipt.ownsStatefulSet(sts) {
 		t.Fatal("controller-created StatefulSet provenance rejected")
 	}
+
+	// Live DNS: write the probe-matching record and verify the controller
+	// advances the derived zone's SOA serial through the public UpdateDNSRevision
+	// path, without touching any other receipt child.
+	coreDNSBefore := &corev1.ConfigMap{}
+	if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: g.Name + "-coredns"}, coreDNSBefore) != nil || coreDNSBefore.Annotations["tsunaro.io/dns-serial"] != "1" {
+		t.Fatal("initial derived zone did not record CAS annotations")
+	}
+	if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: tn.Spec.DNS.HostsConfigMap}, hosts) != nil {
+		t.Fatal("hosts source disappeared before live DNS update")
+	}
+	hosts.Data = map[string]string{"hosts": "198.51.100.8 app.tail.example\n"}
+	if f.kube.Update(ctx, hosts) != nil {
+		t.Fatal("hosts source update rejected")
+	}
+	coreDNSAfter := &corev1.ConfigMap{}
+	eventually(t, "live DNS reconcile advances the derived zone", func() bool {
+		reconcile()
+		if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: g.Name + "-coredns"}, coreDNSAfter) != nil {
+			return false
+		}
+		if dns := meta.FindStatusCondition(g.Status.Conditions, "DNSReady"); dns == nil || dns.Reason != "DNSInSync" {
+			return false
+		}
+		return coreDNSAfter.Annotations["tsunaro.io/dns-serial"] == "2" && strings.Contains(coreDNSAfter.Data["zone.db"], "198.51.100.8")
+	})
+	pf.save("gateway-dns-live.json", map[string]any{
+		"source":  map[string]string{"name": hosts.Name, "uid": string(hosts.UID), "resourceVersion": hosts.ResourceVersion},
+		"before":  map[string]string{"serial": coreDNSBefore.Annotations["tsunaro.io/dns-serial"], "hash": coreDNSBefore.Annotations["tsunaro.io/dns-content-sha256"], "uid": string(coreDNSBefore.UID), "resourceVersion": coreDNSBefore.ResourceVersion},
+		"after":   map[string]string{"serial": coreDNSAfter.Annotations["tsunaro.io/dns-serial"], "hash": coreDNSAfter.Annotations["tsunaro.io/dns-content-sha256"], "uid": string(coreDNSAfter.UID), "resourceVersion": coreDNSAfter.ResourceVersion},
+		"zoneHas": strings.Contains(coreDNSAfter.Data["zone.db"], "198.51.100.8"),
+	})
+	if coreDNSBefore.UID != coreDNSAfter.UID {
+		t.Fatal("live reconcile replaced the derived ConfigMap")
+	}
+
 	var first gateway.GatewayStateBinding
 	var previousUID types.UID
 	for _, phase := range []string{"initial", "recreated"} {

@@ -327,6 +327,7 @@ func TestGatewayFreshWriter(t *testing.T) {
 	}
 
 	gatewayTeardownCases(t, newFixture)
+	gatewayDNSLiveCases(t, newFixture, admin, ctx)
 }
 
 func gatewayWriterMust(t *testing.T, err error, message string) {
@@ -618,6 +619,14 @@ func (f *gatewayWriterFixture) assertComplete() {
 				gatewayWriterMust(f.t, json.Unmarshal(encoded, &payload), "decode admitted child payload")
 				for _, field := range []string{"apiVersion", "kind", "metadata", "status"} {
 					delete(payload, field)
+				}
+				// The derived DNS zone is reconciled live from the Tailnet hosts
+				// source, so the completion fingerprint excludes it; the fresh
+				// writer and this re-computation drop the same key.
+				if ref.Kind == "ConfigMap" && strings.HasSuffix(ref.Name, "-coredns") {
+					if data, ok := payload["data"].(map[string]any); ok {
+						delete(data, "zone.db")
+					}
 				}
 				encoded, err = json.Marshal(payload)
 				gatewayWriterMust(f.t, err, "encode exact child payload digest")
