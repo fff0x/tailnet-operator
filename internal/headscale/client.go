@@ -250,9 +250,10 @@ func (c *Client) CreatePreAuthKey(ctx context.Context, req CreatePreAuthKeyReque
 	return &out.PreAuthKey, nil
 }
 
-// ExpirePreAuthKey stops a pre-auth key from registering further nodes.
-func (c *Client) ExpirePreAuthKey(ctx context.Context, key string) error {
-	return c.do(ctx, http.MethodPost, "/api/v1/preauthkey/expire", map[string]string{"key": key}, nil)
+// ExpirePreAuthKey stops a pre-auth key from registering further nodes. Headscale
+// 0.26+ addresses keys by numeric ID (protojson accepts the uint64 as a string).
+func (c *Client) ExpirePreAuthKey(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/preauthkey/expire", map[string]string{"id": id}, nil)
 }
 
 // CreateAPIKey mints an API key and returns the full secret (prefix.secret). It is shown once.

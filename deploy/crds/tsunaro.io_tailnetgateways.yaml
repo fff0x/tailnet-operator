@@ -54,9 +54,10 @@ spec:
           spec:
             description: |-
               TailnetGatewaySpec is an experimental API contract, suspended by default.
-              Explicit suspend=false opts into the fresh writer, not adoption. Retention is
-              the only deletion policy; adoption never implies consent to replace a pod,
-              reset state, rename nodes or remove stale nodes.
+              Explicit suspend=false opts into the fresh writer, not adoption. Deletion
+              retains everything unless deletionPolicy=Delete explicitly consents to tearing
+              down the operator's own fresh resources; adoption never implies consent to
+              replace a pod, reset state, rename nodes or remove stale nodes.
             properties:
               adoption:
                 description: |-
@@ -145,8 +146,15 @@ spec:
                 type: object
               deletionPolicy:
                 default: Retain
+                description: |-
+                  Retain leaves every resource, node and key in place when the CR is deleted.
+                  Delete records consent through a finalizer: the operator removes only the
+                  fresh resources it created (matched by recorded UID or its own gateway-uid
+                  label), the Headscale node and the minted bootstrap key, in a fixed order
+                  and fail-closed. Adopted or user-supplied objects are never deleted.
                 enum:
                 - Retain
+                - Delete
                 type: string
               dns:
                 description: |-

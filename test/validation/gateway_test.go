@@ -210,7 +210,7 @@ func TestGatewayAdmission(t *testing.T) {
 		{"dotted-dns-service", "dns.serviceName", "router.dns"},
 		{"long-dns-service", "dns.serviceName", strings.Repeat("a", 64)},
 		{"numeric-dns-service", "dns.serviceName", "1router-dns"}, {"invalid-class", "service.loadBalancerClass", "example.com/a/b"},
-		{"replicas-zero", "replicas", int64(0)}, {"replicas-two", "replicas", int64(2)}, {"deletion", "deletionPolicy", "Delete"},
+		{"replicas-zero", "replicas", int64(0)}, {"replicas-two", "replicas", int64(2)}, {"deletion-unknown", "deletionPolicy", "Orphan"},
 		{"lb-outside", "service.loadBalancerIP", "10.2.0.53"}, {"lb-family", "service.loadBalancerIP", "fd00::53"}, {"empty-lan", "routes.lan", []any{}},
 		{"dns-shell", "dns.zone", "tail.example;id"}, {"dns-upstream-shell", "dns.extraZones", []any{map[string]any{"zone": "extra.example", "upstreams": []any{"10.0.0.1;id"}}}},
 		{"primary-overlap", "dns.extraZones", []any{map[string]any{"zone": "sub.tail.example", "upstreams": []any{"10.0.0.1"}}}},

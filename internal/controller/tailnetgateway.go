@@ -8,8 +8,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/gateway"
 )
 
 // TailnetGatewayReconciler keeps suspension read-only and explicitly opts fresh
@@ -39,12 +41,29 @@ func (r *TailnetGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		return ctrl.Result{}, &gatewayAPIError{operation: "resource read", cause: err}
 	}
+	runtime := r.RuntimeClient != nil && r.OperatorNamespace != ""
 	if !gw.DeletionTimestamp.IsZero() {
 		// Retain: no finalizer, garbage-collection ownership, or cleanup of state,
 		// workloads or nodes, including resources created by the fresh writer.
-		return ctrl.Result{}, nil
+		// Only a finalizer recorded under deletionPolicy=Delete authorizes teardown.
+		if !runtime || !controllerutil.ContainsFinalizer(&gw, gateway.TeardownFinalizer) {
+			return ctrl.Result{}, nil
+		}
+		return r.reconcileTeardown(ctx, req)
 	}
-	if gw.Spec.Suspend != nil && !*gw.Spec.Suspend && r.RuntimeClient != nil && r.OperatorNamespace != "" {
+	// The finalizer mirrors deletionPolicy=Delete; it is the only CR metadata write.
+	if want := runtime && gw.Spec.DeletionPolicy == tnv1.GatewayDeletionPolicyDelete; want != controllerutil.ContainsFinalizer(&gw, gateway.TeardownFinalizer) {
+		before := gw.DeepCopy()
+		if want {
+			controllerutil.AddFinalizer(&gw, gateway.TeardownFinalizer)
+		} else {
+			controllerutil.RemoveFinalizer(&gw, gateway.TeardownFinalizer)
+		}
+		if err := r.Patch(ctx, &gw, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
+			return ctrl.Result{}, &gatewayAPIError{operation: "finalizer write", cause: err}
+		}
+	}
+	if gw.Spec.Suspend != nil && !*gw.Spec.Suspend && runtime {
 		return r.reconcileFresh(ctx, req)
 	}
 	before := gw.DeepCopy()
