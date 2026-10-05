@@ -60,8 +60,8 @@ func mintRecordData(g *tnv1.TailnetGateway, tn *tnv1.Tailnet, namespace string, 
 	return data, nil
 }
 
-// storeGatewayMintRecord is an UNCONNECTED persistence experiment, not a writer
-// authorization or cross-object transaction. Its Client must perform uncached
+// storeGatewayMintRecord persists fresh auth provenance, not workload
+// authorization or a cross-object transaction. Its Client must perform uncached
 // API reads. It never mints, adopts, patches, deletes or starts workloads.
 // Only a successful Secret Create response can seed the separate immutable
 // receipt. Partial writes remain retained and blocked; no compensating deletion

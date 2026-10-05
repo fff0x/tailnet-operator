@@ -25,7 +25,7 @@ var ErrGatewayAuthStore = errors.New("gateway auth bootstrap: exclusive key stor
 
 const gatewayAuthKeyField = "TS_AUTHKEY"
 
-// storeGatewayMint is package-private and uncalled by the production manager.
+// storeGatewayMint is the fresh writer's package-private auth persistence step.
 // It stores only a freshly returned key from the selected Headscale client;
 // no pre-existing Secret is ever adopted or overwritten. API Create is the
 // name-exclusivity gate. An orphaned minted key after a crash or failed Create

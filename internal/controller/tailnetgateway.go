@@ -12,12 +12,13 @@ import (
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
-// TailnetGatewayReconciler reports suspension only. Admission currently requires
-// suspend=true; even a bypassed/older CR cannot activate a workload writer. No
-// child, Secret, Tailnet or Headscale reads are necessary to honor suspension.
-// Persistent gateway identity must never use the ephemeral agent lifecycle.
+// TailnetGatewayReconciler keeps suspension read-only and explicitly opts fresh
+// gateways into a create-only retained lifecycle, never the ephemeral agent path.
 type TailnetGatewayReconciler struct {
 	client.Client
+	// RuntimeClient bypasses the cache for all provenance and exclusivity checks.
+	RuntimeClient     client.Client
+	OperatorNamespace string
 }
 
 // gatewayAPIError retains classification without exposing API response bodies,
@@ -40,8 +41,11 @@ func (r *TailnetGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	if !gw.DeletionTimestamp.IsZero() {
 		// Retain: no finalizer, garbage-collection ownership, or cleanup of state,
-		// workloads or nodes. This controller never created any of those.
+		// workloads or nodes, including resources created by the fresh writer.
 		return ctrl.Result{}, nil
+	}
+	if gw.Spec.Suspend != nil && !*gw.Spec.Suspend && r.RuntimeClient != nil && r.OperatorNamespace != "" {
+		return r.reconcileFresh(ctx, req)
 	}
 	before := gw.DeepCopy()
 	reason := "Suspended"
@@ -75,7 +79,7 @@ func (r *TailnetGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 func (r *TailnetGatewayReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Observe status updates too: repair stale Ready=True, then the equality
-	// guard stops our own status event. No child informer or periodic polling.
+	// guard stops our own status event. Active gateways also poll uncached children.
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("tailnetgateway").
 		For(&tnv1.TailnetGateway{}).
