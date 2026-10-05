@@ -8,31 +8,36 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestGatewayAuthReceiptRejectsRebinding(t *testing.T) {
 	c, g, tn, req, key, minted := authStoreFixture(t)
-	if err := storeGatewayMint(t.Context(), c, "operator", g, tn, req, key, minted); err != nil {
+	created, err := storeGatewayMint(t.Context(), c, "operator", g, tn, req, key, minted)
+	if err != nil {
 		t.Fatal("cannot prepare synthetic minted Secret")
 	}
 	secret := &corev1.Secret{}
-	if c.Get(t.Context(), types.NamespacedName{Name: "router-auth", Namespace: "operator"}, secret) != nil {
+	if c.Get(t.Context(), client.ObjectKey{Name: "router-auth", Namespace: "operator"}, secret) != nil {
 		t.Fatal("synthetic Secret missing")
 	}
-	const createdUID types.UID = "server-assigned-uid" // fake client does not assign a UID on Create.
-	secret.UID = createdUID
+	createdUID := created.UID // Captured by storage from Create, not this Get.
+	if createdUID == "" || secret.UID != createdUID {
+		t.Fatal("Create UID was not captured independently")
+	}
 	now := minted.Add(time.Minute)
 	receipt, err := ReadGatewayAuthReceipt(secret, g, tn, "operator", createdUID, now)
 	if err != nil || receipt.UID != secret.UID || receipt.Version == "" || receipt.SecretName != secret.Name || receipt.KeyID != key.ID || !receipt.Expires.Equal(key.Expiration) || strings.Contains(receipt.SecretName+receipt.KeyID, key.Key) {
 		t.Fatal("stored receipt rejected or credential exposed")
 	}
 	for name, mutate := range map[string]func(*corev1.Secret){
-		"missing key": func(s *corev1.Secret) { delete(s.Data, gatewayAuthKeyField) },
-		"extra key":   func(s *corev1.Secret) { s.Data["extra"] = []byte("private") },
-		"mutable":     func(s *corev1.Secret) { s.Immutable = nil },
-		"blank uid":   func(s *corev1.Secret) { s.UID = "" },
+		"missing key":      func(s *corev1.Secret) { delete(s.Data, gatewayAuthKeyField) },
+		"credential in ID": func(s *corev1.Secret) { s.Annotations["tsunaro.io/auth-key-id"] = key.Key },
+		"noncanonical ID":  func(s *corev1.Secret) { s.Annotations["tsunaro.io/auth-key-id"] = "017" },
+		"extra key":        func(s *corev1.Secret) { s.Data["extra"] = []byte("private") },
+		"mutable":          func(s *corev1.Secret) { s.Immutable = nil },
+		"blank uid":        func(s *corev1.Secret) { s.UID = "" },
 		"recreated": func(s *corev1.Secret) {
 			s.UID = "recreated-uid"
 			s.ResourceVersion = "new-version"

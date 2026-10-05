@@ -44,7 +44,7 @@ func ReadGatewayAuthReceipt(secret *corev1.Secret, g *tnv1.TailnetGateway, tn *t
 		secret.Type != corev1.SecretTypeOpaque || len(secret.OwnerReferences) != 0 || len(secret.StringData) != 0 ||
 		len(secret.Data) != 1 || len(secret.Data[gatewayAuthKeyField]) == 0 || len(secret.Data[gatewayAuthKeyField]) > 4096 ||
 		secret.Labels[gatewayUIDLabel] != string(g.UID) || secret.Labels["app.kubernetes.io/managed-by"] != "tailnet-operator" ||
-		secret.Annotations["tsunaro.io/tailnet-uid"] != string(tn.UID) || secret.Annotations["tsunaro.io/auth-key-id"] == "" {
+		secret.Annotations["tsunaro.io/tailnet-uid"] != string(tn.UID) || !validGatewayKeyID(secret.Annotations["tsunaro.io/auth-key-id"]) {
 		return bad()
 	}
 	server := sha256.Sum256([]byte(tn.Spec.Server))
