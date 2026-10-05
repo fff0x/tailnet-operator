@@ -114,7 +114,7 @@ server binding; an absent node and an empty Secret are not such proof.
 `PlanGatewayMint` and `ValidateGatewayMint` model the alternative: request a
 reusable, **non-ephemeral** key with exact tags and a bounded 24-hour expiry from
 the selected authenticated Headscale client, then reject a response with the
-wrong flags, tags or expiry. These helpers do not call Headscale, persist a
+wrong flags, tags or expiry, or a noncanonical numeric key ID. These helpers do not call Headscale, persist a
 Secret or authorize a Pod. If minting succeeds but the Secret write fails, the
 orphaned key expires; the controller must re-read before retrying and must not
 infer ownership from a masked key list. A package-private `storeGatewayMint`
@@ -126,10 +126,47 @@ production manager has no path to call it. `ReadGatewayAuthReceipt` checks the
 retained Secret's UID/revision, immutability, scope hashes, key presence and
 expiration without returning key bytes. The caller must supply an independently
 captured, durable Create-time Secret UID; using the read Secret's own UID is
-not a recreation check. No crash-safe UID receipt or cross-object transaction
-exists yet. These Kubernetes annotations are **not**
+not a recreation check. These Kubernetes annotations are **not**
 a Headscale-signed proof of the full credential; restrictive Secret-write RBAC
 and later state-to-node verification remain necessary.
+
+The package-private `storeGatewayMintRecord` experiment captures the Secret UID
+and revision from a successful **Create response**, never from a later Get.
+It rejects returned key bytes, key ID or expiry that differ from the mint response.
+It then exclusively creates an immutable, ownerless `<gateway>-auth-receipt`
+ConfigMap in the operator namespace. This record is separate from the nine rendered
+resources and contains no credential bytes or credential hash. Its versioned schema
+binds the Gateway and Tailnet names, UIDs, exact revisions and complete typed-spec
+hashes to the Secret name, Create UID/revision, numeric key ID and absolute expiry.
+Spec hashes use `encoding/json`: sorted map keys, original list order and the
+Go types' default/omission semantics. Only admitted snapshots belong in this protocol.
+
+`readGatewayMintRecord` uses explicit uncached reads and checks the trusted record
+before accepting the Secret. Missing records, replaced Secrets, unknown schema
+fields, expiry or changed scope block recovery. **Even metadata/status-only CR
+updates or Secret metadata updates block reuse**, because revisions must match.
+This is a conservative persistence experiment, not a production lifecycle protocol.
+The ConfigMap is the durable trust anchor: its create/update/delete permissions
+must be restricted as strictly as the Secret's. Immutability does not prevent
+an authorized actor from deleting and forging both objects. Recording the
+ConfigMap's own UID inside itself would not resolve that trust requirement.
+No deployment permissions or controller wiring change for this experiment.
+
+Failure handling does not adopt, overwrite, delete or remint:
+
+- Secret Create response lost: no UID evidence; any persisted Secret remains blocked.
+- Secret exists without a record: never reconstruct the record from Secret metadata.
+- Record Create response lost: that attempt reports failure; a later read may verify
+  an already persisted, trusted record.
+- Scope changes between writes: partial objects remain retained; they do not authorize a Pod.
+
+Isolated Kubernetes 1.31 tests exercise persistence through a new client, competing
+writers, response loss, Create-time mutation, dry-run, immutability and UID replacement.
+Their explicit test adapter changes only in-memory suspend observations; admission
+still rejects activation. Run them with `task test-validation` and explicit envtest
+assets. These tests do not prove process restart, production crash recovery or
+cross-object atomicity. Sequential rechecks cannot close every race, and a durable
+record does not prove that postflight checks completed. No production writer is enabled.
 
 `VerifyGatewayState` is a disconnected post-registration check. For a retained
 state Secret with the inventoried UID, it reads `_machinekey` and the active
@@ -138,8 +175,9 @@ online Headscale node with matching public keys, name, tags and address; for a
 new mint it can also require the issued key ID. The receipt contains only node
 ID, IPv4 and Secret UID/revision. This reads **private Tailscale key material in
 operator memory**; it never returns or logs it. The Go module pins Tailscale
-1.94.1 while the modeled kernel image is 1.102.4: state-layout compatibility
-needs a real image/Headscale E2E proof before this can affect Ready or adoption.
+1.94.1 while the modeled kernel image is 1.102.4. The isolated fresh-Pod gate
+below verifies this state layout against Headscale 0.29.3 on Linux amd64,
+including Pod recreation. This is not production Ready or adoption evidence.
 It does not establish service, DNS or route health, and the controller still
 does not invoke it. A caller must not use this diagnostic receipt as a writer
 authorization. Read snapshots
@@ -174,8 +212,10 @@ A later route update that adds a family needs a new runtime prerequisite check.
 
 For fresh state, bootstrap uses `TS_AUTH_ONCE=false`, `--reset` and explicit
 `--accept-routes=false`. Tailscale 1.102.4 does not apply all `TS_EXTRA_ARGS` through
-its `TS_AUTH_ONCE=true` restart path. This model never resets an adopted node.
-There is no `--force-reauth`, ephemeral-key minting or offline-node deletion.
+its `TS_AUTH_ONCE=true` restart path. Tags come from the verified bootstrap key,
+not `--advertise-tags`: Headscale 0.29.3 rejects requested tags on pre-auth-key
+registration, even when they match the key. This model never resets an adopted
+node. There is no `--force-reauth`, ephemeral-key minting or offline-node deletion.
 
 Routes include mandatory LAN and LB prefixes plus optional scoped literal egress
 addresses. DNS targets are not resolved. Only non-deleting egress CRs from the
@@ -235,9 +275,49 @@ fixture release. The latter's
 UID-65532/no-HostPath/no-added-capabilities contract remains unchanged.
 
 Offline contract tests also check the actual `RenderFresh` pod shape, but are
-**not** a running kernel gateway or a TUN permission proof. A future isolated fixture must still bind and release the
-live Pod with the runner before starting a kernel process. Writer, bootstrap,
-identity and routing proofs remain open.
+**not** a running kernel gateway or a TUN permission proof. The separate fresh-Pod
+gate below binds and releases the live Pod before starting its kernel preflight.
+Production writer, credential provenance, routing and adoption remain open.
+
+### Isolated fresh-Pod bootstrap gate
+
+```sh
+systemd-run --user --scope -p Delegate=yes -- \
+  bash hack/e2e-kind-projection.sh --gateway-fresh-only
+```
+
+This opt-in selection has a 10-minute test budget, plus setup and cleanup. It
+requires the runner's existing assets and the pinned gateway OCI archives
+listed in the [Kind suite requirements](../../test/e2e-kind/README.md#requirements).
+The runner verifies archive contents, platform/config digests and imported CRI
+references before creating the Pod. A containerd archive-index alias is accepted
+only when it belongs to that same verified image configuration.
+
+`TestGatewayFreshPod` uses real Tailscale 1.102.4, CoreDNS 1.14.6 and Headscale
+0.29.3. Test-admin code renders admitted, suspended CRs and creates a Pod from
+the fresh StatefulSet template; no gateway controller or StatefulSet is started.
+The Pod gets fixture-only overrides: `PullNever`, the public fixture control CA,
+IPv4 forwarding via the permitted namespaced sysctl, a short termination grace,
+and `fsGroup: 65532` for the unprivileged gate's private EmptyDir. This does not
+change the production template's security context. TUN, token and state mounts
+remain isolated from CoreDNS and the gate.
+
+The dedicated two-app/two-init startup contract preserves the existing single-app
+contract. It checks the gate before `kernel-preflight`, rejects early execution,
+requires successful preflight and binds both running images with zero restarts.
+Both contracts share the same live UID/node/network proof and expiring approval.
+
+On Linux amd64, the gate verifies a non-ephemeral tagged key, private state-to-node
+binding, readiness and advertisement of the LAN and LB route prefixes. It then
+deletes only the owned Pod and creates a new Pod with the same state Secret.
+The new Pod must retain the Secret UID, Headscale node ID and IPv4, pass a new
+startup proof and establish the same state-to-node binding. Private key bytes
+remain in memory and are not written to evidence.
+
+This does **not** prove route approval or packet forwarding, DNS answers/reload,
+egress-derived host routes, IPv6 routing, arm64 execution, crash-safe writer
+recovery, CR-deletion retention or interruption-free adoption. The API remains
+suspend-only; passing the fixture does not authorize the production controller.
 
 ## Fresh DNS rendering: partial implementation
 
@@ -280,6 +360,18 @@ Before runtime integration, the caller must:
   from the suspend-only controller and the installed admission contract. Cross-
   object source/target writes are not atomic; source watches, initial creation,
   proven field ownership and live DNS checks are still required.
+
+  `TestDNSUpdateAPICAS` exercises this helper against an isolated Kubernetes 1.31
+  API server in `task test-validation` and CI. It checks real resource-version
+  conflicts, source/serial recomputation, preservation of concurrent metadata,
+  three-attempt limits for target conflicts and source changes, and no-op behavior
+  after a conflict or with a new client. Deleted
+  or immutable targets are not recreated or replaced. The production CRD remains
+  unchanged and rejects `suspend: false`. A test-only client changes the in-memory
+  suspend observation to reach the helper; unmodified observations still block it.
+  This proves ConfigMap CAS behavior, not an admitted runtime, process restart,
+  exclusive ownership, cross-object atomicity or live DNS reload.
+
 - Project the configuration directory without `subPath` and set CoreDNS's working
   directory to `/etc/coredns`. The file plugin checks for zone updates each second.
 - Select supported bind addresses explicitly and verify the actual image, Service
