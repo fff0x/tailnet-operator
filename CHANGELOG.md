@@ -4,6 +4,27 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- `TailnetGateway.spec.deletionPolicy: Delete` tears down the operator-created fresh
+  resources on CR deletion: StatefulSet first, then the Headscale node and the minted
+  bootstrap key, then the receipt children by recorded UID and the state/auth Secrets
+  and receipts last. Every delete is UID-preconditioned; foreign objects or Headscale
+  errors block with `Ready=False/TeardownBlocked` and nothing further is removed.
+  Switching back to `Retain` releases the finalizer. `Retain` stays the default and
+  still deletes nothing.
+
+### Changed
+
+- Chart RBAC: namespace-local `delete` on StatefulSets, PodDisruptionBudgets,
+  ServiceAccounts, Roles and RoleBindings, and `patch` on `tailnetgateways` for the
+  teardown finalizer.
+
+### Fixed
+
+- Headscale client: expire pre-auth keys by numeric ID as Headscale 0.26+ requires;
+  the previous `key` field was silently ignored and expired nothing.
+
 ## [0.7.1] - 2026-10-05
 
 ### Fixed
