@@ -24,7 +24,7 @@ import (
 	"tsunaro.io/tailnet-operator/test/internal/isolation"
 )
 
-// Admission proves only the suspended API contract, not ownership or node identity.
+// Admission proves default suspension and explicit activation, not ownership or node identity.
 func TestGatewayAdmission(t *testing.T) {
 	must := func(err error) {
 		t.Helper()
@@ -110,6 +110,22 @@ func TestGatewayAdmission(t *testing.T) {
 		unstructured.RemoveNestedField(o.Object, "spec", "authKeySecretRef")
 		check(t, o, true)
 	})
+	t.Run("explicit-activation", func(t *testing.T) {
+		o := fresh()
+		o.SetName("active-gateway")
+		set(o, "spec.suspend", false)
+		must(c.Create(ctx, o))
+		t.Cleanup(func() { must(c.Delete(ctx, o)) })
+		for _, suspend := range []bool{false, true, false} {
+			set(o, "spec.suspend", suspend)
+			must(c.Update(ctx, o))
+			must(c.Get(ctx, client.ObjectKeyFromObject(o), o))
+			got, found, err := unstructured.NestedBool(o.Object, "spec", "suspend")
+			if err != nil || !found || got != suspend {
+				t.Fatalf("explicit suspend=%t was not preserved", suspend)
+			}
+		}
+	})
 	t.Run("version-pinned-images", func(t *testing.T) {
 		for _, pin := range []string{"ghcr.io/tailscale/tailscale:v1.102.4", "coredns/coredns:1.14.7", "example.invalid/socat:1.8.0.3-r2"} {
 			o := fresh()
@@ -194,7 +210,7 @@ func TestGatewayAdmission(t *testing.T) {
 		{"dotted-dns-service", "dns.serviceName", "router.dns"},
 		{"long-dns-service", "dns.serviceName", strings.Repeat("a", 64)},
 		{"numeric-dns-service", "dns.serviceName", "1router-dns"}, {"invalid-class", "service.loadBalancerClass", "example.com/a/b"},
-		{"runtime-disabled", "suspend", false}, {"replicas-zero", "replicas", int64(0)}, {"replicas-two", "replicas", int64(2)}, {"deletion", "deletionPolicy", "Delete"},
+		{"replicas-zero", "replicas", int64(0)}, {"replicas-two", "replicas", int64(2)}, {"deletion", "deletionPolicy", "Delete"},
 		{"lb-outside", "service.loadBalancerIP", "10.2.0.53"}, {"lb-family", "service.loadBalancerIP", "fd00::53"}, {"empty-lan", "routes.lan", []any{}},
 		{"dns-shell", "dns.zone", "tail.example;id"}, {"dns-upstream-shell", "dns.extraZones", []any{map[string]any{"zone": "extra.example", "upstreams": []any{"10.0.0.1;id"}}}},
 		{"primary-overlap", "dns.extraZones", []any{map[string]any{"zone": "sub.tail.example", "upstreams": []any{"10.0.0.1"}}}},

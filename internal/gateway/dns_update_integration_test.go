@@ -26,9 +26,9 @@ import (
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
-// dnsAPIExerciseClient changes only the in-memory suspend observation. The real
-// CRD remains installed and rejects suspend=false. This is a ConfigMap CAS
-// experiment, NOT a runtime path or evidence that a suspended CR may write DNS.
+// dnsAPIExerciseClient changes only the in-memory suspend observation; stored
+// fixtures remain suspended. This is a ConfigMap CAS experiment, NOT evidence
+// that a suspended CR may write DNS.
 // All UIDs, resourceVersions, reads and writes otherwise come from the API server.
 // Hooks force deterministic races; they never manufacture API conflict errors.
 type dnsAPIExerciseClient struct {
@@ -167,12 +167,18 @@ func TestDNSUpdateAPICAS(t *testing.T) {
 		return current
 	}
 
-	t.Run("admission-and-suspend-remain-closed", func(t *testing.T) {
+	t.Run("activation-admitted-but-stored-suspension-blocks", func(t *testing.T) {
 		g, source, target := fixture(t, "dns-suspended")
 		changeSource(t, source, "203.0.113.9 changed.tail.example\n")
-		g.Spec.Suspend = ptr.To(false)
-		if err := admin.Update(ctx, g); !apierrors.IsInvalid(err) {
-			t.Fatal("real admission permitted runtime activation")
+		active := g.DeepCopy()
+		active.Spec.Suspend = ptr.To(false)
+		must(t, admin.Update(ctx, active, client.DryRunAll))
+		if active.Spec.Suspend == nil || *active.Spec.Suspend {
+			t.Fatal("real admission did not preserve explicit activation")
+		}
+		must(t, admin.Get(ctx, client.ObjectKeyFromObject(g), g))
+		if g.Spec.Suspend == nil || !*g.Spec.Suspend {
+			t.Fatal("dry-run activation changed stored suspension")
 		}
 		if err := updateDNSRevision(ctx, admin, g.Name, g.Name); !errors.Is(err, ErrDNSWriteBlocked) {
 			t.Fatal("real suspended observation permitted DNS write")

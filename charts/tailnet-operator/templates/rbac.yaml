@@ -19,7 +19,8 @@ rules:
   - apiGroups: ["tsunaro.io"]
     resources: [tailnetingresses/status]
     verbs: [get, update, patch]
-  # Gateway controller only reports suspension; no workload/finalizer rights.
+  # Gateway activation is explicit; fresh child creation is namespaced below.
+  # No Gateway spec or finalizer mutation is granted.
   - apiGroups: ["tsunaro.io"]
     resources: [tailnetgateways]
     verbs: [get, list, watch]
@@ -113,6 +114,20 @@ rules:
   - apiGroups: [""]
     resources: [secrets, configmaps, services]
     verbs: [get, list, watch, create, update, patch, delete]
+  # Fresh Gateways use direct uncached get/create requests in this namespace.
+  # No child informer, adoption, mutation, deletion or RBAC escalation is granted.
+  - apiGroups: [""]
+    resources: [serviceaccounts]
+    verbs: [get, create]
+  - apiGroups: ["apps"]
+    resources: [statefulsets]
+    verbs: [get, create]
+  - apiGroups: ["policy"]
+    resources: [poddisruptionbudgets]
+    verbs: [get, create]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [roles, rolebindings]
+    verbs: [get, create]
   # Scraped for /status and /targets to classify missing routes.
   - apiGroups: [""]
     resources: [pods]

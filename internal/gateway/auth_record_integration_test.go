@@ -25,7 +25,7 @@ import (
 )
 
 // The same explicit experiment boundary as the DNS CAS tests: only Gateway
-// Get snapshots become active in memory. Real admission remains suspend-only.
+// Get snapshots become active in memory; stored fixtures remain suspended.
 // Hooks inject response loss/races around REAL writes, never invent UIDs/RVs.
 type authRecordAPIClient struct {
 	client.Client
@@ -202,10 +202,17 @@ func TestGatewayAuthRecordAPI(t *testing.T) {
 		}
 	})
 
-	t.Run("real-suspension-and-admission-stay-closed", func(t *testing.T) {
+	t.Run("activation-admitted-but-stored-suspension-blocks", func(t *testing.T) {
 		g, tn, req, key, now := fixture(t, "auth-suspended")
-		if !apierrors.IsInvalid(admin.Update(ctx, g)) {
-			t.Fatal("real admission enabled runtime")
+		active := g.DeepCopy()
+		must(t, admin.Update(ctx, active, client.DryRunAll))
+		if active.Spec.Suspend == nil || *active.Spec.Suspend {
+			t.Fatal("real admission did not preserve explicit activation")
+		}
+		stored := &tnv1.TailnetGateway{}
+		must(t, admin.Get(ctx, client.ObjectKeyFromObject(g), stored))
+		if stored.Spec.Suspend == nil || !*stored.Spec.Suspend {
+			t.Fatal("dry-run activation changed stored suspension")
 		}
 		// Even forged active input cannot pass the ordinary client's live Get.
 		got, err := storeGatewayMintRecord(ctx, admin, g.Name, g, tn, req, key, func() time.Time { return now })
