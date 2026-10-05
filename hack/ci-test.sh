@@ -55,7 +55,7 @@ for binary in kube-apiserver etcd kubectl; do
   [[ -x "$KUBEBUILDER_ASSETS/$binary" ]] || { echo "missing envtest binary: $binary" >&2; exit 1; }
 done
 
-printf '\n== Kubernetes 1.31 admission ==\n'
-go test -tags=integration ./test/validation -count=1 -v -timeout=10m
+printf '\n== Kubernetes 1.31 admission and gateway persistence ==\n'
+go test -tags=integration ./test/validation ./internal/gateway -count=1 -v -timeout=10m
 printf '\n== Tier 1: real Headscale 0.28.0 / 0.29.3 ==\n'
 bash hack/e2e.sh
