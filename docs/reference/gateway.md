@@ -40,17 +40,14 @@ IPv6, extra DNS zones and TCP forwards remain unsupported by this writer.
 6. Observe the retained set. Report runtime Ready only after a running, Ready Pod matches
    the StatefulSet and its state binds to an online Headscale node with the advertised routes.
 
-The completion record binds Gateway/Tailnet UIDs, generations and full typed-spec hashes.
-Unlike the write-boundary checks, it permits later metadata/status-only CR revision changes.
-Without update/delete permissions for the new workload and RBAC resources, a created
-Gateway is effectively immutable. Even an API-admitted spec change invalidates its
-completion receipt and blocks reconciliation; the controller cannot update or replace
-the retained runtime.
-Changed specs/generations, replaced state/resources, payload drift or expired auth block observation.
-A suspend/resume cycle also changes generation and invalidates completion evidence;
-resuming an existing set is not implemented by this fresh-only slice.
-No keys are renewed and no resources are updated, adopted, compensated or deleted
-outside the explicit [Deletion](#deletion) consent.
+The completion record (format 2) binds Gateway/Tailnet UIDs and hashes of the
+[identity fields](#spec-updates), not generations or full specs. It permits later
+metadata/status-only CR revision changes and the mutable spec changes listed below.
+Replaced state/resources, payload drift, expired auth or a changed identity field block observation.
+A suspend/resume cycle no longer invalidates completion evidence.
+No keys are renewed and no resources are adopted, compensated or deleted
+outside the explicit [Deletion](#deletion) consent. The only workload write is
+the container-image reconcile described under [Spec updates](#spec-updates).
 Partial creation without a complete receipt remains blocked, even if a workload started.
 A lost completion response may be recovered only when the complete immutable record actually exists.
 These are sequential checks, not a transaction or a general crash-recovery protocol.
@@ -401,9 +398,8 @@ auth Secrets, receipts, Headscale node and bootstrap key stay. Clean up by hand.
 Setting `Delete` on an active (non-suspended) Gateway adds the finalizer
 `tsunaro.io/gateway-teardown` on the next reconcile. Switching back to `Retain`
 removes it again, also while the CR is already terminating: that is the escape hatch
-when a teardown is blocked. Changing the policy changes the generation and therefore
-invalidates the completion receipt; a running Gateway keeps running but reports
-`FreshBlocked` until it is deleted. Flip the policy immediately before deleting.
+when a teardown is blocked. The policy is consent, not identity: flipping it does
+not touch the completion receipt, and a running Gateway stays Ready.
 
 On deletion with the finalizer present the controller tears down, in this order and
 fail-closed, only what this Gateway provably created:
@@ -464,6 +460,52 @@ other key stay digest-bound and still trip `FreshBlocked` on drift. The
 not make the gateway Ready, and a blocked DNS reconcile does not revoke it. The
 receipt ConfigMaps still demand the trust of a Secret; whoever can rewrite the
 `-coredns` annotations can forge zone provenance.
+
+## Spec updates
+
+A completed Gateway tolerates spec changes by field class. The receipt (format 2)
+pins an identity hash of the fields whose change would need a new node or a new
+runtime shape; everything else is either reconciled or irrelevant to the retained set.
+
+| Class | Fields | Effect of a change |
+|---|---|---|
+| Pinned identity | `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `routes.*`, `service.*`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP`, `dns.extraZones`, `forwardImage`, `forwards`; Tailnet `spec.server` and `spec.dns.hostsConfigMap` | `Ready=False/IdentityChanged`; nothing is written. Revert the field, or delete with `deletionPolicy: Delete` and recreate. |
+| Live DNS | `dns.staticRecords`, `dns.wildcardAddress`, the hosts source | Re-rendered into `zone.db` ([Live DNS reconcile](#live-dns-reconcile)). |
+| Images | `image` (tailscale and kernel-preflight), `dns.image` | Written into `spec.template` of the receipt StatefulSet; see below. |
+| Consent / lifecycle | `deletionPolicy`, `suspend` | No effect on the receipt. |
+| Other Tailnet fields | everything except `server` and `dns.hostsConfigMap` | No effect on the receipt. |
+
+Routes stay pinned until a route reconciler exists. Receipts written before format 2
+(releases up to 0.8.0) report `IdentityChanged`; migrate by deleting with
+`deletionPolicy: Delete` and recreating.
+
+**Images.** `UpdateWorkloadRevision` rewrites only the container `image` fields of the
+StatefulSet template, after re-verifying the receipt UID and the image-less digest, with
+the observed `resourceVersion` as CAS. The StatefulSet uses `OnDelete`: the operator
+never restarts the Pod. The `WorkloadCurrent` condition reports the result:
+
+- `True / PodCurrent` — the running Pod already uses the wanted images.
+- `False / PodTemplateStale` — the template follows the spec; delete Pod `<gateway>-0`
+  to apply it. The running Pod keeps serving and `Ready` is unaffected.
+- `False / WorkloadUpdateConflict` — concurrent change; the next reconcile retries.
+- `False / WorkloadUpdateBlocked` — StatefulSet or receipt is not verified; nothing is written.
+
+The condition is absent while suspended, terminating or before a completion receipt.
+The StatefulSet digest in the receipt covers everything except container images:
+selector, `serviceName`, `updateStrategy`, `replicas` and every other template field
+(command, env, volumes, security context, labels) still trip `FreshBlocked` on drift.
+
+Ready no longer requires the Pod to match the current template (it may legitimately
+predate an image change); it requires StatefulSet ownership by UID, the gateway and
+state-UID labels, the service account, running and Ready containers, a verified state
+binding and the advertised routes. The `update` verb on `statefulsets` is the only
+write right added for this; it is never used on other kinds.
+
+Envtest covers the controller path against a real API server with a synthetic Pod.
+Kind proves, with the real StatefulSet controller, that an `image` change updates the
+template, reports `PodTemplateStale`, keeps the Pod UID and container IDs, and
+converges back after reverting. Rolling a Pod onto a *different* image is not proven in
+kind: the startup gate binds the exact pinned reference.
 
 ## Fresh DNS rendering: partial implementation
 
@@ -586,7 +628,7 @@ While suspended, the controller sets `Ready=False/Suspended` and the other liste
 these are not fresh observations. `observedGeneration` means the suspension was
 processed, not that configuration was applied. Unrelated conditions are preserved.
 A nil suspend value is treated as true. With explicit `false`, the minimal writer
-reports `Provisioning`, `FreshBlocked`, missing dependencies, or `FreshRuntimeReady`.
+reports `Provisioning`, `FreshBlocked`, `IdentityChanged`, missing dependencies, or `FreshRuntimeReady`.
 `Registered`, `DNSReady` and `Ready` describe verified identity plus Pod/listener
 health, not DNS query results. Route approval, stale-node management and cluster
 DNS forwarding stay `Unknown/ExternallyManaged`. No fresh Service-IP allocation

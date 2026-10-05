@@ -58,8 +58,14 @@ The development `TailnetGateway` CRD defaults to `suspend: true`. Explicit `fals
 activates fresh-only IPv4 creation; existing gateways are never adopted or replaced.
 The operator/chart require this fourth CRD, gateway read/status authorization and
 operator-namespace get/create/delete for StatefulSets, PDBs, ServiceAccounts, Roles and
-RoleBindings plus `patch` on `tailnetgateways` for the teardown finalizer. No update
-rights are added. Suspension freezes reconciliation, not the running Pod.
+RoleBindings plus `patch` on `tailnetgateways` for the teardown finalizer. StatefulSets
+additionally get `update`, used only to follow `image`/`dns.image` in the Pod template
+(`OnDelete`: no Pod restart; `WorkloadCurrent` reports staleness). Suspension freezes
+reconciliation, not the running Pod. The completion receipt is format 2 and pins identity
+fields only: `deletionPolicy`, `suspend`, static records and unrelated Tailnet fields no
+longer block a running gateway, and a changed identity field reports `IdentityChanged`.
+Gateways created by 0.8.0 or earlier carry a format-1 receipt; delete them with
+`deletionPolicy: Delete` and recreate.
 CR deletion retains resources unless `deletionPolicy: Delete` explicitly consents to
 the UID-preconditioned teardown. Partial creation remains blocked without automatic
 remint or rollback. The derived `-coredns` ConfigMap is reconciled live from the
