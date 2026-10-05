@@ -180,7 +180,7 @@ func TestDNSUpdateAPICAS(t *testing.T) {
 		if g.Spec.Suspend == nil || !*g.Spec.Suspend {
 			t.Fatal("dry-run activation changed stored suspension")
 		}
-		if err := updateDNSRevision(ctx, admin, g.Name, g.Name); !errors.Is(err, ErrDNSWriteBlocked) {
+		if err := UpdateDNSRevision(ctx, admin, g.Name, g.Name); !errors.Is(err, ErrDNSWriteBlocked) {
 			t.Fatal("real suspended observation permitted DNS write")
 		}
 		got := readMap(t, client.ObjectKeyFromObject(target))
@@ -205,7 +205,7 @@ func TestDNSUpdateAPICAS(t *testing.T) {
 			// The losing writer must re-read this further source change, too.
 			changeSource(t, source, "203.0.113.10 final.tail.example\n")
 		}
-		must(t, updateDNSRevision(ctx, c, g.Name, g.Name))
+		must(t, UpdateDNSRevision(ctx, c, g.Name, g.Name))
 		if c.attempts != 2 || c.conflicts != 1 {
 			t.Fatal("expected one real API resourceVersion conflict and retry")
 		}
@@ -215,7 +215,7 @@ func TestDNSUpdateAPICAS(t *testing.T) {
 		}
 		// A new client/helper invocation has no previous in-memory revision.
 		restarted := &dnsAPIExerciseClient{Client: newClient(t)}
-		must(t, updateDNSRevision(ctx, restarted, g.Name, g.Name))
+		must(t, UpdateDNSRevision(ctx, restarted, g.Name, g.Name))
 		if restarted.attempts != 0 || readMap(t, client.ObjectKeyFromObject(target)).ResourceVersion != got.ResourceVersion {
 			t.Fatal("unchanged persisted revision churned after client restart")
 		}
@@ -233,7 +233,7 @@ func TestDNSUpdateAPICAS(t *testing.T) {
 			setDNSAPIRevision(t, winner, g, desired, 42)
 			must(t, admin.Update(ctx, winner))
 		}
-		must(t, updateDNSRevision(ctx, c, g.Name, g.Name))
+		must(t, UpdateDNSRevision(ctx, c, g.Name, g.Name))
 		if c.attempts != 1 || c.conflicts != 1 {
 			t.Fatal("converged conflict caused another write")
 		}
@@ -255,7 +255,7 @@ func TestDNSUpdateAPICAS(t *testing.T) {
 				changeSource(t, source, "203.0.113.11 fresh.tail.example\n")
 			}
 		}
-		must(t, updateDNSRevision(ctx, c, g.Name, g.Name))
+		must(t, UpdateDNSRevision(ctx, c, g.Name, g.Name))
 		if c.attempts != 1 || c.conflicts != 0 {
 			t.Fatal("source race reached the target writer before revalidation")
 		}
@@ -271,7 +271,7 @@ func TestDNSUpdateAPICAS(t *testing.T) {
 			current.Annotations["example.com/retain"] = strconv.Itoa(c.attempts)
 			must(t, admin.Update(ctx, current))
 		}
-		if err := updateDNSRevision(ctx, c, g.Name, g.Name); !errors.Is(err, ErrDNSWriteConflict) || c.attempts != 3 || c.conflicts != 3 {
+		if err := UpdateDNSRevision(ctx, c, g.Name, g.Name); !errors.Is(err, ErrDNSWriteConflict) || c.attempts != 3 || c.conflicts != 3 {
 			t.Fatal("real API conflicts did not stop at the retry budget")
 		}
 		got := assertRevision(t, target, 7, "app.tail.example")
@@ -295,7 +295,7 @@ func TestDNSUpdateAPICAS(t *testing.T) {
 				changeSource(t, source, "203.0.113.8 changed"+strconv.Itoa(sourceReads)+".tail.example\n")
 			}
 		}
-		if err := updateDNSRevision(ctx, c, g.Name, g.Name); !errors.Is(err, ErrDNSWriteConflict) || sourceReads != 6 || c.attempts != 0 {
+		if err := UpdateDNSRevision(ctx, c, g.Name, g.Name); !errors.Is(err, ErrDNSWriteConflict) || sourceReads != 6 || c.attempts != 0 {
 			t.Fatal("source revalidation did not stop after three invalidated snapshots")
 		}
 		if !reflect.DeepEqual(readMap(t, client.ObjectKeyFromObject(target)), target) {
@@ -308,7 +308,7 @@ func TestDNSUpdateAPICAS(t *testing.T) {
 		changeSource(t, source, "203.0.113.13 blocked.tail.example\n")
 		c := &dnsAPIExerciseClient{Client: newClient(t)}
 		c.beforeUpdate = func(client.Object) { must(t, admin.Delete(ctx, target)) }
-		if err := updateDNSRevision(ctx, c, g.Name, g.Name); !errors.Is(err, ErrDNSWriteBlocked) || c.attempts != 1 {
+		if err := UpdateDNSRevision(ctx, c, g.Name, g.Name); !errors.Is(err, ErrDNSWriteBlocked) || c.attempts != 1 {
 			t.Fatal("missing target was not blocked")
 		}
 		if err := admin.Get(ctx, client.ObjectKeyFromObject(target), &corev1.ConfigMap{}); !apierrors.IsNotFound(err) {
@@ -322,7 +322,7 @@ func TestDNSUpdateAPICAS(t *testing.T) {
 		must(t, admin.Update(ctx, target))
 		changeSource(t, source, "203.0.113.14 blocked.tail.example\n")
 		c := &dnsAPIExerciseClient{Client: newClient(t)}
-		if err := updateDNSRevision(ctx, c, g.Name, g.Name); !errors.Is(err, ErrDNSWriteBlocked) || c.attempts != 1 || c.conflicts != 0 {
+		if err := UpdateDNSRevision(ctx, c, g.Name, g.Name); !errors.Is(err, ErrDNSWriteBlocked) || c.attempts != 1 || c.conflicts != 0 {
 			t.Fatal("immutable target rejection was retried or ignored")
 		}
 		if !reflect.DeepEqual(readMap(t, client.ObjectKeyFromObject(target)), target) {

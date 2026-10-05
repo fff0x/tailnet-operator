@@ -76,6 +76,16 @@ func TestRenderFresh(t *testing.T) {
 			if obj.AutomountServiceAccountToken == nil || *obj.AutomountServiceAccountToken {
 				t.Fatal("automatic token mount")
 			}
+		case *corev1.ConfigMap:
+			if obj.Name != "router-coredns" {
+				t.Fatal("unexpected derived ConfigMap")
+			}
+			if obj.Annotations[DNSSerialAnnotation] != "1" || !dnsRevisionHash.MatchString(obj.Annotations[DNSHashAnnotation]) {
+				t.Fatal("derived DNS CAS annotations missing or malformed")
+			}
+			if obj.Annotations[DNSHashAnnotation] != dnsContentHash(obj.Data["Corefile"], obj.Data[DNSZoneFile]) {
+				t.Fatal("CAS hash does not describe the initial payload")
+			}
 		case *corev1.Service:
 			if len(obj.Spec.Ports) != 2 || obj.Spec.Ports[0].Port != 53 || obj.Spec.Ports[1].Port != 53 || obj.Spec.Ports[0].Protocol != corev1.ProtocolUDP || obj.Spec.Ports[1].Protocol != corev1.ProtocolTCP {
 				t.Fatal("unexpected exposed ports")

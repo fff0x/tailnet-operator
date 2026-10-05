@@ -163,10 +163,22 @@ func TestFreshPayloadFingerprint(t *testing.T) {
 			t.Fatal("replacement object retained provenance")
 		}
 	}
-	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "router-coredns", UID: "dns-uid"}, Data: map[string]string{"Corefile": "original"}}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "router-coredns", UID: "dns-uid"}, Data: map[string]string{"Corefile": "original", DNSZoneFile: "zone1"}}
 	original := objectReceipt(cm)
 	cm.Data["Corefile"] = "changed"
 	if objectReceipt(cm) == original {
-		t.Fatal("in-place DNS drift not bound")
+		t.Fatal("in-place Corefile drift not bound")
+	}
+	cm.Data["Corefile"] = "original"
+	cm.Data[DNSZoneFile] = "zone-after-live-reconcile"
+	if objectReceipt(cm) != original {
+		t.Fatal("derived zone drift must be excluded from the fingerprint")
+	}
+	// A non-coredns ConfigMap must keep every key digest-bound.
+	other := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "router-fresh", UID: "fresh-uid"}, Data: map[string]string{DNSZoneFile: "retained"}}
+	before := objectReceipt(other)
+	other.Data[DNSZoneFile] = "mutated"
+	if objectReceipt(other) == before {
+		t.Fatal("foreign ConfigMap drift not bound")
 	}
 }

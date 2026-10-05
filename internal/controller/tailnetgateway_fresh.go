@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -37,10 +38,22 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 		message = "Fresh Pod is running with verified persistent identity and advertised routes; route approval and cluster DNS forwarding remain external."
 	}
 	g.Status.ObservedGeneration = g.Generation
-	for _, name := range []string{"Registered", "DNSReady", "Ready"} {
-		status := ready
-		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: name, Status: status, Reason: reason, Message: message, ObservedGeneration: g.Generation})
+	meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "Registered", Status: ready, Reason: reason, Message: message, ObservedGeneration: g.Generation})
+	meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: g.Generation})
+	// Live DNS runs only once the writer confirms a verified completion receipt;
+	// before that, the derived zone has no persisted state to reconcile.
+	dnsStatus, dnsReason, dnsMessage := metav1.ConditionFalse, reason, message
+	if observation.Completed {
+		switch err := gateway.UpdateDNSRevision(ctx, r.RuntimeClient, g.Name, r.OperatorNamespace); {
+		case err == nil:
+			dnsStatus, dnsReason, dnsMessage = metav1.ConditionTrue, "DNSInSync", "Derived zone matches the Tailnet hosts source at the recorded serial."
+		case errors.Is(err, gateway.ErrDNSWriteConflict):
+			dnsStatus, dnsReason, dnsMessage = metav1.ConditionFalse, "DNSUpdateConflict", "Concurrent change on the derived zone; a later reconcile will retry."
+		default:
+			dnsStatus, dnsReason, dnsMessage = metav1.ConditionFalse, "DNSUpdateBlocked", "Derived zone source, target or revision annotations are not verified; no update is attempted."
+		}
 	}
+	meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "DNSReady", Status: dnsStatus, Reason: dnsReason, Message: dnsMessage, ObservedGeneration: g.Generation})
 	for _, name := range []string{"RoutesInSync", "StaleNodes", "ClusterDNSForward"} {
 		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: name, Status: metav1.ConditionUnknown, Reason: "ExternallyManaged", Message: "Fresh bootstrap does not manage route approvals, stale nodes or cluster DNS forwarding.", ObservedGeneration: g.Generation})
 	}
