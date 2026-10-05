@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"net/netip"
-	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -43,9 +42,6 @@ func freshPod(g *tnv1.TailnetGateway, server string, routes RoutePlan, configNam
 	resources := func(memory string) corev1.ResourceRequirements {
 		return corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("64Mi")}, Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse(memory)}}
 	}
-	tags := slices.Clone(g.Spec.Tags)
-	slices.Sort(tags)
-	tags = slices.Compact(tags)
 	healthAddr := "0.0.0.0:8080"
 	if netip.MustParseAddr(string(g.Spec.DNS.ServiceClusterIP)).Is6() {
 		healthAddr = "[::]:8080"
@@ -61,7 +57,9 @@ func freshPod(g *tnv1.TailnetGateway, server string, routes RoutePlan, configNam
 			// Reconcile explicit prefs on each boot; no --force-reauth. This fresh-only
 			// model must not reset the preferences of an adopted node.
 			{Name: "TS_AUTH_ONCE", Value: "false"},
-			{Name: "TS_EXTRA_ARGS", Value: "--login-server=" + server + " --reset --accept-routes=false --advertise-tags=" + strings.Join(tags, ",")},
+			// Headscale 0.29 rejects RequestTags during pre-auth-key enrollment.
+			// The verified, tagged bootstrap key assigns the node's tags.
+			{Name: "TS_EXTRA_ARGS", Value: "--login-server=" + server + " --reset --accept-routes=false"},
 			{Name: "TS_AUTHKEY", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: string(g.Spec.AuthKeySecretRef.Name)}, Key: g.Spec.AuthKeySecretRef.Key}}},
 			{Name: "TS_ENABLE_HEALTH_CHECK", Value: "true"}, {Name: "TS_LOCAL_ADDR_PORT", Value: healthAddr},
 		},

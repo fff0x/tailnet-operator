@@ -126,7 +126,9 @@ func TestRenderFresh(t *testing.T) {
 			if vars["TS_KUBE_SECRET"].Value != "router-state" || vars["TS_USERSPACE"].Value != "false" || vars["TS_ACCEPT_DNS"].Value != "false" || vars["TS_AUTH_ONCE"].Value != "false" || vars["TS_ROUTES"].Value != strings.Join(plan.Routes.Routes, ",") {
 				t.Fatal("unsafe kernel preferences")
 			}
-			if vars["TS_EXTRA_ARGS"].Value != "--login-server=https://headscale.example --reset --accept-routes=false --advertise-tags=tag:fabric,tag:mesh" {
+			// Headscale 0.29 rejects any requested tags on pre-auth-key
+			// enrollment. The verified key, not CLI requests, assigns tags.
+			if vars["TS_EXTRA_ARGS"].Value != "--login-server=https://headscale.example --reset --accept-routes=false" {
 				t.Fatal("unsafe bootstrap flags")
 			}
 			if vars["TS_AUTHKEY"].Value != "" || vars["TS_AUTHKEY"].ValueFrom.SecretKeyRef.Name != "router-auth" {
