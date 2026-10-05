@@ -1,21 +1,61 @@
-# TailnetGateway: experimental suspended contract
+# TailnetGateway: experimental fresh-only writer
 
-**The gateway controller reports suspension only.** The cluster-scoped
-`tsunaro.io/v1alpha1` CRD validates configuration, but creates no workloads, keys,
-routes, policy entries or DNS records. `spec.suspend` defaults to `true`; admission
-rejects `false`. An accepted CR is not a working gateway or an adoption proof.
-Existing ingress and egress controllers do not reconcile this resource.
+**`spec.suspend` defaults to `true`. Setting it to `false` opts into fresh IPv4 creation.**
+The cluster-scoped `tsunaro.io/v1alpha1` resource does not adopt existing gateways.
+CR acceptance alone is not runtime or data-plane evidence. Existing ingress and
+egress controllers do not reconcile this resource.
 
-The registered gateway controller reads only the gateway CR and patches its status.
-It does not resolve the Tailnet, read Secrets, invoke a resource renderer, call
-Headscale or watch child resources. Missing dependencies do not prevent suspension.
-It adds no owner references or finalizers and performs no deletion cleanup.
+While suspended, the controller reads only the Gateway CR and patches its status.
+Missing dependencies do not prevent suspension. Suspension does not stop an already
+running gateway. CR deletion performs no cleanup: resources have no Gateway owner
+references or finalizers. StatefulSets retain and recreate their own Pods.
 
-This API is a development foundation, not a release or migration instruction.
-The only additional permissions are gateway get/list/watch and status get/update/patch.
-Gateway spec/lifecycle, finalizer, StatefulSet and RBAC management remain unauthorized.
+This is a development feature, not a release or migration instruction. New permissions
+are namespace-local `get/create` for StatefulSets, PDBs, ServiceAccounts, Roles and
+RoleBindings. There are no new update/delete, escalation, binding or CR-spec grants.
 Do not remove an existing gateway, move its Secret, or change Headscale split-DNS
 because this CRD is installed. See [compatibility](../COMPATIBILITY.md#experimental-gateway-api).
+
+## Minimal fresh lifecycle
+
+The active controller uses uncached API reads and the selected Tailnet's existing
+working API key. It requires owned DNS hosts input, available resource names and
+nonconflicting Gateway identities/addresses. External auth references, adoption,
+IPv6, extra DNS zones and TCP forwards remain unsupported by this writer.
+
+1. Render the initial plan without side effects; reject unsupported inputs and occupied names.
+2. Exclusively create the empty mutable State Secret. Its successful Create response supplies the expected UID.
+   This also prevents competing or ambiguous attempts from minting again.
+   Pod-name/selector conflicts block creation. Workload, Service and PDB selectors
+   additionally bind to this new State UID, preventing selection of old orphan Pods.
+3. Call `PlanGatewayMint`, then the existing Headscale client, then `storeGatewayMintRecord`.
+   The reusable key is non-ephemeral, tag-bound and limited to 24 hours.
+4. Recheck source revisions, empty State UID and durable auth before each resource Create.
+   Create the nine rendered resources, with the StatefulSet last. Never patch or adopt an existing object.
+5. Create immutable `<gateway>-fresh` completion evidence: scope, independent State UID,
+   auth receipt, child UIDs and admitted payload hashes. It contains no credentials or private-state hash.
+6. Observe the retained set. Report runtime Ready only after a running, Ready Pod matches
+   the StatefulSet and its state binds to an online Headscale node with the advertised routes.
+
+The completion record binds Gateway/Tailnet UIDs, generations and full typed-spec hashes.
+Unlike the write-boundary checks, it permits later metadata/status-only CR revision changes.
+Without update/delete permissions for the new workload and RBAC resources, a created
+Gateway is effectively immutable. Even an API-admitted spec change invalidates its
+completion receipt and blocks reconciliation; the controller cannot update or replace
+the retained runtime.
+Changed specs/generations, replaced state/resources, payload drift or expired auth block observation.
+A suspend/resume cycle also changes generation and invalidates completion evidence;
+resuming an existing set is not implemented by this fresh-only slice.
+No keys are renewed and no resources are updated, adopted, compensated or automatically deleted.
+Partial creation without a complete receipt remains blocked, even if a workload started.
+A lost completion response may be recovered only when the complete immutable record actually exists.
+These are sequential checks, not a transaction or a general crash-recovery protocol.
+
+Protect both receipt ConfigMaps as strictly as Secrets. An administrator who can replace
+all retained evidence can forge it. Initial DNS is a fixed snapshot at SOA serial 1;
+source changes and route changes are not reconciled by this slice. Runtime Ready does
+not assert approved routes, LoadBalancer allocation, DNS answers or cluster DNS forwarding.
+The isolated Kind probe supplies separate forwarding/DNS evidence.
 
 ## Configuration
 
@@ -65,11 +105,11 @@ The pure planner preserves explicit prefix granularity and waits for a 30-second
 quiet period before making a route update eligible. Status must acknowledge a
 successful write, not merely elapsed time. No running router is changed yet.
 
-## Fresh resource model: not a runtime
+## Pure fresh resource renderer
 
 `internal/gateway.RenderFresh` models initial resources without reading or writing
-Kubernetes or Headscale. The suspension controller does not call it. Rendering
-success is not permission to create resources or evidence of a runnable gateway.
+Kubernetes or Headscale. The active writer calls it after selecting fresh inputs.
+Rendering alone is not permission to create resources or evidence of a runnable gateway.
 
 The model requires admitted, defaulted CRs and the operator namespace. It rejects
 adoption, historical identity signals, implicit bootstrap, TCP forwards and extra
@@ -88,12 +128,13 @@ or finalizer. This models retention; it does not prove live deletion behavior.
 The PDB blocks voluntary eviction of the singleton and can therefore block drains.
 
 State and auth Secrets are deliberately absent from the returned objects. Before
-any future creation, the writer must verify all of these prerequisites:
+workload creation, the writer checks these prerequisites:
 
 - Every resource name is available, with no retained or foreign object to overwrite.
 - The referenced state Secret already exists, is mutable and contains no retained identity.
 - The separate auth Secret contains a verified non-ephemeral key for the selected Headscale instance and tags.
-- Source ownership, Tailnet scope, Service addresses, network conflicts and image compatibility are valid.
+- Source ownership, Tailnet scope and declared identity/address conflicts are checked.
+- Kernel and image compatibility remain deployment prerequisites; the Pod's read-only init check can block startup.
 
 `internal/gateway.InspectFreshSnapshots` is a disconnected read-only inventory
 check. `InspectFreshFromReader` gathers its Kubernetes snapshots through an
@@ -120,9 +161,9 @@ orphaned key expires; the controller must re-read before retrying and must not
 infer ownership from a masked key list. A package-private `storeGatewayMint`
 models an exclusive Kubernetes Secret **Create** after validating the response
 and re-reading Gateway/Tailnet revisions. The retained, immutable Secret records
-UID-bound metadata; an existing name is never overwritten. This disconnected
-helper does not mint, verify a later state-to-node binding, or start a Pod; the
-production manager has no path to call it. `ReadGatewayAuthReceipt` checks the
+UID-bound metadata; an existing name is never overwritten. This helper does not
+itself mint, verify a later state-to-node binding, or start a Pod. The fresh writer
+connects those steps. `ReadGatewayAuthReceipt` checks the
 retained Secret's UID/revision, immutability, scope hashes, key presence and
 expiration without returning key bytes. The caller must supply an independently
 captured, durable Create-time Secret UID; using the read Secret's own UID is
@@ -130,7 +171,7 @@ not a recreation check. These Kubernetes annotations are **not**
 a Headscale-signed proof of the full credential; restrictive Secret-write RBAC
 and later state-to-node verification remain necessary.
 
-The package-private `storeGatewayMintRecord` experiment captures the Secret UID
+The package-private `storeGatewayMintRecord` captures the Secret UID
 and revision from a successful **Create response**, never from a later Get.
 It rejects returned key bytes, key ID or expiry that differ from the mint response.
 It then exclusively creates an immutable, ownerless `<gateway>-auth-receipt`
@@ -145,12 +186,14 @@ Go types' default/omission semantics. Only admitted snapshots belong in this pro
 before accepting the Secret. Missing records, replaced Secrets, unknown schema
 fields, expiry or changed scope block recovery. **Even metadata/status-only CR
 updates or Secret metadata updates block reuse**, because revisions must match.
-This is a conservative persistence experiment, not a production lifecycle protocol.
+This strict reader is used during bootstrap. Completed-set observation uses the
+separate `<gateway>-fresh` record to tolerate status/metadata-only CR changes;
+Secret metadata changes and auth expiry still block it.
 The ConfigMap is the durable trust anchor: its create/update/delete permissions
 must be restricted as strictly as the Secret's. Immutability does not prevent
 an authorized actor from deleting and forging both objects. Recording the
 ConfigMap's own UID inside itself would not resolve that trust requirement.
-No deployment permissions or controller wiring change for this experiment.
+These trust requirements also apply to the writer's completion receipt.
 
 Failure handling does not adopt, overwrite, delete or remint:
 
@@ -162,13 +205,14 @@ Failure handling does not adopt, overwrite, delete or remint:
 
 Isolated Kubernetes 1.31 tests exercise persistence through a new client, competing
 writers, response loss, Create-time mutation, dry-run, immutability and UID replacement.
-Their explicit test adapter changes only in-memory suspend observations; admission
-still rejects activation. Run them with `task test-validation` and explicit envtest
-assets. These tests do not prove process restart, production crash recovery or
+Their explicit legacy test adapter changes only in-memory suspend observations;
+ordinary suspended observations still block writes. Admission now accepts activation.
+Run them with `task test-validation` and explicit envtest assets. These tests do not prove process restart, production crash recovery or
 cross-object atomicity. Sequential rechecks cannot close every race, and a durable
-record does not prove that postflight checks completed. No production writer is enabled.
+record does not prove that postflight checks completed. The writer also requires
+its completion receipt and a live state-to-node check before reporting Ready.
 
-`VerifyGatewayState` is a disconnected post-registration check. For a retained
+`VerifyGatewayState` is the writer's post-registration check. For a retained
 state Secret with the inventoried UID, it reads `_machinekey` and the active
 `profile-*`, derives **public** machine and node keys, then requires one unique,
 online Headscale node with matching public keys, name, tags and address; for a
@@ -177,20 +221,18 @@ ID, IPv4 and Secret UID/revision. This reads **private Tailscale key material in
 operator memory**; it never returns or logs it. The Go module pins Tailscale
 1.94.1 while the modeled kernel image is 1.102.4. The isolated fresh-Pod gate
 below verifies this state layout against Headscale 0.29.3 on Linux amd64,
-including Pod recreation. This is not production Ready or adoption evidence.
-It does not establish service, DNS or route health, and the controller still
-does not invoke it. A caller must not use this diagnostic receipt as a writer
-authorization. Read snapshots
-are not an exclusive lock; every absence needs revalidation immediately before
-creation, with conflict handling. DNS serial/hash persistence and CAS, image and
-network compatibility, and a safe creation sequence are also pending. The
-suspended controller never invokes this inspection or `RenderFresh`.
+including Pod recreation. The check alone does not establish service, DNS or route
+health, or authorize adoption. The controller combines it with retained provenance,
+Pod readiness and advertised-route observations. Read snapshots are not exclusive
+locks; every Create can still conflict. DNS updates and live deployment compatibility
+remain separate concerns. Suspended reconciliation never calls these helpers.
 
 The pod Role permits only `get`, `update` and `patch` of the exact state Secret.
 It cannot create missing state, read the auth Secret through the API, or list Secrets.
 Only Tailscale mounts the rotating service-account token and state-cache directory.
 The kubelet supplies the auth key through a Secret reference; the plan contains no key value.
-Operator RBAC is unchanged and still cannot create the modeled workloads or roles.
+Operator RBAC permits namespace-local creation of these resources. It does not
+grant the Gateway Pod broader Secret access.
 
 ### Kernel prerequisites and startup boundary
 
@@ -277,7 +319,8 @@ UID-65532/no-HostPath/no-added-capabilities contract remains unchanged.
 Offline contract tests also check the actual `RenderFresh` pod shape, but are
 **not** a running kernel gateway or a TUN permission proof. The separate fresh-Pod
 gate below binds and releases the live Pod before starting its kernel preflight.
-Production writer, credential provenance, routing and adoption remain open.
+The active writer connects credential provenance and resource creation. Broader
+routing coverage and adoption remain open.
 
 ### Isolated fresh-Pod bootstrap gate
 
@@ -294,9 +337,12 @@ references before creating the Pod. A containerd archive-index alias is accepted
 only when it belongs to that same verified image configuration.
 
 `TestGatewayFreshPod` uses real Tailscale 1.102.4, CoreDNS 1.14.6 and Headscale
-0.29.3. Test-admin code renders admitted, suspended CRs and creates a Pod from
-the fresh StatefulSet template; no gateway controller or StatefulSet is started.
-The Pod gets fixture-only overrides: `PullNever`, the public fixture control CA,
+0.29.3. The test admits an active fresh CR and drives the production reconciler
+in-process against the real Kubernetes API and Headscale REST endpoint.
+The controller mints the key and creates state, receipts and rendered resources;
+the StatefulSet controller creates the Pod. The test supplies the working API key
+and owned hosts source, not the gateway bootstrap key or runtime objects.
+The StatefulSet template gets fixture-only overrides: `PullNever`, the public fixture control CA,
 IPv4 forwarding via the permitted namespaced sysctl, a short termination grace,
 and `fsGroup: 65532` for the unprivileged gate's private EmptyDir. This does not
 change the production template's security context. TUN, token and state mounts
@@ -309,21 +355,41 @@ Both contracts share the same live UID/node/network proof and expiring approval.
 
 On Linux amd64, the gate verifies a non-ephemeral tagged key, private state-to-node
 binding, readiness and advertisement of the LAN and LB route prefixes. It then
-deletes only the owned Pod and creates a new Pod with the same state Secret.
+deletes only the owned Pod; the StatefulSet creates its replacement with the same state Secret.
 The new Pod must retain the Secret UID, Headscale node ID and IPv4, pass a new
 startup proof and establish the same state-to-node binding. Private key bytes
 remain in memory and are not written to evidence.
 
-This does **not** prove route approval or packet forwarding, DNS answers/reload,
-egress-derived host routes, IPv6 routing, arm64 execution, crash-safe writer
-recovery, CR-deletion retention or interruption-free adoption. The API remains
-suspend-only; passing the fixture does not authorize the production controller.
+The same gate also checks the actual IPv4 data path, before and after Pod recreation:
+
+- A separate, unprivileged target Pod supplies the advertised LAN /32. An independent
+  UID65532 tsnet peer accepts routes; both pass the unchanged single-app startup gate.
+- The fixture explicitly approves only that /32 on the state-bound Headscale node.
+  A fresh TCP challenge must reach the target, whose accepted socket must observe
+  the gateway Pod's source IPv4. A native-underlay control instead observes the peer
+  Pod's IPv4. A connection alone, stale reply or direct Kubernetes shortcut cannot pass.
+- Before approval and after revocation, the peer must observe the route as absent.
+  It refuses to dial without a selected gateway route because `tsnet.Dial` can otherwise
+  fall back to the native network. This checks route withdrawal and prevents fallback;
+  it does **not** establish packet-level ACL denial or interruption of existing flows.
+- UDP and TCP DNS queries go through tsnet to the gateway's tailnet IPv4 on port 53.
+  Only `app.tail.example. IN A` is queried, without recursion. The response must be
+  authoritative, match the fresh transaction/question, contain exactly the configured
+  `198.51.100.8` answer and the expected local `tail.example. NS tail.example.` authority.
+  Foreign authorities, CNAMEs, additional records and malformed wire data are rejected.
+
+The target, peer and gateway retain their verified UIDs/processes throughout each phase.
+This proves one IPv4 TCP subnet path and one local DNS name over UDP/TCP, not every route
+or DNS feature. It does **not** prove DNS reload, egress-derived host routes, IPv6 routing,
+arm64 execution, crash-safe writer recovery, CR-deletion retention or interruption-free
+adoption. Activation requires explicit `suspend: false`; no production Pod-template
+security change is needed for these checks.
 
 ## Fresh DNS rendering: partial implementation
 
 `internal/gateway.RenderDNS` compiles a primary authoritative zone into `Corefile`
-and `zone.db`. This pure renderer is **not connected to the controller**. It does
-not render a pod or authorize adoption of an existing CoreDNS configuration.
+and `zone.db`. The fresh writer uses it through `RenderFresh` for initial creation.
+It does not itself render a Pod or authorize adoption of existing CoreDNS configuration.
 
 The caller supplies a snapshot of the selected Tailnet's owned hosts ConfigMap.
 Dynamic names replace the entire static address set for the same name, not just
@@ -339,7 +405,7 @@ nonempty `extraZones` returns an error and no partial output. With CoreDNS 1.14.
 known name. That does not satisfy the required strict-local contract. Admission
 still accepts the future API field; it does not activate this weaker behavior.
 
-Before runtime integration, the caller must:
+Initial creation checks scope and ownership. Future dynamic DNS integration must also:
 
 - Verify Tailnet/namespace scope and hosts-ConfigMap ownership.
 - Render every source-host change into the derived zone ConfigMap; mounting the
@@ -357,18 +423,17 @@ Before runtime integration, the caller must:
   revisioned, UID-labelled** ConfigMap through an explicit client. It re-reads
   Gateway, Tailnet and owned hosts source before updating, retries conflicts
   from a fresh snapshot and refuses to create/adopt a target. It is unreachable
-  from the suspend-only controller and the installed admission contract. Cross-
-  object source/target writes are not atomic; source watches, initial creation,
-  proven field ownership and live DNS checks are still required.
+  from the fresh-only controller. Cross-object source/target writes are not atomic;
+  source watches, update ownership and live reload checks remain unimplemented.
 
   `TestDNSUpdateAPICAS` exercises this helper against an isolated Kubernetes 1.31
   API server in `task test-validation` and CI. It checks real resource-version
   conflicts, source/serial recomputation, preservation of concurrent metadata,
   three-attempt limits for target conflicts and source changes, and no-op behavior
   after a conflict or with a new client. Deleted
-  or immutable targets are not recreated or replaced. The production CRD remains
-  unchanged and rejects `suspend: false`. A test-only client changes the in-memory
-  suspend observation to reach the helper; unmodified observations still block it.
+  or immutable targets are not recreated or replaced. A test-only client changes
+  the legacy suspended fixture's in-memory observation to reach the helper;
+  unmodified suspended observations still block it. The CRD now admits activation.
   This proves ConfigMap CAS behavior, not an admitted runtime, process restart,
   exclusive ownership, cross-object atomicity or live DNS reload.
 
@@ -401,8 +466,8 @@ control reproduces TXT fallthrough against an owned loopback upstream.
 This does not verify the lab's CoreDNS 1.14.7 image, a running Kubernetes sidecar,
 external forwarding support, kernel subnet routing or interruption-free adoption.
 The fresh resource model above includes a StatefulSet and Services, but source
-watches, serial persistence and the writer remain pending. The controller remains
-suspended and does not call either renderer.
+watches and update serial persistence remain pending. The active controller creates
+only the initial snapshot and never rewrites or resets a retained DNS ConfigMap.
 
 ## Adoption and retention
 
@@ -436,12 +501,17 @@ The status subresource reserves `nodeId`, `ipv4`, `serviceIP`, advertised/approv
 route lists, stale node IDs, route-planner hashes/timestamp and conditions.
 Intended conditions include `Registered`, `RoutesInSync`, `DNSReady`, `StaleNodes`,
 `ClusterDNSForward`, and `Ready`. Stale nodes are reported, not automatically deleted.
-The controller sets `Ready=False/Suspended` and the other listed conditions to
+While suspended, the controller sets `Ready=False/Suspended` and the other listed conditions to
 `Unknown/Suspended`. It preserves last-known identity, routes and debounce fields;
 these are not fresh observations. `observedGeneration` means the suspension was
 processed, not that configuration was applied. Unrelated conditions are preserved.
-A nil suspend value is treated as true. If admission is bypassed to set false,
-the controller still performs no runtime work and reports `RuntimeUnavailable`.
+A nil suspend value is treated as true. With explicit `false`, the minimal writer
+reports `Provisioning`, `FreshBlocked`, missing dependencies, or `FreshRuntimeReady`.
+`Registered`, `DNSReady` and `Ready` describe verified identity plus Pod/listener
+health, not DNS query results. Route approval, stale-node management and cluster
+DNS forwarding stay `Unknown/ExternallyManaged`. No fresh Service-IP allocation
+or debounce acknowledgement is claimed. Active gateways poll uncached children
+every five seconds; unchanged status is not rewritten.
 
 Status patches use resource-version preconditions. Conflicts retry through the
 work queue, unchanged status is not rewritten, and status-only events withdraw

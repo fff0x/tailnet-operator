@@ -105,8 +105,9 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 ## CRD reference
 
 The development [TailnetGateway API](docs/reference/gateway.md) is experimental and
-suspended: `suspend: false` is rejected. Its controller reports `Ready=False/Suspended`
-and does not read or change gateway workloads, credentials or Headscale nodes. Review its [migration boundary](docs/COMPATIBILITY.md#experimental-gateway-api)
+suspended by default. Explicit `suspend: false` enables fresh IPv4 creation with
+persistent identity checks. It does not adopt, update or replace retained gateways.
+Review its [migration boundary](docs/COMPATIBILITY.md#experimental-gateway-api)
 before installing the additional CRD.
 
 ### Tailnet

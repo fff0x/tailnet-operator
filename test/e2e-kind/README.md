@@ -179,17 +179,29 @@ Bounded negative observations are not exhaustive ACL coverage.
 
 **`TestGatewayFreshPod`** is a separate opt-in selection with real kernel Tailscale
 1.102.4, CoreDNS 1.14.6 and the same gated HTTPS Headscale 0.29.3 fixture, without
-an HTTP peer or agent admission webhook. It uses the fresh renderer, a precreated
-mutable state Secret and a separate immutable, tagged, non-ephemeral bootstrap key.
+an HTTP peer or agent admission webhook. The fixture drives the production reconciler
+in-process against the real API and Headscale REST endpoint. The controller creates
+state, mints the non-ephemeral key, persists provenance and creates the rendered
+StatefulSet; Kubernetes creates and recreates its Pod. Test code supplies only
+working API credentials, owned hosts input and fixture-only template overrides.
 The gateway-specific startup contract admits exactly two apps and two inits;
 the existing single-app gate remains unchanged in shape and approval semantics.
 
-The Linux-amd64 run verifies successful kernel preflight, pinned runtime images,
-state-to-node public identity and advertised LAN/LB routes. A new Pod must retain
+The Linux-amd64 run verifies controller Ready, successful kernel preflight, pinned
+runtime images, state-to-node public identity and advertised LAN/LB routes. A new Pod must retain
 the state Secret UID, Headscale node ID and IPv4 after deleting the first Pod.
 Fixture-only sysctl/fsGroup/CA/pull-policy changes and all proof limits are listed
 in the [gateway reference](../../docs/reference/gateway.md#isolated-fresh-pod-bootstrap-gate).
-No packet forwarding, DNS answers, IPv6 routing, arm64 execution or adoption is proved.
+An independent UID65532 tsnet peer dials a separate target Pod through the gateway's
+explicitly approved target /32. A fresh challenge response carries the target socket's
+observed source IP: it must match the gateway Pod, not the peer Pod. A native-underlay
+control proves that direct Kubernetes reachability cannot satisfy this assertion.
+Before approval and after revocation, the probe observes no selected route and refuses
+tsnet's native fallback; this is not packet-level ACL-denial evidence.
+Both before and after gateway recreation, UDP and TCP queries to its tailnet IP must
+return the authoritative `app.tail.example. A 198.51.100.8` answer with the expected local
+NS authority. No recursive or arbitrary-name DNS request is exposed.
+IPv6 routing, arbitrary subnet topologies, DNS reload, arm64 execution and adoption remain unproved.
 
 ## Offline checks
 
@@ -215,4 +227,5 @@ config rendering, the certificate renewal patch, command lifecycle and the dial 
 | `cmd/proofverify`, `cmd/projection`, `cmd/hold`, `cmd/controlprobe`, `cmd/httppeer`, `cmd/fixture` | proof replay, projection observer, placeholder app, TLS probe, tsnet peer, fixture driver |
 | `cert-manager-images.json`, `cert-manager-assets.py` | pinned cert-manager digests and the offline cache validator |
 | `gateway-images.json`, `gateway-assets.py` | pinned gateway images, shared archive verification and CRI import binding |
+| `cmd/gatewayprobe`, `../internal/gatewayprobe` | guarded tsnet peer/target, socket-source challenge, fixed local DNS query and strict result schema |
 | `../internal/{netproof,kindfixture,isolation}` | dial contract, webhook/CA helpers, envtest safety guards |
