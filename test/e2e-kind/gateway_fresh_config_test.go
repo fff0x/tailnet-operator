@@ -47,9 +47,9 @@ func TestGatewayRuntimeImageAliases(t *testing.T) {
 
 func TestGatewayCLIIdentityDecoder(t *testing.T) {
 	// Exact encoding/json protobuf shape from Headscale 0.29.3 CLI, not REST.
-	b := []byte(`[{"id":12,"machine_key":"mkey:public","node_key":"nodekey:public","given_name":"router","online":true,"ip_addresses":["100.64.0.1"],"tags":["tag:fabric"],"available_routes":["192.0.2.0/24"],"pre_auth_key":{"id":7}}]`)
+	b := []byte(`[{"id":12,"machine_key":"mkey:public","node_key":"nodekey:public","given_name":"router","online":true,"ip_addresses":["100.64.0.1"],"tags":["tag:fabric"],"available_routes":["192.0.2.0/24"],"approved_routes":["192.0.2.0/24"],"pre_auth_key":{"id":7}}]`)
 	nodes, ok := decodeGatewayCLINodes(b)
-	if !ok || len(nodes) != 1 || nodes[0].ID != "12" || nodes[0].MachineKey != "mkey:public" || nodes[0].NodeKey != "nodekey:public" || nodes[0].GivenName != "router" || !nodes[0].Online || nodes[0].PreAuthKey == nil || nodes[0].PreAuthKey.ID != "7" || nodes[0].PreAuthKey.Ephemeral || !reflect.DeepEqual(nodes[0].IPAddresses, []string{"100.64.0.1"}) || !reflect.DeepEqual(nodes[0].AvailableRoutes, []string{"192.0.2.0/24"}) {
+	if !ok || len(nodes) != 1 || nodes[0].ID != "12" || nodes[0].MachineKey != "mkey:public" || nodes[0].NodeKey != "nodekey:public" || nodes[0].GivenName != "router" || !nodes[0].Online || nodes[0].PreAuthKey == nil || nodes[0].PreAuthKey.ID != "7" || nodes[0].PreAuthKey.Ephemeral || !reflect.DeepEqual(nodes[0].IPAddresses, []string{"100.64.0.1"}) || !reflect.DeepEqual(nodes[0].AvailableRoutes, []string{"192.0.2.0/24"}) || !reflect.DeepEqual(nodes[0].ApprovedRoutes, []string{"192.0.2.0/24"}) {
 		t.Fatal("CLI public identity conversion failed")
 	}
 	for _, bad := range []string{`[{"id":"12"}]`, `[{"id":0}]`, `[{"id":12,"pre_auth_key":{}}]`, `{"nodes":[]}`, `[{"id":12}] trailing`, strings.Repeat("x", (1<<20)+1)} {
@@ -110,6 +110,11 @@ func TestGatewayFreshRunnerSelection(t *testing.T) {
 		`cmp "$out/gateway-cache.json" "$out/gateway-assets.json"`,
 		`"$fixture/gateway-assets.py" --check-import`,
 		`crictl inspecti "$ref" > "$out/gateway-$component-cri-image.json"`,
+		"httppeer,kernelcheck,gatewayprobe}/*.go",
+		"kindfixture,kernelcheck,gatewayprobe}/*.go",
+		"httppeer kernelcheck gatewayprobe; do",
+		"httppeer,kernelcheck,gatewayprobe}",
+		`len(s.splitlines())==12 and s.count("statically linked")==12`,
 	} {
 		if !strings.Contains(string(b), required) {
 			t.Fatal("gateway runner bound selection/provenance missing")
