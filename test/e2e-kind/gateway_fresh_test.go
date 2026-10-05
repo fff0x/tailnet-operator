@@ -39,6 +39,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/controller"
@@ -559,7 +560,71 @@ func TestGatewayFreshPod(t *testing.T) {
 			previousUID = p.UID // StatefulSet controller, not this test, recreates it.
 		}
 	}
-	t.Log("gate: production fresh controller Ready, StatefulSet-created kernel Pod/preflight/images, non-ephemeral state binding and identity retained across recreation; real IPv4 /32 TCP forwarding with approval/revocation and distinct native control, known local UDP/TCP DNS via gateway tailnet IP; no IPv6 or adoption proof")
+
+	// Teardown: deletionPolicy=Delete is the only consent and the finalizer records
+	// it. The real StatefulSet controller and garbage collector remove the Pod.
+	gatewayUID := g.UID
+	if f.kube.Get(ctx, client.ObjectKeyFromObject(g), g) != nil {
+		t.Fatal("gateway unavailable before teardown")
+	}
+	g.Spec.DeletionPolicy = tnv1.GatewayDeletionPolicyDelete
+	if f.kube.Update(ctx, g) != nil {
+		t.Fatal("deletionPolicy=Delete rejected")
+	}
+	teardown := func() bool {
+		t.Helper()
+		if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(g)}); err != nil {
+			t.Fatal("real gateway teardown reconciliation failed")
+		}
+		err := f.kube.Get(ctx, client.ObjectKeyFromObject(g), g)
+		if apierrors.IsNotFound(err) {
+			return true
+		}
+		if err != nil {
+			t.Fatal("gateway status unavailable")
+		}
+		return false
+	}
+	if teardown() || !controllerutil.ContainsFinalizer(g, gateway.TeardownFinalizer) {
+		t.Fatal("Delete consent did not record the teardown finalizer")
+	}
+	if f.kube.Delete(ctx, g, client.Preconditions{UID: &gatewayUID}) != nil {
+		t.Fatal("gateway delete rejected")
+	}
+	eventually(t, "gateway torn down and finalizer released", teardown)
+	for _, list := range []client.ObjectList{&corev1.PodList{}, &appsv1.StatefulSetList{}, &policyv1.PodDisruptionBudgetList{}, &corev1.ServiceList{}, &corev1.ServiceAccountList{}, &rbacv1.RoleList{}, &rbacv1.RoleBindingList{}, &corev1.ConfigMapList{}, &corev1.SecretList{}} {
+		if f.kube.List(ctx, list, client.InNamespace(namespace), client.MatchingLabels{"tsunaro.io/gateway-uid": string(gatewayUID)}) != nil {
+			t.Fatal("gateway inventory unavailable after teardown")
+		}
+		if meta.LenList(list) != 0 {
+			t.Fatalf("teardown left %T behind", list)
+		}
+	}
+	nodes, err := hs.ListNodes(ctx)
+	if err != nil {
+		t.Fatal("Headscale REST node observation failed")
+	}
+	if slices.ContainsFunc(nodes, func(n headscale.Node) bool { return n.ID == first.NodeID }) {
+		t.Fatal("gateway node survived teardown")
+	}
+	// CLI JSON is encoding/json over protobuf: numeric id, timestamp as seconds.
+	type cliKey struct {
+		ID         uint64 `json:"id"`
+		Expiration *struct {
+			Seconds int64 `json:"seconds"`
+		} `json:"expiration"`
+	}
+	var keys []cliKey
+	if json.Unmarshal(pf.cli("preauthkeys", "list", "--output", "json"), &keys) != nil {
+		t.Fatal("Headscale CLI key observation failed")
+	}
+	if !slices.ContainsFunc(keys, func(k cliKey) bool {
+		return strconv.FormatUint(k.ID, 10) == keyID && k.Expiration != nil && k.Expiration.Seconds <= time.Now().Unix()
+	}) {
+		t.Fatal("minted bootstrap key is not expired after teardown")
+	}
+	pf.save("gateway-teardown-result.json", map[string]any{"finalizerRecorded": true, "gatewayGone": true, "labelledInventoryEmpty": true, "nodeDeleted": first.NodeID, "keyExpired": keyID})
+	t.Log("gate: production fresh controller Ready, StatefulSet-created kernel Pod/preflight/images, non-ephemeral state binding and identity retained across recreation; real IPv4 /32 TCP forwarding with approval/revocation and distinct native control, known local UDP/TCP DNS via gateway tailnet IP; deletionPolicy=Delete teardown removed every labelled object, the Headscale node and expired the bootstrap key; no IPv6 or adoption proof")
 }
 
 func gatewayProcessesStable(before, actual *corev1.Pod) bool {
