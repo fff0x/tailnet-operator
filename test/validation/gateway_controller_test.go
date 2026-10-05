@@ -163,9 +163,17 @@ func TestGatewaySuspendedController(t *testing.T) {
 			t.Fatal("operator has gateway finalizer authorization")
 		}
 	}
-	for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete"} {
-		if allowed("apps", "statefulsets", "", verb, namespace) || allowed("rbac.authorization.k8s.io", "roles", "", verb, namespace) {
-			t.Fatal("suspended integration expanded workload or RBAC permissions")
+	for _, resource := range []struct{ group, name string }{
+		{"", "serviceaccounts"}, {"apps", "statefulsets"}, {"policy", "poddisruptionbudgets"},
+		{"rbac.authorization.k8s.io", "roles"}, {"rbac.authorization.k8s.io", "rolebindings"},
+	} {
+		for _, ns := range []string{namespace, "unrelated-tenant", ""} {
+			for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection", "escalate", "bind"} {
+				want := ns == namespace && (verb == "get" || verb == "create")
+				if got := allowed(resource.group, resource.name, "", verb, ns); got != want {
+					t.Fatalf("fresh child authorization %s/%s %s in %q: got %t, want %t", resource.group, resource.name, verb, ns, got, want)
+				}
+			}
 		}
 	}
 

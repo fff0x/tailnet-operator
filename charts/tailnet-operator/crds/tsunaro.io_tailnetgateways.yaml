@@ -31,7 +31,8 @@ spec:
       openAPIV3Schema:
         description: |-
           TailnetGateway describes a persistent kernel router in the operator namespace.
-          The current controller reports suspension only; suspend=false is rejected.
+          Suspended by default; suspend=false explicitly opts into the fresh writer,
+          not adoption of existing resources.
         properties:
           apiVersion:
             description: |-
@@ -52,9 +53,10 @@ spec:
             type: object
           spec:
             description: |-
-              TailnetGatewaySpec is an experimental, suspended API contract. The controller
-              reports suspension only. Retention is the only deletion policy; adoption never implies
-              consent to replace a pod, reset state, rename nodes or remove stale nodes.
+              TailnetGatewaySpec is an experimental API contract, suspended by default.
+              Explicit suspend=false opts into the fresh writer, not adoption. Retention is
+              the only deletion policy; adoption never implies consent to replace a pod,
+              reset state, rename nodes or remove stale nodes.
             properties:
               adoption:
                 description: |-
@@ -480,11 +482,9 @@ spec:
                 type: object
               suspend:
                 default: true
+                description: Explicit false opts into fresh resource creation; adoption
+                  remains unsupported.
                 type: boolean
-                x-kubernetes-validations:
-                - message: gateway runtime is not implemented; suspend must remain
-                    true
-                  rule: self
               tags:
                 default:
                 - tag:fabric
