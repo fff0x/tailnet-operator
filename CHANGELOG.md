@@ -4,6 +4,20 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-05
+
+### Fixed
+
+- Isolate fixed DNS Service IPs from automatic LoadBalancer Service ClusterIP allocation
+  in the Gateway API test fixture. A deterministic regression checks that separation;
+  production reconciliation and provenance checks are unchanged.
+
+### Release notes
+
+This release includes the experimental fresh-only Gateway described in 0.7.0 below.
+All experimental limits remain unchanged. The v0.7.0 tag is retained, but its failed
+release build published no image or chart; use 0.7.1 for installation.
+
 ## [0.7.0] - 2026-10-05
 
 ### Added
