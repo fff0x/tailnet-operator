@@ -50,7 +50,7 @@ func gatewayTeardownCases(t *testing.T, newFixture func(*testing.T, bool) *gatew
 		f.createSyntheticReadyPod()
 		f.reconcile("FreshRuntimeReady")
 		f.setDeletionPolicy(tnv1.GatewayDeletionPolicyDelete)
-		f.reconcile("FreshBlocked") // generation changed; the workload keeps running
+		f.reconcile("FreshRuntimeReady") // consent is not identity; the workload keeps running
 		if !controllerutil.ContainsFinalizer(f.g, gateway.TeardownFinalizer) {
 			t.Fatal("Delete must record the teardown finalizer before deletion")
 		}
@@ -76,7 +76,7 @@ func gatewayTeardownCases(t *testing.T, newFixture func(*testing.T, bool) *gatew
 		f.reconcile("Provisioning")
 		f.assertComplete()
 		f.setDeletionPolicy(tnv1.GatewayDeletionPolicyDelete)
-		f.reconcile("FreshBlocked")
+		f.reconcile("Provisioning")
 		role := &rbacv1.Role{}
 		f.get(f.g.Name, role)
 		gatewayWriterMust(t, f.c.Delete(f.ctx, role), "delete child as test admin")
@@ -108,12 +108,12 @@ func gatewayTeardownCases(t *testing.T, newFixture func(*testing.T, bool) *gatew
 		f.reconcile("Provisioning")
 		f.assertComplete()
 		f.setDeletionPolicy(tnv1.GatewayDeletionPolicyDelete)
-		f.reconcile("FreshBlocked")
+		f.reconcile("Provisioning")
 		if !controllerutil.ContainsFinalizer(f.g, gateway.TeardownFinalizer) {
 			t.Fatal("finalizer missing after Delete")
 		}
 		f.setDeletionPolicy(tnv1.GatewayDeletionPolicyRetain)
-		f.reconcile("FreshBlocked")
+		f.reconcile("Provisioning")
 		if controllerutil.ContainsFinalizer(f.g, gateway.TeardownFinalizer) {
 			t.Fatal("finalizer must follow deletionPolicy back to Retain")
 		}
@@ -131,7 +131,7 @@ func gatewayTeardownCases(t *testing.T, newFixture func(*testing.T, bool) *gatew
 		f.reconcile("Provisioning")
 		f.assertComplete()
 		f.setDeletionPolicy(tnv1.GatewayDeletionPolicyDelete)
-		f.reconcile("FreshBlocked")
+		f.reconcile("Provisioning")
 		f.hs.setFailDelete(true)
 		node := f.seedSyntheticState()
 		f.hs.setNodes([]headscale.Node{node})
@@ -158,7 +158,7 @@ func gatewayTeardownCases(t *testing.T, newFixture func(*testing.T, bool) *gatew
 		f.reconcile("Provisioning")
 		f.assertComplete()
 		f.setDeletionPolicy(tnv1.GatewayDeletionPolicyDelete)
-		f.reconcile("FreshBlocked")
+		f.reconcile("Provisioning")
 		node := f.seedSyntheticState()
 		f.hs.setNodes([]headscale.Node{node})
 		f.hs.setFailDelete(true)

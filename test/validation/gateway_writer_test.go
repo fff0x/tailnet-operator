@@ -193,18 +193,12 @@ func TestGatewayFreshWriter(t *testing.T) {
 		f.assertMints(1)
 	})
 
-	for _, change := range []string{"gateway spec", "tailnet spec", "state replacement", "child payload drift", "child replacement", "auth replacement"} {
+	for _, change := range []string{"state replacement", "child payload drift", "child replacement", "auth replacement"} {
 		t.Run("blocks "+change, func(t *testing.T) {
 			f := newFixture(t, false)
 			f.reconcile("Provisioning")
 			f.assertComplete()
 			switch change {
-			case "gateway spec":
-				f.g.Spec.Tags = []string{"tag:fabric", "tag:changed"}
-				gatewayWriterMust(t, admin.Update(ctx, f.g), "change gateway spec")
-			case "tailnet spec":
-				f.tn.Spec.APIKeyLifetime.Duration = 48 * time.Hour
-				gatewayWriterMust(t, admin.Update(ctx, f.tn), "change Tailnet spec")
 			case "state replacement", "auth replacement":
 				name := string(f.g.Spec.StateSecretRef.Name)
 				if change == "auth replacement" {
@@ -328,6 +322,7 @@ func TestGatewayFreshWriter(t *testing.T) {
 
 	gatewayTeardownCases(t, newFixture)
 	gatewayDNSLiveCases(t, newFixture, admin, ctx)
+	gatewayUpdateCases(t, newFixture, admin, ctx)
 }
 
 func gatewayWriterMust(t *testing.T, err error, message string) {
@@ -585,19 +580,14 @@ func (f *gatewayWriterFixture) assertComplete() {
 		Routes []string `json:"routes"`
 	}
 	gatewayWriterMust(f.t, json.Unmarshal([]byte(cm.Data["receipt.json"]), &receipt), "decode completion receipt")
-	if receipt.StateUID != state.UID || receipt.Auth.UID != auth.UID || receipt.Auth.KeyID != "9" || len(receipt.Objects) != 10 || receipt.Scope["gatewayUID"] != string(f.g.UID) || receipt.Scope["tailnetUID"] != string(f.tn.UID) || receipt.Scope["gatewayGeneration"] != fmt.Sprint(f.g.Generation) || receipt.Scope["tailnetGeneration"] != fmt.Sprint(f.tn.Generation) {
-		f.t.Fatal("completion receipt did not capture original API identities and generations")
+	if receipt.StateUID != state.UID || receipt.Auth.UID != auth.UID || receipt.Auth.KeyID != "9" || len(receipt.Objects) != 10 || receipt.Scope["gatewayUID"] != string(f.g.UID) || receipt.Scope["tailnetUID"] != string(f.tn.UID) {
+		f.t.Fatal("completion receipt did not capture original API identities")
 	}
-	for _, spec := range []struct {
-		name  string
-		value any
-	}{{"gateway", f.g.Spec}, {"tailnet", f.tn.Spec}} {
-		b, err := json.Marshal(spec.value)
-		gatewayWriterMust(f.t, err, "encode typed scope fixture")
-		hash := sha256.Sum256(b)
-		if receipt.Scope[spec.name+"SpecSHA256"] != hex.EncodeToString(hash[:]) {
-			f.t.Fatal("completion scope omitted full typed spec")
-		}
+	// Format 2 pins identity hashes, never generations or full specs.
+	hex64 := func(v string) bool { b, err := hex.DecodeString(v); return err == nil && len(b) == sha256.Size }
+	if len(receipt.Scope) != 7 || receipt.Scope["format"] != "2" || receipt.Scope["gatewayName"] != f.g.Name || receipt.Scope["tailnetName"] != f.tn.Name ||
+		!hex64(receipt.Scope["gatewayIdentitySHA256"]) || !hex64(receipt.Scope["tailnetIdentitySHA256"]) {
+		f.t.Fatal("completion scope is not the identity-only format 2")
 	}
 	seen := map[string]bool{}
 	for _, ref := range receipt.Objects {
@@ -619,6 +609,19 @@ func (f *gatewayWriterFixture) assertComplete() {
 				gatewayWriterMust(f.t, json.Unmarshal(encoded, &payload), "decode admitted child payload")
 				for _, field := range []string{"apiVersion", "kind", "metadata", "status"} {
 					delete(payload, field)
+				}
+				// Container images follow the spec (UpdateWorkloadRevision); the
+				// receipt binds every other StatefulSet and template field.
+				if ref.Kind == "StatefulSet" {
+					spec, _ := payload["spec"].(map[string]any)
+					template, _ := spec["template"].(map[string]any)
+					podSpec, _ := template["spec"].(map[string]any)
+					for _, key := range []string{"initContainers", "containers"} {
+						list, _ := podSpec[key].([]any)
+						for _, item := range list {
+							delete(item.(map[string]any), "image")
+						}
+					}
 				}
 				// The derived DNS zone is reconciled live from the Tailnet hosts
 				// source, so the completion fingerprint excludes it; the fresh

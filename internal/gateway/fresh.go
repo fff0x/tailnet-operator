@@ -68,7 +68,7 @@ func RenderFresh(in FreshInputs) (FreshPlan, error) {
 		g.Spec.Adoption != nil || g.Status.NodeID != "" || g.Status.IPv4 != "" || g.Status.ServiceIP != "" ||
 		len(g.Status.RoutesAdvertised) != 0 || len(g.Status.RoutesApproved) != 0 ||
 		g.Status.RoutePlan.AppliedHash != "" || len(g.Status.StaleNodes) != 0 ||
-		g.Spec.Replicas != 1 || g.Spec.DeletionPolicy != "Retain" || len(g.Spec.Forwards) != 0 ||
+		g.Spec.Replicas != 1 || len(g.Spec.Forwards) != 0 ||
 		g.Spec.Image == "" || g.Spec.DNS.Image == "" {
 		return FreshPlan{}, ErrFreshConfiguration
 	}

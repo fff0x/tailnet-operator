@@ -10,14 +10,12 @@ import (
 	"net/netip"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -30,6 +28,12 @@ import (
 
 var ErrFreshWrite = errors.New("gateway fresh write: prerequisites or retained provenance are unverified")
 
+// ErrFreshIdentity means the completion receipt is intact but the Gateway or
+// Tailnet no longer matches the identity fields pinned at creation (or the
+// receipt predates the identity scope). Nothing is written; revert the field
+// or delete and recreate the Gateway.
+var ErrFreshIdentity = errors.New("gateway fresh: pinned identity fields differ from the completion receipt")
+
 // GatewayHeadscale is satisfied by the existing authenticated Headscale client.
 // No route, policy, node deletion or key-expiry mutations are part of this writer;
 // deletion and expiry belong to TeardownFresh (GatewayTeardownHeadscale) only.
@@ -41,10 +45,18 @@ type GatewayHeadscale interface {
 // FreshObservation reports bootstrap health, not end-to-end route/DNS reachability.
 // Completed is true for every verified completion receipt even before the Pod is
 // Ready; it is the signal that the live DNS reconciler may run.
+//
+// PodPresent is true for a Pod with verified provenance (owned by the receipt
+// StatefulSet); PodCurrent additionally means its spec matches the template the
+// live Gateway spec wants. A stale-but-verified Pod stays Ready: the operator
+// never restarts an identity-bearing Pod itself (OnDelete).
 type FreshObservation struct {
-	Ready, Completed bool
-	Binding          GatewayStateBinding
-	Routes, Approved []string
+	Ready, Completed       bool
+	PodPresent, PodCurrent bool
+	Binding                GatewayStateBinding
+	Routes, Approved       []string
+	workload               freshObjectReceipt
+	stateUID               types.UID
 }
 
 type freshObjectReceipt struct {
@@ -254,18 +266,51 @@ func completedObject(g *tnv1.TailnetGateway, ns string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: g.Name + "-fresh", Namespace: ns, Labels: map[string]string{gatewayUIDLabel: string(g.UID), "app.kubernetes.io/managed-by": "tailnet-operator"}}, Immutable: ptr.To(true)}
 }
 
+type freshGatewayIdentity struct {
+	TailnetRef, StateSecretRef tnv1.GatewayLocalReference
+	Hostname                   string
+	Tags                       []string
+	Replicas                   int32
+	Routes                     tnv1.GatewayRoutes
+	Service                    tnv1.GatewayService
+	Zone                       tnv1.GatewayName
+	DNSServiceName             tnv1.GatewayServiceName
+	DNSServiceClusterIP        tnv1.GatewayIP
+	ExtraZones                 []tnv1.GatewayExtraZone
+	ForwardImage               tnv1.GatewayImage
+	Forwards                   []tnv1.GatewayForward
+}
+
+// freshScope is receipt format 2: it pins identity, not generations. Mutable
+// fields (image, dns.image, staticRecords, wildcardAddress, deletionPolicy,
+// suspend, Tailnet fields other than server and hostsConfigMap) are reconciled
+// live or are irrelevant to the retained set. Routes, service and zone fields
+// stay pinned until a route reconciler exists.
 func freshScope(g *tnv1.TailnetGateway, tn *tnv1.Tailnet, ns string) (map[string]string, error) {
-	scope, err := mintRecordScope(g, tn, ns)
-	if err != nil {
+	// Reuse the preamble checks (not suspended, no adoption, no external auth).
+	if _, err := mintRecordScope(g, tn, ns); err != nil {
 		return nil, err
 	}
-	// RV remains a write-boundary CAS in auth_record. A completed set is observed
-	// across status/metadata updates using UID + generation + full typed specs.
-	delete(scope, "gatewayVersion")
-	delete(scope, "tailnetVersion")
-	scope["gatewayGeneration"] = strconv.FormatInt(g.Generation, 10)
-	scope["tailnetGeneration"] = strconv.FormatInt(tn.Generation, 10)
-	return scope, nil
+	routes := g.Spec.Routes
+	routes.LAN = slices.Clone(routes.LAN)
+	slices.Sort(routes.LAN)
+	tags := slices.Clone(g.Spec.Tags)
+	slices.Sort(tags)
+	gateway := freshGatewayIdentity{
+		g.Spec.TailnetRef, g.Spec.StateSecretRef, g.Spec.Hostname, tags, g.Spec.Replicas, routes, g.Spec.Service,
+		g.Spec.DNS.Zone, g.Spec.DNS.ServiceName, g.Spec.DNS.ServiceClusterIP, g.Spec.DNS.ExtraZones, g.Spec.ForwardImage, g.Spec.Forwards,
+	}
+	tailnet := struct{ Server, HostsConfigMap string }{tn.Spec.Server, tn.Spec.DNS.HostsConfigMap}
+	gb, ge := json.Marshal(gateway)
+	tb, te := json.Marshal(tailnet)
+	if ge != nil || te != nil {
+		return nil, ErrGatewayAuthRecord
+	}
+	gh, th := sha256.Sum256(gb), sha256.Sum256(tb)
+	return map[string]string{
+		"format": "2", "gatewayName": g.Name, "gatewayUID": string(g.UID), "gatewayIdentitySHA256": hex.EncodeToString(gh[:]),
+		"tailnetName": tn.Name, "tailnetUID": string(tn.UID), "tailnetIdentitySHA256": hex.EncodeToString(th[:]),
+	}, nil
 }
 
 func freshIPv4(g *tnv1.TailnetGateway, p FreshPlan, hosts string) bool {
@@ -347,6 +392,11 @@ func objectReceipt(obj client.Object) freshObjectReceipt {
 	for _, k := range []string{"apiVersion", "kind", "metadata", "status"} {
 		delete(data, k)
 	}
+	// Container images follow the Gateway spec via UpdateWorkloadRevision; the
+	// rest of the StatefulSet, including every other template field, stays bound.
+	if _, ok := obj.(*appsv1.StatefulSet); ok {
+		blankTemplateImages(data)
+	}
 	// The derived DNS zone is reconciled live from the Tailnet hosts source via
 	// UpdateDNSRevision. Its integrity rides on the matching annotations and the
 	// DNSReady condition, not on this immutable fingerprint. Every other key of
@@ -361,6 +411,20 @@ func objectReceipt(obj client.Object) freshObjectReceipt {
 	return freshObjectReceipt{Kind: writerObjectKind(obj), Name: obj.GetName(), UID: obj.GetUID(), Digest: hex.EncodeToString(hash[:])}
 }
 
+func blankTemplateImages(data map[string]any) {
+	spec, _ := data["spec"].(map[string]any)
+	template, _ := spec["template"].(map[string]any)
+	podSpec, _ := template["spec"].(map[string]any)
+	for _, key := range []string{"initContainers", "containers"} {
+		list, _ := podSpec[key].([]any)
+		for _, item := range list {
+			if container, ok := item.(map[string]any); ok {
+				delete(container, "image")
+			}
+		}
+	}
+}
+
 func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, hs GatewayHeadscale, now time.Time, scope map[string]string, record *corev1.ConfigMap) (FreshObservation, error) {
 	bad := func() (FreshObservation, error) { return FreshObservation{}, ErrFreshWrite }
 	if record.UID == "" || record.ResourceVersion == "" || record.DeletionTimestamp != nil || record.Immutable == nil || !*record.Immutable || len(record.OwnerReferences) != 0 || len(record.Finalizers) != 0 || len(record.BinaryData) != 0 || len(record.Data) != 1 || record.Labels[gatewayUIDLabel] != string(g.UID) || record.Labels["app.kubernetes.io/managed-by"] != "tailnet-operator" {
@@ -373,8 +437,11 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 	var receipt freshReceipt
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&receipt) != nil || decoder.Decode(&struct{}{}) != io.EOF || !reflect.DeepEqual(scope, receipt.Scope) || receipt.StateUID == "" || len(receipt.Objects) != 10 {
+	if decoder.Decode(&receipt) != nil || decoder.Decode(&struct{}{}) != io.EOF || receipt.StateUID == "" || len(receipt.Objects) != 10 {
 		return bad()
+	}
+	if !reflect.DeepEqual(scope, receipt.Scope) {
+		return FreshObservation{}, ErrFreshIdentity
 	}
 	auth := &corev1.Secret{}
 	if c.Get(ctx, client.ObjectKey{Namespace: ns, Name: g.Name + "-auth"}, auth) != nil {
@@ -397,6 +464,7 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 		wanted[freshObjectKind(obj)+"/"+obj.GetName()] = emptyFreshObject(obj)
 	}
 	var sts *appsv1.StatefulSet
+	var workload freshObjectReceipt
 	for _, ref := range receipt.Objects {
 		k := ref.Kind + "/" + ref.Name
 		obj := wanted[k]
@@ -406,6 +474,7 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 		delete(wanted, k)
 		if v, ok := obj.(*appsv1.StatefulSet); ok {
 			sts = v
+			workload = ref
 		}
 	}
 	if len(wanted) != 0 || sts == nil {
@@ -415,7 +484,7 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 	if c.Get(ctx, client.ObjectKey{Namespace: ns, Name: string(g.Spec.StateSecretRef.Name)}, state) != nil || state.UID != receipt.StateUID || state.DeletionTimestamp != nil {
 		return bad()
 	}
-	result := FreshObservation{Completed: true, Routes: slices.Clone(receipt.Routes)}
+	result := FreshObservation{Completed: true, Routes: slices.Clone(receipt.Routes), workload: workload}
 	pod := &corev1.Pod{}
 	err = c.Get(ctx, client.ObjectKey{Namespace: ns, Name: g.Name + "-0"}, pod)
 	if apierrors.IsNotFound(err) {
@@ -425,16 +494,18 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 		return bad()
 	}
 	owner := metav1.GetControllerOf(pod)
-	if pod.DeletionTimestamp != nil || owner == nil || owner.UID != sts.UID || owner.Kind != "StatefulSet" || owner.Name != sts.Name || pod.Labels[gatewayUIDLabel] != string(g.UID) || pod.Spec.ServiceAccountName != g.Name || pod.Labels[gatewayStateUIDLabel] != string(receipt.StateUID) || !equality.Semantic.DeepDerivative(sts.Spec.Template.Spec, pod.Spec) {
+	if pod.DeletionTimestamp != nil || owner == nil || owner.UID != sts.UID || owner.Kind != "StatefulSet" || owner.Name != sts.Name || pod.Labels[gatewayUIDLabel] != string(g.UID) || pod.Spec.ServiceAccountName != g.Name || pod.Labels[gatewayStateUIDLabel] != string(receipt.StateUID) {
 		return result, nil
 	}
+	result.PodPresent = true
+	result.PodCurrent = podImagesCurrent(pod.Spec, freshImages(g))
 	ready := false
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
 			ready = true
 		}
 	}
-	if !ready || pod.Status.Phase != corev1.PodRunning || len(pod.Status.ContainerStatuses) != len(sts.Spec.Template.Spec.Containers) {
+	if !ready || pod.Status.Phase != corev1.PodRunning || len(pod.Status.ContainerStatuses) != len(pod.Spec.Containers) {
 		return result, nil
 	}
 	for _, container := range pod.Status.ContainerStatuses {

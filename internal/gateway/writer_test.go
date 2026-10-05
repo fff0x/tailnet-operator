@@ -32,32 +32,74 @@ func TestFreshCompletionScope(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(initial, after) {
 		t.Fatal("status or metadata RV churn invalidates completed provenance")
 	}
-	for _, field := range []string{"gatewayUID", "tailnetUID", "gatewayGeneration", "tailnetGeneration", "gatewaySpec", "tailnetSpec", "suspended", "externalAuth", "adoption"} {
-		t.Run(field, func(t *testing.T) {
+	// Mutable fields and churn must keep the receipt valid ...
+	for name, mutate := range map[string]func(*tnv1.TailnetGateway, *tnv1.Tailnet){
+		"gatewayGeneration": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Generation++ },
+		"tailnetGeneration": func(_ *tnv1.TailnetGateway, tn *tnv1.Tailnet) { tn.Generation++ },
+		"image":             func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Image = "ghcr.io/tailscale/tailscale:v1.102.5" },
+		"dns image":         func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.DNS.Image = "coredns/coredns:1.14.7" },
+		"static records": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) {
+			g.Spec.DNS.StaticRecords = []tnv1.GatewayStaticRecord{{Name: "app", Address: "198.51.100.8"}}
+		},
+		"wildcard": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.DNS.WildcardAddress = "198.51.100.9" },
+		"deletion policy": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) {
+			g.Spec.DeletionPolicy = tnv1.GatewayDeletionPolicyDelete
+		},
+		"tag order":       func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Tags = []string{"tag:fabric", "tag:mesh"} },
+		"tailnet api url": func(_ *tnv1.TailnetGateway, tn *tnv1.Tailnet) { tn.Spec.APIURL = "https://api.example" },
+	} {
+		t.Run("mutable/"+name, func(t *testing.T) {
 			cg, ct := g.DeepCopy(), tn.DeepCopy()
-			switch field {
-			case "gatewayUID":
-				cg.UID = "replacement"
-			case "tailnetUID":
-				ct.UID = "replacement"
-			case "gatewayGeneration":
-				cg.Generation++
-			case "tailnetGeneration":
-				ct.Generation++
-			case "gatewaySpec":
-				cg.Spec.Hostname = "different"
-			case "tailnetSpec":
-				ct.Spec.Server = "https://different.example"
-			case "suspended":
-				cg.Spec.Suspend = ptr.To(true)
-			case "externalAuth":
-				cg.Spec.AuthKeySecretRef = &tnv1.GatewayAuthKeyReference{Name: "foreign"}
-			case "adoption":
-				cg.Spec.Adoption = &tnv1.GatewayAdoption{NodeID: "1"}
+			mutate(cg, ct)
+			got, err := freshScope(cg, ct, in.Namespace)
+			if err != nil || !reflect.DeepEqual(initial, got) {
+				t.Fatal("mutable field invalidated the completion receipt")
 			}
+		})
+	}
+	// ... while every pinned identity field must not reuse it.
+	for name, mutate := range map[string]func(*tnv1.TailnetGateway, *tnv1.Tailnet){
+		"gatewayUID": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.UID = "replacement" },
+		"tailnetUID": func(_ *tnv1.TailnetGateway, tn *tnv1.Tailnet) { tn.UID = "replacement" },
+		"hostname":   func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Hostname = "different" },
+		"tags":       func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Tags = []string{"tag:fabric"} },
+		"lan": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) {
+			g.Spec.Routes.LAN = append(g.Spec.Routes.LAN, "10.9.0.0/16")
+		},
+		"egress adv":  func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Routes.AdvertiseEgressTargets = ptr.To(false) },
+		"lb ip":       func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Service.LoadBalancerIP = "198.51.100.2" },
+		"lb cidr":     func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Service.TailnetLBCIDR = "198.51.0.0/16" },
+		"pool labels": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Service.PoolLabels = nil },
+		"dns zone":    func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.DNS.Zone = "other.example" },
+		"dns service": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.DNS.ServiceName = "other-dns" },
+		"dns cluster": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.DNS.ServiceClusterIP = "10.96.0.54" },
+		"extra zones": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) {
+			g.Spec.DNS.ExtraZones = []tnv1.GatewayExtraZone{{Zone: "x.example"}}
+		},
+		"forwards":     func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Forwards = []tnv1.GatewayForward{{Name: "api"}} },
+		"tailnet url":  func(_ *tnv1.TailnetGateway, tn *tnv1.Tailnet) { tn.Spec.Server = "https://different.example" },
+		"tailnet host": func(_ *tnv1.TailnetGateway, tn *tnv1.Tailnet) { tn.Spec.DNS.HostsConfigMap = "other-hosts" },
+	} {
+		t.Run("pinned/"+name, func(t *testing.T) {
+			cg, ct := g.DeepCopy(), tn.DeepCopy()
+			mutate(cg, ct)
 			got, err := freshScope(cg, ct, in.Namespace)
 			if err == nil && reflect.DeepEqual(initial, got) {
-				t.Fatal("changed scope reused completion receipt")
+				t.Fatal("changed identity reused completion receipt")
+			}
+		})
+	}
+	// Suspend, external auth and adoption are refused outright, not just unequal.
+	for name, mutate := range map[string]func(*tnv1.TailnetGateway){
+		"suspended":    func(g *tnv1.TailnetGateway) { g.Spec.Suspend = ptr.To(true) },
+		"externalAuth": func(g *tnv1.TailnetGateway) { g.Spec.AuthKeySecretRef = &tnv1.GatewayAuthKeyReference{Name: "foreign"} },
+		"adoption":     func(g *tnv1.TailnetGateway) { g.Spec.Adoption = &tnv1.GatewayAdoption{NodeID: "1"} },
+	} {
+		t.Run("refused/"+name, func(t *testing.T) {
+			cg := g.DeepCopy()
+			mutate(cg)
+			if _, err := freshScope(cg, tn, in.Namespace); err == nil {
+				t.Fatal("scope accepted refused input")
 			}
 		})
 	}

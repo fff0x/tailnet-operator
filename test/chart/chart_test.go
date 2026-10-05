@@ -331,9 +331,10 @@ func TestRBACPrivilegesExact(t *testing.T) {
 			local := append([]grant{}, workloads...)
 			local = append(local, grant{"", "services", write},
 				// Fresh gateway children: create-only plus UID-preconditioned delete for
-				// deletionPolicy=Delete teardown. Never update/list/watch/escalate/bind.
+				// deletionPolicy=Delete teardown; StatefulSets also update (spec.template follows
+				// the spec). Never list/watch/escalate/bind.
 				grant{"", "serviceaccounts", "get create delete"},
-				grant{"apps", "statefulsets", "get create delete"},
+				grant{"apps", "statefulsets", "get create update delete"},
 				grant{"policy", "poddisruptionbudgets", "get create delete"},
 				grant{"rbac.authorization.k8s.io", "roles rolebindings", "get create delete"},
 				grant{"tsunaro.io", "tailnetegresses", read},

@@ -555,8 +555,9 @@ spec:
               success claims.
             properties:
               conditions:
-                description: Registered, RoutesInSync, DNSReady, StaleNodes, ClusterDNSForward
-                  and Ready.
+                description: |-
+                  Registered, RoutesInSync, DNSReady, StaleNodes, ClusterDNSForward and Ready;
+                  fresh gateways with a verified completion receipt also report WorkloadCurrent.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
