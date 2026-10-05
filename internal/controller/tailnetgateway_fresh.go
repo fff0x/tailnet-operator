@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/gateway"
@@ -56,13 +57,26 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 }
 
 func (r *TailnetGatewayReconciler) observeFreshRuntime(ctx context.Context, g *tnv1.TailnetGateway) (gateway.FreshObservation, string) {
+	tn, hs, reason := r.freshHeadscale(ctx, g)
+	if hs == nil {
+		return gateway.FreshObservation{}, reason
+	}
+	observation, err := gateway.ReconcileFresh(ctx, r.RuntimeClient, r.OperatorNamespace, g, tn, hs, time.Now)
+	if err != nil {
+		return gateway.FreshObservation{}, "FreshBlocked"
+	}
+	return observation, "Provisioning"
+}
+
+// freshHeadscale resolves the Tailnet and an authenticated client, or a reason.
+func (r *TailnetGatewayReconciler) freshHeadscale(ctx context.Context, g *tnv1.TailnetGateway) (*tnv1.Tailnet, *headscale.Client, string) {
 	tn := &tnv1.Tailnet{}
 	if r.RuntimeClient.Get(ctx, client.ObjectKey{Name: string(g.Spec.TailnetRef.Name)}, tn) != nil {
-		return gateway.FreshObservation{}, "NoTailnet"
+		return nil, nil, "NoTailnet"
 	}
 	token, err := readWorkingKey(ctx, r.RuntimeClient, r.OperatorNamespace, tn.Name)
 	if err != nil {
-		return gateway.FreshObservation{}, "NoAPIKey"
+		return nil, nil, "NoAPIKey"
 	}
 	endpoint := tn.Spec.APIURL
 	if endpoint == "" {
@@ -70,10 +84,58 @@ func (r *TailnetGatewayReconciler) observeFreshRuntime(ctx context.Context, g *t
 	}
 	// This is the same working-key and API-endpoint selection used by egress.
 	// Neither credential values nor arbitrary server/API errors enter status/logs.
-	hs := headscale.New(endpoint, token)
-	observation, err := gateway.ReconcileFresh(ctx, r.RuntimeClient, r.OperatorNamespace, g, tn, hs, time.Now)
-	if err != nil {
-		return gateway.FreshObservation{}, "FreshBlocked"
+	return tn, headscale.New(endpoint, token), ""
+}
+
+// reconcileTeardown runs only for a terminating CR that carries the teardown
+// finalizer. Switching deletionPolicy back to Retain while terminating drops the
+// finalizer and retains everything; Headscale or attribution failures block.
+func (r *TailnetGatewayReconciler) reconcileTeardown(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	g := &tnv1.TailnetGateway{}
+	if err := r.RuntimeClient.Get(ctx, req.NamespacedName, g); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, &gatewayAPIError{operation: "teardown resource read", cause: err}
 	}
-	return observation, "Provisioning"
+	if g.DeletionTimestamp == nil || !controllerutil.ContainsFinalizer(g, gateway.TeardownFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	progress, reason := gateway.TeardownProgress{}, "Deleting"
+	if g.Spec.DeletionPolicy != tnv1.GatewayDeletionPolicyDelete {
+		progress, reason = gateway.TeardownProgress{Step: "retained", Done: true}, "Retained"
+	} else if tn, hs, why := r.freshHeadscale(ctx, g); hs == nil {
+		progress, reason = gateway.TeardownProgress{Step: why}, "TeardownBlocked"
+	} else if p, err := gateway.TeardownFresh(ctx, r.RuntimeClient, r.OperatorNamespace, g, tn, hs); err != nil {
+		progress, reason = p, "TeardownBlocked"
+	} else {
+		progress = p
+	}
+	if progress.Done {
+		before := g.DeepCopy()
+		controllerutil.RemoveFinalizer(g, gateway.TeardownFinalizer)
+		if err := r.RuntimeClient.Patch(ctx, g, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
+			return ctrl.Result{}, &gatewayAPIError{operation: "finalizer removal", cause: err}
+		}
+		return ctrl.Result{}, nil
+	}
+	before := g.DeepCopy()
+	g.Status.ObservedGeneration = g.Generation
+	message := "Teardown in progress; step: " + progress.Step + "."
+	if reason == "TeardownBlocked" {
+		message = "Teardown blocked at step " + progress.Step + "; nothing further is deleted. Set deletionPolicy=Retain to release the finalizer and keep all resources."
+	}
+	for _, name := range []string{"Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "Ready"} {
+		status := metav1.ConditionUnknown
+		if name == "Ready" {
+			status = metav1.ConditionFalse
+		}
+		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: name, Status: status, Reason: reason, Message: message, ObservedGeneration: g.Generation})
+	}
+	if !equality.Semantic.DeepEqual(before.Status, g.Status) {
+		if err := r.RuntimeClient.Status().Patch(ctx, g, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
+			return ctrl.Result{}, &gatewayAPIError{operation: "teardown status write", cause: err}
+		}
+	}
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }

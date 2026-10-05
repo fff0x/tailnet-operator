@@ -185,10 +185,17 @@ type GatewayAdoption struct {
 	Objects []GatewayAdoptionObject `json:"objects"`
 }
 
+// Values of TailnetGatewaySpec.DeletionPolicy.
+const (
+	GatewayDeletionPolicyRetain = "Retain"
+	GatewayDeletionPolicyDelete = "Delete"
+)
+
 // TailnetGatewaySpec is an experimental API contract, suspended by default.
-// Explicit suspend=false opts into the fresh writer, not adoption. Retention is
-// the only deletion policy; adoption never implies consent to replace a pod,
-// reset state, rename nodes or remove stale nodes.
+// Explicit suspend=false opts into the fresh writer, not adoption. Deletion
+// retains everything unless deletionPolicy=Delete explicitly consents to tearing
+// down the operator's own fresh resources; adoption never implies consent to
+// replace a pod, reset state, rename nodes or remove stale nodes.
 // +kubebuilder:validation:XValidation:rule="self.tailnetRef == oldSelf.tailnetRef && self.hostname == oldSelf.hostname && self.stateSecretRef == oldSelf.stateSecretRef",message="gateway identity references are immutable"
 // +kubebuilder:validation:XValidation:rule="has(self.adoption) == has(oldSelf.adoption) && (!has(self.adoption) || self.adoption == oldSelf.adoption)",message="adoption inventory is immutable"
 // +kubebuilder:validation:XValidation:rule="!has(self.authKeySecretRef) || self.authKeySecretRef.name != self.stateSecretRef.name",message="auth key and state must use separate Secrets"
@@ -216,8 +223,13 @@ type TailnetGatewaySpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == 1",message="gateway replicas must equal one"
 	// +optional
 	Replicas int32 `json:"replicas,omitempty"`
+	// Retain leaves every resource, node and key in place when the CR is deleted.
+	// Delete records consent through a finalizer: the operator removes only the
+	// fresh resources it created (matched by recorded UID or its own gateway-uid
+	// label), the Headscale node and the minted bootstrap key, in a fixed order
+	// and fail-closed. Adopted or user-supplied objects are never deleted.
 	// +kubebuilder:default=Retain
-	// +kubebuilder:validation:Enum=Retain
+	// +kubebuilder:validation:Enum=Retain;Delete
 	// +optional
 	DeletionPolicy string `json:"deletionPolicy,omitempty"`
 	// Bootstrap tags do not authorize dropping existing tags on an adopted node.

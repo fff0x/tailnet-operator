@@ -31,7 +31,8 @@ import (
 var ErrFreshWrite = errors.New("gateway fresh write: prerequisites or retained provenance are unverified")
 
 // GatewayHeadscale is satisfied by the existing authenticated Headscale client.
-// No route, policy, node deletion or key-expiry mutations are part of this writer.
+// No route, policy, node deletion or key-expiry mutations are part of this writer;
+// deletion and expiry belong to TeardownFresh (GatewayTeardownHeadscale) only.
 type GatewayHeadscale interface {
 	ListNodes(context.Context) ([]headscale.Node, error)
 	CreatePreAuthKey(context.Context, headscale.CreatePreAuthKeyRequest) (*headscale.PreAuthKey, error)
