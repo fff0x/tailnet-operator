@@ -24,7 +24,7 @@ bindings: a RoleBinding limits its role to that namespace, a ClusterRoleBinding 
 | Role | Role namespace | Effective namespace(s) | API groups | Resources | Verbs | Resource names | Non-resource URLs |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetgateways/status` | `get`, `patch`, `update` | all names | — |
-| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetgateways` | `get`, `list`, `watch` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetgateways` | `get`, `list`, `patch`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses/finalizers`, `tailnets/finalizers` | `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses/status` | `get`, `patch`, `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses` | `get`, `list`, `watch` | all names | — |
@@ -39,13 +39,13 @@ bindings: a RoleBinding limits its role to that namespace, a ClusterRoleBinding 
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `configmaps`, `secrets`, `services` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `events` | `create`, `patch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `pods` | `get`, `list`, `watch` | all names | — |
-| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `serviceaccounts` | `create`, `get` | all names | — |
+| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `serviceaccounts` | `create`, `delete`, `get` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `apps` | `deployments` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
-| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `apps` | `statefulsets` | `create`, `get` | all names | — |
+| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `apps` | `statefulsets` | `create`, `delete`, `get` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `coordination.k8s.io` | `leases` | `create`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `networking.k8s.io` | `networkpolicies` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
-| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `policy` | `poddisruptionbudgets` | `create`, `get` | all names | — |
-| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `rbac.authorization.k8s.io` | `rolebindings`, `roles` | `create`, `get` | all names | — |
+| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `policy` | `poddisruptionbudgets` | `create`, `delete`, `get` | all names | — |
+| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `rbac.authorization.k8s.io` | `rolebindings`, `roles` | `create`, `delete`, `get` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tsunaro.io` | `tailnetegresses/finalizers` | `update` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tsunaro.io` | `tailnetegresses/status` | `get`, `patch`, `update` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tsunaro.io` | `tailnetegresses` | `get`, `list`, `watch` | all names | — |

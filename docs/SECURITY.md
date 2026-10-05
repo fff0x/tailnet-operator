@@ -56,6 +56,11 @@ state or list Secrets. The operator reads private state keys in memory to verify
 public identity. Auth/completion receipt ConfigMaps are privileged trust anchors:
 protect their create/update/delete rights as strictly as Secrets. Replacing all
 retained evidence can forge provenance; immutability alone does not prevent this.
+The operator may `delete` the Gateway's StatefulSet, PDB, ServiceAccount, Role and
+RoleBinding and `patch` `tailnetgateways` for its finalizer. Deletion happens only
+with `deletionPolicy: Delete`, only for objects whose UID the receipt recorded or
+that carry the operator's gateway label, and every call is UID-preconditioned; the
+CR patch writes metadata only. The Secret/ConfigMap delete rights already existed.
 
 The operator holds cluster-wide permissions on the workloads and Secrets it manages for tenant
 agents, plus cert-manager `Certificate` get/create/patch/delete for `issuerRef` ingresses. Kubernetes
