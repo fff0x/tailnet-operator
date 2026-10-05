@@ -57,10 +57,11 @@ The two timeout fields do not reproduce Envoy connection-idle or stream-idle pol
 The development `TailnetGateway` CRD defaults to `suspend: true`. Explicit `false`
 activates fresh-only IPv4 creation; existing gateways are never adopted or replaced.
 The operator/chart require this fourth CRD, gateway read/status authorization and
-operator-namespace get/create for StatefulSets, PDBs, ServiceAccounts, Roles and
-RoleBindings. No update/delete rights for those resources or Gateway finalizer
-permissions are added. Suspension freezes reconciliation, not the running Pod.
-CR deletion retains resources. Partial creation remains blocked without automatic
+operator-namespace get/create/delete for StatefulSets, PDBs, ServiceAccounts, Roles and
+RoleBindings plus `patch` on `tailnetgateways` for the teardown finalizer. No update
+rights are added. Suspension freezes reconciliation, not the running Pod.
+CR deletion retains resources unless `deletionPolicy: Delete` explicitly consents to
+the UID-preconditioned teardown. Partial creation remains blocked without automatic
 remint or rollback. Do not treat CR acceptance or observed generation as runtime,
 DNS or identity evidence.
 See the [gateway reference](reference/gateway.md).

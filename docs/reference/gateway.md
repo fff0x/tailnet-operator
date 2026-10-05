@@ -7,12 +7,15 @@ egress controllers do not reconcile this resource.
 
 While suspended, the controller reads only the Gateway CR and patches its status.
 Missing dependencies do not prevent suspension. Suspension does not stop an already
-running gateway. CR deletion performs no cleanup: resources have no Gateway owner
-references or finalizers. StatefulSets retain and recreate their own Pods.
+running gateway. CR deletion retains everything by default: resources have no Gateway
+owner references. Only `deletionPolicy: Delete` consents to the operator tearing down
+its own fresh resources; see [Deletion](#deletion). StatefulSets retain and recreate their own Pods.
 
 This is a development feature, not a release or migration instruction. New permissions
-are namespace-local `get/create` for StatefulSets, PDBs, ServiceAccounts, Roles and
-RoleBindings. There are no new update/delete, escalation, binding or CR-spec grants.
+are namespace-local `get/create/delete` for StatefulSets, PDBs, ServiceAccounts, Roles and
+RoleBindings, and `patch` on `tailnetgateways` for the teardown finalizer. `delete` is
+used only by the teardown and always with a UID precondition. There are no update,
+escalation, binding or CR-spec grants.
 Do not remove an existing gateway, move its Secret, or change Headscale split-DNS
 because this CRD is installed. See [compatibility](../COMPATIBILITY.md#experimental-gateway-api).
 
@@ -46,7 +49,8 @@ the retained runtime.
 Changed specs/generations, replaced state/resources, payload drift or expired auth block observation.
 A suspend/resume cycle also changes generation and invalidates completion evidence;
 resuming an existing set is not implemented by this fresh-only slice.
-No keys are renewed and no resources are updated, adopted, compensated or automatically deleted.
+No keys are renewed and no resources are updated, adopted, compensated or deleted
+outside the explicit [Deletion](#deletion) consent.
 Partial creation without a complete receipt remains blocked, even if a workload started.
 A lost completion response may be recovered only when the complete immutable record actually exists.
 These are sequential checks, not a transaction or a general crash-recovery protocol.
@@ -70,7 +74,7 @@ There is no configurable target namespace or arbitrary Pod/Corefile/shell templa
 | `authKeySecretRef.{name,key}` | Optional external bootstrap key, default key `TS_AUTHKEY`; must not be the state Secret |
 | `image` | Kernel Tailscale image with a concrete version tag or SHA256 digest, not the userspace agent image |
 | `replicas` | Exactly `1`, also the default |
-| `deletionPolicy` | Only `Retain`, also the default; adopted resources and persistent identity must survive CR deletion |
+| `deletionPolicy` | `Retain` (default): CR deletion leaves every resource, the Headscale node and the key in place. `Delete`: consent to the fail-closed teardown below |
 | `tags` | Bootstrap tags, default `[tag:fabric]`; not authority to drop existing tags during adoption |
 | `routes.lan[]` | 1–32 canonical masked non-default IPv4/IPv6 prefixes |
 | `routes.advertiseEgressTargets` | Default `true`; literal IPv4/IPv6 targets yield /32 or /128; DNS targets are not resolved |
@@ -123,8 +127,8 @@ It returns nine resources:
 - A derived CoreDNS ConfigMap, ServiceAccount, Role, RoleBinding and singleton PDB.
 
 UID-bound selectors isolate gateways. Pool labels affect only the LB Service and
-cannot overwrite identity labels. No resource receives a gateway GC owner reference
-or finalizer. This models retention; it does not prove live deletion behavior.
+cannot overwrite identity labels. No resource receives a gateway GC owner reference.
+Retention is the default; the explicit teardown is described under [Deletion](#deletion).
 The PDB blocks voluntary eviction of the singleton and can therefore block drains.
 
 State and auth Secrets are deliberately absent from the returned objects. Before
@@ -381,9 +385,44 @@ The same gate also checks the actual IPv4 data path, before and after Pod recrea
 The target, peer and gateway retain their verified UIDs/processes throughout each phase.
 This proves one IPv4 TCP subnet path and one local DNS name over UDP/TCP, not every route
 or DNS feature. It does **not** prove DNS reload, egress-derived host routes, IPv6 routing,
-arm64 execution, crash-safe writer recovery, CR-deletion retention or interruption-free
-adoption. Activation requires explicit `suspend: false`; no production Pod-template
+arm64 execution, crash-safe writer recovery or interruption-free adoption. The same
+run ends with a `deletionPolicy: Delete` teardown and checks that no labelled object,
+the Headscale node or a usable bootstrap key remains. Activation requires explicit `suspend: false`; no production Pod-template
 security change is needed for these checks.
+
+## Deletion
+
+`deletionPolicy` is the only consent record. With the default `Retain`, deleting the
+CR removes nothing: no finalizer is set, the StatefulSet keeps running, the state and
+auth Secrets, receipts, Headscale node and bootstrap key stay. Clean up by hand.
+
+Setting `Delete` on an active (non-suspended) Gateway adds the finalizer
+`tsunaro.io/gateway-teardown` on the next reconcile. Switching back to `Retain`
+removes it again, also while the CR is already terminating: that is the escape hatch
+when a teardown is blocked. Changing the policy changes the generation and therefore
+invalidates the completion receipt; a running Gateway keeps running but reports
+`FreshBlocked` until it is deleted. Flip the policy immediately before deleting.
+
+On deletion with the finalizer present the controller tears down, in this order and
+fail-closed, only what this Gateway provably created:
+
+1. The StatefulSet recorded in the `<gateway>-fresh` receipt, then it waits until no
+   Pod labelled `tsunaro.io/gateway-uid=<CR UID>` remains (`Ready=False/Deleting`).
+2. The Headscale node bound to the state Secret (`VerifyGatewayState`, falling back to
+   `status.nodeId`); deleting it drops its route approvals. Then the minted bootstrap
+   key is expired by its recorded ID. A user-supplied `authKeySecretRef` is never touched.
+3. The remaining receipt children, each by the UID recorded at creation.
+4. The auth Secret, the state Secret (UID must equal the receipt's), then the
+   `-auth-receipt` and `-fresh` ConfigMaps last: the receipt is the inventory.
+
+Every Kubernetes delete carries a UID precondition. An object under one of our names
+with a different UID, a receipt without our label, or a Headscale error other than 404
+blocks at that step: `Ready=False/TeardownBlocked` names the step, nothing further is
+deleted, and the finalizer stays until the conflict is removed or the policy is set to
+`Retain`. Without a completion receipt (partial creation) there is no child inventory:
+only the state/auth Secrets and receipts carrying our label are removed and the key is
+expired; children created before the fault remain. Deleting a suspended Gateway or one
+reconciled without a runtime client always retains.
 
 ## Fresh DNS rendering: partial implementation
 
