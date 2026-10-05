@@ -62,7 +62,11 @@ RoleBindings plus `patch` on `tailnetgateways` for the teardown finalizer. No up
 rights are added. Suspension freezes reconciliation, not the running Pod.
 CR deletion retains resources unless `deletionPolicy: Delete` explicitly consents to
 the UID-preconditioned teardown. Partial creation remains blocked without automatic
-remint or rollback. Do not treat CR acceptance or observed generation as runtime,
+remint or rollback. The derived `-coredns` ConfigMap is reconciled live from the
+Tailnet hosts source via a CAS writer; the `DNSReady` condition reports the writer
+verdict. Gateways rendered by versions before this slice carry no DNS CAS
+annotations and permanently report `DNSReady=False/DNSUpdateBlocked`; delete and
+recreate with `deletionPolicy: Delete` to migrate. Do not treat CR acceptance or observed generation as runtime,
 DNS or identity evidence.
 See the [gateway reference](reference/gateway.md).
 

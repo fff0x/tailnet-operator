@@ -56,10 +56,12 @@ A lost completion response may be recovered only when the complete immutable rec
 These are sequential checks, not a transaction or a general crash-recovery protocol.
 
 Protect both receipt ConfigMaps as strictly as Secrets. An administrator who can replace
-all retained evidence can forge it. Initial DNS is a fixed snapshot at SOA serial 1;
-source changes and route changes are not reconciled by this slice. Runtime Ready does
-not assert approved routes, LoadBalancer allocation, DNS answers or cluster DNS forwarding.
-The isolated Kind probe supplies separate forwarding/DNS evidence.
+all retained evidence can forge it. The initial zone is rendered at SOA serial 1 and
+carries the `tsunaro.io/dns-serial` and `tsunaro.io/dns-content-sha256` annotations.
+Changes to the Tailnet hosts source are reconciled live into the derived `-coredns`
+ConfigMap (see [Deletion](#deletion)-neighbour [Live DNS reconcile](#live-dns-reconcile)); routes remain unchanged.
+Runtime Ready does not assert approved routes, LoadBalancer allocation, DNS answers or
+cluster DNS forwarding. The isolated Kind probe supplies separate forwarding/DNS evidence.
 
 ## Configuration
 
@@ -423,6 +425,45 @@ deleted, and the finalizer stays until the conflict is removed or the policy is 
 only the state/auth Secrets and receipts carrying our label are removed and the key is
 expired; children created before the fault remain. Deleting a suspended Gateway or one
 reconciled without a runtime client always retains.
+
+## Live DNS reconcile
+
+Once a Gateway has recorded its completion receipt (`FreshObservation.Completed`),
+the controller reconciles the derived `-coredns` ConfigMap against the Tailnet
+hosts source on every pass of the normal 5 s requeue. The write path is the
+existing `UpdateDNSRevision`:
+
+- Re-render the zone from the live `hosts` source, Gateway and Tailnet; the SOA
+  serial advances only when the semantic content hash changes (cosmetic
+  reformatting of `hosts` is a no-op), and exhaustion is a hard failure, not a
+  reset.
+- Compare against the persisted CAS annotations `tsunaro.io/dns-serial` and
+  `tsunaro.io/dns-content-sha256`; the hash is validated against the ConfigMap's
+  actual payload, so a replaced zone without a matching hash blocks the write.
+- Update the `-coredns` ConfigMap with the exact `resourceVersion` observed; a
+  concurrent change retries up to three times, then surfaces as a conflict.
+- Never create, replace or adopt the ConfigMap, the hosts source or any other
+  receipt child. kubelet refreshes the Pod's projected volume (~60 s) and the
+  CoreDNS `file` plugin reloads the zone (`reload 1s`).
+
+The `DNSReady` condition reflects the writer verdict:
+
+- `True / DNSInSync` — the derived zone matches the hosts source at the
+  recorded serial.
+- `False / DNSUpdateBlocked` — source, target or revision annotations are not
+  verified; no update is attempted. Also used until the Gateway has a completion
+  receipt and for Gateways rendered by versions before this slice (missing
+  annotations are never treated as a fresh serial 1). Delete and recreate the
+  Gateway (`deletionPolicy: Delete`) to migrate.
+- `False / DNSUpdateConflict` — a concurrent change on the ConfigMap aborted
+  the CAS; the next reconcile retries.
+
+Only `zone.db` is excluded from the completion fingerprint; `Corefile` and every
+other key stay digest-bound and still trip `FreshBlocked` on drift. The
+`DNSReady` condition is independent of `Ready`: a successful live reconcile does
+not make the gateway Ready, and a blocked DNS reconcile does not revoke it. The
+receipt ConfigMaps still demand the trust of a Secret; whoever can rewrite the
+`-coredns` annotations can forge zone provenance.
 
 ## Fresh DNS rendering: partial implementation
 
