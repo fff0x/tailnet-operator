@@ -29,8 +29,8 @@ func TestGatewayPrerequisiteRunner(t *testing.T) {
 		"elif [[ $# == 1 && $1 == --gateway-preflight-only ]]; then\n    test_pattern='^TestGatewayKernelPrerequisites$'\n    test_timeout=10m\n    kernel_only=true",
 		"[[ $kernel_only != true ]] || modes+=(kernel)",
 		"kernel) action=(exec --user 65534:65534 \"$node\" /tmp/owned-source-kernelcheck --capture=node --fixture=p2.1-kernel-prerequisites)",
-		"test/internal/{netproof,kindfixture,kernelcheck}/*.go",
-		"httppeer,kernelcheck}/*.go",
+		"test/internal/{netproof,kindfixture,kernelcheck,gatewayprobe}/*.go",
+		"httppeer,kernelcheck,gatewayprobe}/*.go",
 	} {
 		if !strings.Contains(s, required) {
 			t.Fatal("fixed selection, budget or provenance contract changed")

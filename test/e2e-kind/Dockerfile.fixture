@@ -9,6 +9,7 @@ COPY --chmod=0755 netgate /netgate
 COPY --chmod=0755 controlprobe /controlprobe
 COPY --chmod=0755 headscale /headscale
 COPY --chmod=0755 httppeer /httppeer
+COPY --chmod=0755 gatewayprobe /gatewayprobe
 USER 65532:65532
 ENTRYPOINT ["/hold"]
 CMD ["--fixture=p1.8-layered-isolation"]

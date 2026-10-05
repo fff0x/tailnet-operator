@@ -162,6 +162,7 @@ func decodeGatewayCLINodes(b []byte) ([]headscale.Node, bool) {
 		IPAddresses     []string `json:"ip_addresses"`
 		Tags            []string `json:"tags"`
 		AvailableRoutes []string `json:"available_routes"`
+		ApprovedRoutes  []string `json:"approved_routes"`
 		PreAuthKey      *struct {
 			ID        uint64 `json:"id"`
 			Ephemeral bool   `json:"ephemeral"`
@@ -175,7 +176,7 @@ func decodeGatewayCLINodes(b []byte) ([]headscale.Node, bool) {
 		if row.ID == 0 {
 			return nil, false
 		}
-		n := headscale.Node{ID: strconv.FormatUint(row.ID, 10), MachineKey: row.MachineKey, NodeKey: row.NodeKey, GivenName: row.GivenName, Online: row.Online, IPAddresses: row.IPAddresses, Tags: row.Tags, AvailableRoutes: row.AvailableRoutes}
+		n := headscale.Node{ID: strconv.FormatUint(row.ID, 10), MachineKey: row.MachineKey, NodeKey: row.NodeKey, GivenName: row.GivenName, Online: row.Online, IPAddresses: row.IPAddresses, Tags: row.Tags, AvailableRoutes: row.AvailableRoutes, ApprovedRoutes: row.ApprovedRoutes}
 		if row.PreAuthKey != nil {
 			if row.PreAuthKey.ID == 0 {
 				return nil, false
@@ -199,6 +200,7 @@ func TestGatewayFreshPod(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Minute)
 	defer cancel()
+	dataPlane := newGatewayDataPlane(t, pf)
 	create := func(obj client.Object) {
 		t.Helper()
 		if err := f.kube.Create(ctx, obj); err != nil {
@@ -217,7 +219,7 @@ func TestGatewayFreshPod(t *testing.T) {
 		TailnetRef: tnv1.GatewayLocalReference{Name: tnv1.GatewayName(tn.Name)}, Hostname: "gateway-fixture", Suspend: ptr.To(true),
 		StateSecretRef: tnv1.GatewayLocalReference{Name: "gateway-state"}, AuthKeySecretRef: &tnv1.GatewayAuthKeyReference{Name: "gateway-auth", Key: "TS_AUTHKEY"},
 		Image: tnv1.GatewayImage(images["tailscale"]), Tags: []string{"tag:fabric"},
-		Routes:  tnv1.GatewayRoutes{LAN: []tnv1.GatewayPrefix{"192.0.2.0/24"}},
+		Routes:  tnv1.GatewayRoutes{LAN: []tnv1.GatewayPrefix{tnv1.GatewayPrefix(dataPlane.prefix)}},
 		Service: tnv1.GatewayService{LoadBalancerIP: "198.51.100.17", TailnetLBCIDR: "198.51.100.0/24"},
 		DNS:     tnv1.GatewayDNS{Zone: "tail.example", ServiceName: "gateway-dns", ServiceClusterIP: "10.96.0.54", Image: tnv1.GatewayImage(images["coredns"])},
 	}}
@@ -346,7 +348,8 @@ func TestGatewayFreshPod(t *testing.T) {
 		} else if binding.NodeID != first.NodeID || binding.IPv4 != first.IPv4 || binding.StateUID != first.StateUID {
 			t.Fatal("gateway identity changed after Pod recreation")
 		}
-		pf.save("gateway-"+phase+"-result.json", map[string]any{"stateBound": true, "stateUIDRetained": binding.StateUID == stateUID, "nodeID": binding.NodeID, "ipv4": binding.IPv4, "podUID": p.UID, "kernelPreflightPassed": true, "imagesBound": true, "routesAdvertised": plan.Routes.Routes, "routesForwarded": false})
+		dataPlane.prove(t, phase, p, binding)
+		pf.save("gateway-"+phase+"-result.json", map[string]any{"stateBound": true, "stateUIDRetained": binding.StateUID == stateUID, "nodeID": binding.NodeID, "ipv4": binding.IPv4, "podUID": p.UID, "kernelPreflightPassed": true, "imagesBound": true, "routesAdvertised": plan.Routes.Routes, "routesForwarded": true, "knownLocalDNSVerified": true})
 		if phase == "initial" {
 			if err := f.kube.Delete(ctx, p, client.Preconditions{UID: &p.UID}); err != nil {
 				t.Fatal("remove only owned gateway Pod")
@@ -356,7 +359,7 @@ func TestGatewayFreshPod(t *testing.T) {
 			})
 		}
 	}
-	t.Log("gate: real fresh kernel Pod/preflight/images, non-ephemeral state-to-node binding, advertised route union and identity retained after Pod recreation; no route forwarding, live DNS or adoption proof")
+	t.Log("gate: fresh kernel Pod/preflight/images, non-ephemeral state binding and identity retained across recreation; real IPv4 /32 TCP forwarding with approval/revocation and distinct native control, known local UDP/TCP DNS via gateway tailnet IP; no IPv6 or adoption proof")
 }
 
 func gatewayProcessesStable(before, actual *corev1.Pod) bool {
