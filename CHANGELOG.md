@@ -4,6 +4,17 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-05
+
+### Release notes
+
+Experimental fresh-only `TailnetGateway` continues from 0.7.1 with two steps toward
+production use: an explicit teardown contract and a live DNS reconcile. The
+`TailnetGateway` CRD remains experimental; `spec.suspend` still defaults to `true`
+and existing gateways are not adopted. Gateways rendered by 0.7.x carry no DNS CAS
+annotations and permanently report `DNSReady=False/DNSUpdateBlocked`; migrate by
+deleting with `spec.deletionPolicy: Delete` and recreating.
+
 ### Added
 
 - Live DNS reconcile for a fresh `TailnetGateway`: once the completion receipt is
