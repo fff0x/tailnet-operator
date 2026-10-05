@@ -593,6 +593,47 @@ func TestGatewayFreshPod(t *testing.T) {
 		dataPlane.prove(t, phase, p, binding)
 		pf.save("gateway-"+phase+"-result.json", map[string]any{"controllerReady": true, "statefulSetOwned": true, "stateBound": true, "stateUIDRetained": binding.StateUID == stateUID, "nodeID": binding.NodeID, "ipv4": binding.IPv4, "podUID": p.UID, "kernelPreflightPassed": true, "imagesBound": true, "routesAdvertised": receipt.Routes, "routesForwarded": true, "knownLocalDNSVerified": true})
 		if phase == "initial" {
+			// Spec update on a Ready gateway: the template follows spec.image, but
+			// under OnDelete the running Pod is neither restarted nor replaced. The
+			// alias (tag + same digest) is only a spec change; the startup gate
+			// binds the exact pinned reference, so no Pod is rolled onto it here.
+			original, aliased := g.Spec.Image, tnv1.GatewayImage(strings.Replace(images["tailscale"], "@", ":v9.9.9@", 1))
+			setImage := func(image tnv1.GatewayImage) {
+				t.Helper()
+				if f.kube.Get(ctx, client.ObjectKeyFromObject(g), g) != nil {
+					t.Fatal("gateway unavailable before image update")
+				}
+				g.Spec.Image = image
+				if f.kube.Update(ctx, g) != nil {
+					t.Fatal("gateway image update rejected")
+				}
+			}
+			runningBefore := p.DeepCopy()
+			setImage(aliased)
+			current := &appsv1.StatefulSet{}
+			eventually(t, "StatefulSet template follows spec.image while the Pod keeps running", func() bool {
+				reconcile()
+				stale := meta.FindStatusCondition(g.Status.Conditions, "WorkloadCurrent")
+				return f.kube.Get(ctx, client.ObjectKeyFromObject(sts), current) == nil && current.Spec.Template.Spec.Containers[0].Image == string(aliased) &&
+					stale != nil && stale.Status == metav1.ConditionFalse && stale.Reason == "PodTemplateStale" && meta.IsStatusConditionTrue(g.Status.Conditions, "Ready")
+			})
+			after := &corev1.Pod{}
+			if f.kube.Get(ctx, client.ObjectKeyFromObject(p), after) != nil || after.UID != runningBefore.UID || current.UID != sts.UID || len(after.Status.ContainerStatuses) != len(runningBefore.Status.ContainerStatuses) {
+				t.Fatal("image update replaced the StatefulSet or the running Pod")
+			}
+			for i, status := range after.Status.ContainerStatuses {
+				if status.RestartCount != runningBefore.Status.ContainerStatuses[i].RestartCount || status.ContainerID != runningBefore.Status.ContainerStatuses[i].ContainerID {
+					t.Fatal("image update restarted a running container")
+				}
+			}
+			pf.save("gateway-workload-update.json", map[string]any{"templateImage": current.Spec.Template.Spec.Containers[0].Image, "podUID": after.UID, "statefulSetUID": current.UID, "workloadCurrent": "PodTemplateStale", "ready": true, "restarted": false})
+			setImage(original)
+			eventually(t, "template and Pod converge again after reverting spec.image", func() bool {
+				reconcile()
+				fresh := meta.FindStatusCondition(g.Status.Conditions, "WorkloadCurrent")
+				return f.kube.Get(ctx, client.ObjectKeyFromObject(sts), current) == nil && current.Spec.Template.Spec.Containers[0].Image == string(original) &&
+					fresh != nil && fresh.Status == metav1.ConditionTrue && meta.IsStatusConditionTrue(g.Status.Conditions, "Ready")
+			})
 			if err := f.kube.Delete(ctx, p, client.Preconditions{UID: &p.UID}); err != nil {
 				t.Fatal("remove only owned gateway Pod")
 			}
@@ -626,6 +667,9 @@ func TestGatewayFreshPod(t *testing.T) {
 	}
 	if teardown() || !controllerutil.ContainsFinalizer(g, gateway.TeardownFinalizer) {
 		t.Fatal("Delete consent did not record the teardown finalizer")
+	}
+	if !meta.IsStatusConditionTrue(g.Status.Conditions, "Ready") {
+		t.Fatal("deletionPolicy flip blocked a running gateway")
 	}
 	if f.kube.Delete(ctx, g, client.Preconditions{UID: &gatewayUID}) != nil {
 		t.Fatal("gateway delete rejected")
