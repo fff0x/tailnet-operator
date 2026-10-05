@@ -15,7 +15,7 @@ task crds deploy-gen
 task security
 # Isolated API-server and real Headscale tests; downloads checksum-pinned public assets:
 task e2e
-# With explicitly selected local envtest assets:
+# Admission, gateway DNS CAS and durable mint records with explicit local envtest assets:
 KUBEBUILDER_ASSETS=/path/to/envtest task test-validation
 # Experimental gateway DNS files against a trusted local binary (loopback only):
 COREDNS_BINARY=/absolute/path/to/coredns task test-gateway-dns
@@ -32,8 +32,10 @@ Do not point tests at your current kube-context. The disposable test cluster may
 a prerequisite the way the target node does (for example the gateway gate permits the
 namespaced `net.ipv4.ip_forward` unsafe sysctl so a fixture pod forwards like a Talos
 node); do not change host privileges, add capabilities or relax the pod isolation gate.
-The isolated projection runner also offers `--gateway-preflight-only`; see the
-[read-only kernel gate](docs/reference/gateway.md#read-only-kind-prerequisite-gate).
+The isolated projection runner also offers `--gateway-preflight-only` and
+`--gateway-fresh-only`; see the [gateway gates](docs/reference/gateway.md#read-only-kind-prerequisite-gate).
+The fresh-Pod selection verifies real image bootstrap and identity across Pod recreation,
+not route forwarding or adoption.
 A failed capability check is not support evidence and must not be silently skipped.
 
 An integration bug needs a regression test that fails before the correction when a safe reproduction is possible.
