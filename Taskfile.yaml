@@ -35,11 +35,11 @@ tasks:
       - bash hack/e2e-kind.sh
 
   test-validation:
-    desc: Validate CRDs, examples and optional LIVE_CR_FILE in an isolated envtest API server
+    desc: Validate CRDs, examples, optional LIVE_CR_FILE and gateway persistence in isolated envtest API servers
     requires:
       vars: [KUBEBUILDER_ASSETS]
     cmds:
-      - go test -tags=integration ./test/validation -count=1 -v
+      - go test -tags=integration ./test/validation ./internal/gateway -count=1 -v
 
   test-gateway-dns:
     desc: Check experimental gateway DNS with an explicit CoreDNS binary (loopback only)
