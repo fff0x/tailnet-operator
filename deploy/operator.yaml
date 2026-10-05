@@ -197,7 +197,7 @@ metadata:
     app.kubernetes.io/name: "tailnet-operator"
     app.kubernetes.io/instance: "tailnet-operator"
     app.kubernetes.io/managed-by: "Helm"
-    helm.sh/chart: "tailnet-operator-0.6.0"
+    helm.sh/chart: "tailnet-operator-0.7.0"
 spec:
   replicas: 1
   strategy:
@@ -214,7 +214,7 @@ spec:
         app.kubernetes.io/name: "tailnet-operator"
         app.kubernetes.io/instance: "tailnet-operator"
         app.kubernetes.io/managed-by: "Helm"
-        helm.sh/chart: "tailnet-operator-0.6.0"
+        helm.sh/chart: "tailnet-operator-0.7.0"
     spec:
       serviceAccountName: "tailnet-operator"
       # The manager has a 20-second drain budget; leave time for process exit.
@@ -227,7 +227,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: operator
-          image: "docker.io/ff0x/tailnet-operator:v0.6.0"
+          image: "docker.io/ff0x/tailnet-operator:v0.7.0"
           imagePullPolicy: IfNotPresent
           command: ["/tailnet-operator"]
           args: ["--leader-elect=true"]
@@ -240,7 +240,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: OPERATOR_IMAGE
-              value: "docker.io/ff0x/tailnet-operator:v0.6.0"
+              value: "docker.io/ff0x/tailnet-operator:v0.7.0"
             - name: AGENT_IMAGE_PULL_SECRETS
               value: "[]"
             - name: AGENT_RESOURCES

@@ -31,8 +31,12 @@ All names below are placeholders: Tailnet `corp`, cluster `prod-1`, domain
 | cert-manager | optional | issues the certificate for a `mode: http` ingress ([§6](#6-ingress-and-https)) |
 | Gateway | optional: Envoy/Gateway API with a wildcard certificate for `*.prod-1.tailnet.example.internal` | HTTPS through a shared gateway instead ([§6](#6-ingress-and-https)) |
 
-The operator needs no privileges on the nodes: agents are userspace
+Ingress and egress agents are userspace
 [tsnet](https://tailscale.com/kb/1244/tsnet) pods without `NET_ADMIN` or `/dev/net/tun`.
+The opt-in, experimental `TailnetGateway` instead needs a kernel-mode workload with
+`NET_ADMIN`, `/dev/net/tun` and verified forwarding prerequisites. It is fresh-only,
+not a migration mechanism; read its [limits and prerequisites](reference/gateway.md)
+before activation. Installing the chart alone does not create a Gateway.
 
 ## 2. Headscale
 
@@ -128,7 +132,7 @@ the rendered policy even in file mode.
 
 ```sh
 helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
-  --version 0.6.0 --namespace tailnet-system --create-namespace
+  --version 0.7.0 --namespace tailnet-system --create-namespace
 
 kubectl -n tailnet-system create secret generic headscale-bootstrap --from-literal=apiKey='<key>'
 
@@ -153,9 +157,9 @@ To inspect or vendor the chart, pull it and verify its signature first (see
 [SECURITY.md](SECURITY.md) for the key and the Radicle release record):
 
 ```sh
-helm pull oci://oci.this-is-fine.io/charts/tailnet-operator --version 0.6.0
+helm pull oci://oci.this-is-fine.io/charts/tailnet-operator --version 0.7.0
 cosign verify --key deploy/cosign.pub --insecure-ignore-tlog \
-  oci.this-is-fine.io/charts/tailnet-operator:0.6.0
+  oci.this-is-fine.io/charts/tailnet-operator:0.7.0
 ```
 
 ```sh
