@@ -105,10 +105,22 @@ func ReconcileFresh(ctx context.Context, c client.Client, namespace string, g *t
 	completed := &corev1.ConfigMap{}
 	err = c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: g.Name + "-fresh"}, completed)
 	if err == nil {
+		// Clear a -fresh-next left by a prior rewrite that recreated -fresh but
+		// failed to delete its stage. A migration in this call re-stages as needed.
+		clearStagedReceipt(ctx, c, namespace, g)
 		return observeFresh(ctx, c, namespace, g, tn, hs, now(), scope, completed)
 	}
 	if !apierrors.IsNotFound(err) {
 		return bad()
+	}
+	// -fresh is absent. A receipt migration may have crashed after deleting it but
+	// before recreating it: recover from the staged -fresh-next instead of minting
+	// a new set. A foreign or scope-mismatched stage blocks; it is never adopted.
+	switch recovered, rerr := recoverStagedReceipt(ctx, c, namespace, g, scope); {
+	case rerr != nil:
+		return bad()
+	case recovered != nil:
+		return observeFresh(ctx, c, namespace, g, tn, hs, now(), scope, recovered)
 	}
 
 	// Render using a copy: the mint API requires no external auth reference, while
@@ -276,6 +288,101 @@ func completedObject(g *tnv1.TailnetGateway, ns string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: g.Name + "-fresh", Namespace: ns, Labels: map[string]string{gatewayUIDLabel: string(g.UID), "app.kubernetes.io/managed-by": "tailnet-operator"}}, Immutable: ptr.To(true)}
 }
 
+// stagedReceiptName is the transient staging receipt used by rewriteReceipt to
+// make the immutable completion-receipt rewrite crash-safe.
+func stagedReceiptName(g *tnv1.TailnetGateway) string { return g.Name + "-fresh-next" }
+
+// rewriteReceipt migrates the immutable completion receipt in place: the only way
+// to change an immutable ConfigMap is delete + recreate, so the new payload is
+// first staged in a separate immutable -fresh-next, then -fresh is deleted (with
+// UID+resourceVersion CAS) and recreated from the staged payload, then the stage
+// is removed. A crash between the delete and the recreate leaves -fresh-next for
+// ReconcileFresh's recovery path; a later failure just leaves a stale stage that
+// the next reconcile clears. The StateUID, Auth, Scope and Routes are untouched;
+// only the per-object digests advance from the v0.10.0 rule to the current one.
+func rewriteReceipt(ctx context.Context, c client.Client, ns string, g *tnv1.TailnetGateway, current *corev1.ConfigMap, receipt freshReceipt, migrated []freshObjectReceipt) error {
+	next := receipt
+	next.Objects = migrated
+	data, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	staged := completedObject(g, ns)
+	staged.Name = stagedReceiptName(g)
+	staged.Data = map[string]string{"receipt.json": string(data)}
+	if err := c.Create(ctx, staged); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		// A prior attempt staged it. It must be our own immutable stage with the
+		// identical payload, or we refuse to proceed.
+		existing := &corev1.ConfigMap{}
+		if c.Get(ctx, client.ObjectKey{Namespace: ns, Name: staged.Name}, existing) != nil ||
+			existing.Labels[gatewayUIDLabel] != string(g.UID) || existing.Immutable == nil || !*existing.Immutable ||
+			len(existing.Data) != 1 || existing.Data["receipt.json"] != string(data) {
+			return ErrFreshWrite
+		}
+	}
+	if err := c.Delete(ctx, current, client.Preconditions{UID: &current.UID, ResourceVersion: &current.ResourceVersion}); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	rewritten := completedObject(g, ns)
+	rewritten.Data = map[string]string{"receipt.json": string(data)}
+	if err := c.Create(ctx, rewritten); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	return c.Delete(ctx, staged, client.Preconditions{UID: &staged.UID})
+}
+
+// clearStagedReceipt best-effort removes an owned -fresh-next. It is called only
+// when -fresh already exists, so any stage present is a stale leftover.
+func clearStagedReceipt(ctx context.Context, c client.Client, ns string, g *tnv1.TailnetGateway) {
+	staged := &corev1.ConfigMap{}
+	if c.Get(ctx, client.ObjectKey{Namespace: ns, Name: stagedReceiptName(g)}, staged) != nil || staged.Labels[gatewayUIDLabel] != string(g.UID) {
+		return
+	}
+	_ = c.Delete(ctx, staged, client.Preconditions{UID: &staged.UID})
+}
+
+// recoverStagedReceipt handles a -fresh-next left behind by a rewriteReceipt that
+// crashed between deleting and recreating -fresh. It is only consulted when
+// -fresh is absent. A staged receipt owned by this gateway, immutable and whose
+// scope matches the current identity, is promoted to -fresh; anything else blocks
+// (never a fresh re-create). It returns the promoted receipt object, or nil when
+// there is nothing to recover.
+func recoverStagedReceipt(ctx context.Context, c client.Client, ns string, g *tnv1.TailnetGateway, scope map[string]string) (*corev1.ConfigMap, error) {
+	staged := &corev1.ConfigMap{}
+	err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: stagedReceiptName(g)}, staged)
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil || staged.Labels[gatewayUIDLabel] != string(g.UID) || staged.Labels["app.kubernetes.io/managed-by"] != "tailnet-operator" ||
+		staged.Immutable == nil || !*staged.Immutable || len(staged.Data) != 1 || staged.DeletionTimestamp != nil {
+		return nil, ErrFreshWrite
+	}
+	raw := staged.Data["receipt.json"]
+	var receipt freshReceipt
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if len(raw) == 0 || len(raw) > 1<<20 || decoder.Decode(&receipt) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		!reflect.DeepEqual(scope, receipt.Scope) {
+		return nil, ErrFreshWrite
+	}
+	promoted := completedObject(g, ns)
+	promoted.Data = map[string]string{"receipt.json": raw}
+	if err := c.Create(ctx, promoted); err != nil && !apierrors.IsAlreadyExists(err) {
+		return nil, err
+	}
+	if err := c.Delete(ctx, staged, client.Preconditions{UID: &staged.UID}); err != nil && !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+	fresh := &corev1.ConfigMap{}
+	if c.Get(ctx, client.ObjectKey{Namespace: ns, Name: g.Name + "-fresh"}, fresh) != nil {
+		return nil, ErrFreshWrite
+	}
+	return fresh, nil
+}
+
 type freshGatewayIdentity struct {
 	TailnetRef, StateSecretRef tnv1.GatewayLocalReference
 	Hostname                   string
@@ -428,6 +535,60 @@ func objectReceipt(obj client.Object) freshObjectReceipt {
 	return freshObjectReceipt{Kind: writerObjectKind(obj), Name: obj.GetName(), UID: obj.GetUID(), Digest: hex.EncodeToString(hash[:])}
 }
 
+// legacyObjectReceipt reproduces the v0.10.0 digest rule: only container images
+// and the tailscale TS_ROUTES value are excluded from the StatefulSet template,
+// and only zone.db (not the Corefile) is excluded from the -coredns ConfigMap.
+// It exists solely to recognise a format-3 receipt written by v0.10.0 so
+// observeFresh can migrate it to the current rule in place (see rewriteReceipt).
+// Remove this shim once no v0.10.0 gateways remain.
+func legacyObjectReceipt(obj client.Object) freshObjectReceipt {
+	b, _ := json.Marshal(obj)
+	var data map[string]any
+	_ = json.Unmarshal(b, &data)
+	for _, k := range []string{"apiVersion", "kind", "metadata", "status"} {
+		delete(data, k)
+	}
+	if _, ok := obj.(*appsv1.StatefulSet); ok {
+		blankTemplateMutable(data)
+	}
+	if cm, ok := obj.(*corev1.ConfigMap); ok && strings.HasSuffix(cm.Name, "-coredns") {
+		if payload, ok := data["data"].(map[string]any); ok {
+			delete(payload, DNSZoneFile)
+		}
+	}
+	b, _ = json.Marshal(data)
+	hash := sha256.Sum256(b)
+	return freshObjectReceipt{Kind: writerObjectKind(obj), Name: obj.GetName(), UID: obj.GetUID(), Digest: hex.EncodeToString(hash[:])}
+}
+
+// blankTemplateMutable removes what v0.10.0's UpdateWorkloadRevision rewrote:
+// every container image and the TS_ROUTES value of the tailscale container. It
+// backs legacyObjectReceipt only; the current digest blanks the whole template.
+func blankTemplateMutable(data map[string]any) {
+	spec, _ := data["spec"].(map[string]any)
+	template, _ := spec["template"].(map[string]any)
+	podSpec, _ := template["spec"].(map[string]any)
+	for _, key := range []string{"initContainers", "containers"} {
+		list, _ := podSpec[key].([]any)
+		for _, item := range list {
+			container, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			delete(container, "image")
+			if container["name"] != "tailscale" {
+				continue
+			}
+			env, _ := container["env"].([]any)
+			for _, e := range env {
+				if v, ok := e.(map[string]any); ok && v["name"] == "TS_ROUTES" {
+					delete(v, "value")
+				}
+			}
+		}
+	}
+}
+
 func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, hs GatewayHeadscale, now time.Time, scope map[string]string, record *corev1.ConfigMap) (FreshObservation, error) {
 	bad := func() (FreshObservation, error) { return FreshObservation{}, ErrFreshWrite }
 	if record.UID == "" || record.ResourceVersion == "" || record.DeletionTimestamp != nil || record.Immutable == nil || !*record.Immutable || len(record.OwnerReferences) != 0 || len(record.Finalizers) != 0 || len(record.BinaryData) != 0 || len(record.Data) != 1 || record.Labels[gatewayUIDLabel] != string(g.UID) || record.Labels["app.kubernetes.io/managed-by"] != "tailnet-operator" {
@@ -468,23 +629,48 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 	}
 	var sts *appsv1.StatefulSet
 	var workload, lbService freshObjectReceipt
-	for _, ref := range receipt.Objects {
+	// migrated carries the current-rule digests. It stays identical to the stored
+	// receipt unless a v0.10.0 receipt is recognised, in which case the verified
+	// live objects are re-fingerprinted and the receipt is rewritten in place.
+	migrated := slices.Clone(receipt.Objects)
+	migrate := false
+	for i, ref := range receipt.Objects {
 		k := ref.Kind + "/" + ref.Name
 		obj := wanted[k]
-		if obj == nil || ref.UID == "" || c.Get(ctx, client.ObjectKey{Namespace: ns, Name: ref.Name}, obj) != nil || obj.GetDeletionTimestamp() != nil || len(obj.GetOwnerReferences()) != 0 || objectReceipt(obj) != ref {
+		if obj == nil || ref.UID == "" || c.Get(ctx, client.ObjectKey{Namespace: ns, Name: ref.Name}, obj) != nil || obj.GetDeletionTimestamp() != nil || len(obj.GetOwnerReferences()) != 0 {
+			return bad()
+		}
+		cur := objectReceipt(obj)
+		switch {
+		case cur == ref:
+		case legacyObjectReceipt(obj) == ref:
+			// A format-3 receipt written by v0.10.0: the live object is unchanged
+			// but recorded under the old digest rule. Record the current-rule
+			// digest so the loop still verifies the full set and migrate in place.
+			migrated[i].Digest = cur.Digest
+			migrate = true
+		default:
 			return bad()
 		}
 		delete(wanted, k)
 		if v, ok := obj.(*appsv1.StatefulSet); ok {
 			sts = v
-			workload = ref
+			workload = cur
 		}
 		if v, ok := obj.(*corev1.Service); ok && v.Name == g.Name {
-			lbService = ref
+			lbService = cur
 		}
 	}
 	if len(wanted) != 0 || sts == nil {
 		return bad()
+	}
+	// Only after the entire retained set verified: rewrite the immutable receipt
+	// from the old to the current digest rule. A crash leaves a transient
+	// -fresh-next that ReconcileFresh recovers from; a failure here is retried.
+	if migrate {
+		if err := rewriteReceipt(ctx, c, ns, g, record, receipt, migrated); err != nil {
+			return bad()
+		}
 	}
 	state := &corev1.Secret{}
 	if c.Get(ctx, client.ObjectKey{Namespace: ns, Name: string(g.Spec.StateSecretRef.Name)}, state) != nil || state.UID != receipt.StateUID || state.DeletionTimestamp != nil {
