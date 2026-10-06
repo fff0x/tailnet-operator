@@ -601,7 +601,7 @@ func TestGatewayFreshPod(t *testing.T) {
 				t.Fatal("recreated Pod does not match the reconciled template")
 			}
 		}
-		pf.save("gateway-"+phase+"-result.json", map[string]any{"controllerReady": true, "statefulSetOwned": true, "stateBound": true, "stateUIDRetained": binding.StateUID == stateUID, "nodeID": binding.NodeID, "ipv4": binding.IPv4, "podUID": p.UID, "kernelPreflightPassed": true, "imagesBound": true, "routesAdvertised": receipt.Routes, "routesForwarded": true, "knownLocalDNSVerified": true})
+		pf.save("gateway-"+phase+"-result.json", map[string]any{"controllerReady": true, "statefulSetOwned": true, "stateBound": true, "stateUIDRetained": binding.StateUID == stateUID, "nodeID": binding.NodeID, "ipv4": binding.IPv4, "podUID": p.UID, "kernelPreflightPassed": true, "imagesBound": true, "routesAdvertised": wantRoutes, "routesForwarded": true, "knownLocalDNSVerified": true})
 		if phase == "initial" {
 			// RoutesInSync reads the real Headscale approvals of this isolated node: nothing, a
 			// strict subset (only the LB CIDR), then everything approved, then revoked again.

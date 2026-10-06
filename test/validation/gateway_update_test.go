@@ -318,9 +318,11 @@ func gatewayUpdateCases(t *testing.T, newFixture func(*testing.T, bool) *gateway
 		f.reconcile("FreshRuntimeReady")
 		check(nil)
 		workload(t, f, metav1.ConditionTrue, "PodCurrent")
-		// A pool label that would overwrite a label somebody else put on the Service is refused.
+		// A pool key somebody else already put on the Service is refused, even with the same value,
+		// and the refusal does not stall the template (routes still flow).
 		update(t, f, func(g *tnv1.TailnetGateway) {
-			g.Spec.Service.PoolLabels = map[string]tnv1.GatewayLabelValue{"foreign.example/keep": "no"}
+			g.Spec.Service.PoolLabels = map[string]tnv1.GatewayLabelValue{"foreign.example/keep": "yes"}
+			g.Spec.Routes.LAN = append(g.Spec.Routes.LAN, "10.9.0.0/16")
 		})
 		before := &corev1.Service{}
 		f.get(f.g.Name, before)
@@ -331,12 +333,17 @@ func gatewayUpdateCases(t *testing.T, newFixture func(*testing.T, bool) *gateway
 		if after.ResourceVersion != before.ResourceVersion || after.Labels["foreign.example/keep"] != "yes" {
 			t.Fatal("collision still wrote the Service")
 		}
+		if got := stsRoutes(t, f); !slices.Contains(got, "10.9.0.0/16") {
+			t.Fatalf("blocked Service stalled the template: %v", got)
+		}
 		// A key of the operator's own base labels is refused when the plan is rendered.
 		update(t, f, func(g *tnv1.TailnetGateway) {
 			g.Spec.Service.PoolLabels = map[string]tnv1.GatewayLabelValue{baseKey: "hijack"}
 		})
 		f.reconcile("FreshBlocked")
-		update(t, f, func(g *tnv1.TailnetGateway) { g.Spec.Service.PoolLabels = nil })
+		update(t, f, func(g *tnv1.TailnetGateway) {
+			g.Spec.Service.PoolLabels, g.Spec.Routes.LAN = nil, g.Spec.Routes.LAN[:1]
+		})
 		f.reconcile("FreshRuntimeReady")
 		workload(t, f, metav1.ConditionTrue, "PodCurrent")
 		f.assertMints(1)

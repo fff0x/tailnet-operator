@@ -91,17 +91,19 @@ func (r *TailnetGatewayReconciler) reconcileWorkload(ctx context.Context, g *tnv
 	if err != nil {
 		return metav1.ConditionFalse, "WorkloadUpdateBlocked", "Spec routes do not plan (invalid prefix, tailnetLBCIDR without loadBalancerIP, or a non-IPv4 route); nothing is written."
 	}
-	switch err := gateway.UpdateServiceRevision(ctx, r.RuntimeClient, r.OperatorNamespace, g, o); {
-	case errors.Is(err, gateway.ErrServiceConflict):
-		return metav1.ConditionFalse, "ServiceUpdateConflict", "Concurrent change on the LoadBalancer Service; a later reconcile will retry."
-	case err != nil:
-		return metav1.ConditionFalse, "ServiceUpdateBlocked", "LoadBalancer Service or completion receipt is not verified, or a pool label collides with a label the operator did not write; the Service is not updated."
-	}
+	// Both writes are attempted independently: a blocked Service never stalls the template.
+	svcErr := gateway.UpdateServiceRevision(ctx, r.RuntimeClient, r.OperatorNamespace, g, o)
 	switch err := gateway.UpdateWorkloadRevision(ctx, r.RuntimeClient, r.OperatorNamespace, g, o, plan.Routes); {
 	case errors.Is(err, gateway.ErrWorkloadConflict):
 		return metav1.ConditionFalse, "WorkloadUpdateConflict", "Concurrent change on the StatefulSet; a later reconcile will retry."
 	case err != nil:
 		return metav1.ConditionFalse, "WorkloadUpdateBlocked", "StatefulSet or completion receipt is not verified; the Pod template is not updated."
+	}
+	switch {
+	case errors.Is(svcErr, gateway.ErrServiceConflict):
+		return metav1.ConditionFalse, "ServiceUpdateConflict", "Concurrent change on the LoadBalancer Service; a later reconcile will retry."
+	case svcErr != nil:
+		return metav1.ConditionFalse, "ServiceUpdateBlocked", "LoadBalancer Service or completion receipt is not verified, or a pool label key already exists on the Service; the Service is not updated."
 	}
 	if !o.PodPresent {
 		return metav1.ConditionUnknown, "Provisioning", "No verified Pod yet."
