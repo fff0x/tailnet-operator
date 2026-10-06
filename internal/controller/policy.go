@@ -331,7 +331,6 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 		IngressSourceAllowlist: tn.Spec.Policy.IngressSourceAllowlist,
 	}
 	var skipped []string
-	var egressTargets []string // what a gateway of this Tailnet advertises as host routes
 	var egs tnv1.TailnetEgressList
 	if err := r.List(ctx, &egs, client.InNamespace(r.OperatorNamespace)); err != nil {
 		return in, nil, err
@@ -342,9 +341,6 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 		}
 		e := policy.Egress{Tag: egressTag(tn, &eg)}
 		for _, t := range eg.Spec.Targets {
-			if eg.DeletionTimestamp.IsZero() {
-				egressTargets = append(egressTargets, t.Address)
-			}
 			addr, err := netip.ParseAddr(t.Address)
 			if err != nil {
 				skipped = append(skipped, eg.Name+"/"+t.Name)
@@ -379,15 +375,7 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 		if string(g.Spec.TailnetRef.Name) != tn.Name || !g.DeletionTimestamp.IsZero() {
 			continue
 		}
-		ri := gateway.RouteInputs{LoadBalancerCIDR: string(g.Spec.Service.TailnetLBCIDR),
-			AdvertiseEgressTargets: g.Spec.Routes.AdvertiseEgressTargets == nil || *g.Spec.Routes.AdvertiseEgressTargets}
-		for _, p := range g.Spec.Routes.LAN {
-			ri.LAN = append(ri.LAN, string(p))
-		}
-		if ri.AdvertiseEgressTargets {
-			ri.EgressTargets = egressTargets
-		}
-		plan, err := gateway.PlanRoutes(ri)
+		plan, err := gateway.PlanRoutes(gateway.SpecRouteInputs(&g, tn.Name, r.OperatorNamespace, egs.Items))
 		if err != nil {
 			skipped = append(skipped, "gateway/"+g.Name)
 			continue

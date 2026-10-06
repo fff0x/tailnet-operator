@@ -47,16 +47,18 @@ type GatewayHeadscale interface {
 // Ready; it is the signal that the live DNS reconciler may run.
 //
 // PodPresent is true for a Pod with verified provenance (owned by the receipt
-// StatefulSet); PodCurrent additionally means its spec matches the template the
-// live Gateway spec wants. A stale-but-verified Pod stays Ready: the operator
+// StatefulSet); PodCurrent additionally means its container images match the live
+// Gateway spec (the caller compares PodRoutes with the planned routes). A stale-but-verified Pod stays Ready: the operator
 // never restarts an identity-bearing Pod itself (OnDelete).
 type FreshObservation struct {
 	Ready, Completed       bool
 	PodPresent, PodCurrent bool
 	Binding                GatewayStateBinding
 	Routes, Approved       []string
-	workload               freshObjectReceipt
-	stateUID               types.UID
+	// PodRoutes are the routes the running Pod was started with (its TS_ROUTES), in plan order.
+	PodRoutes         []string
+	workload, service freshObjectReceipt
+	stateUID          types.UID
 }
 
 type freshObjectReceipt struct {
@@ -271,8 +273,8 @@ type freshGatewayIdentity struct {
 	Hostname                   string
 	Tags                       []string
 	Replicas                   int32
-	Routes                     tnv1.GatewayRoutes
-	Service                    tnv1.GatewayService
+	LoadBalancerIP             tnv1.GatewayIP
+	LoadBalancerClass          tnv1.GatewayClass
 	Zone                       tnv1.GatewayName
 	DNSServiceName             tnv1.GatewayServiceName
 	DNSServiceClusterIP        tnv1.GatewayIP
@@ -281,23 +283,20 @@ type freshGatewayIdentity struct {
 	Forwards                   []tnv1.GatewayForward
 }
 
-// freshScope is receipt format 2: it pins identity, not generations. Mutable
+// freshScope is receipt format 3: it pins identity, not generations. Mutable
 // fields (image, dns.image, staticRecords, wildcardAddress, deletionPolicy,
-// suspend, Tailnet fields other than server and hostsConfigMap) are reconciled
-// live or are irrelevant to the retained set. Routes, service and zone fields
-// stay pinned until a route reconciler exists.
+// suspend, routes.*, service.tailnetLBCIDR, service.poolLabels, Tailnet fields
+// other than server and hostsConfigMap) are reconciled live or are irrelevant to
+// the retained set. The load-balancer IP and class and the zone fields stay pinned.
 func freshScope(g *tnv1.TailnetGateway, tn *tnv1.Tailnet, ns string) (map[string]string, error) {
 	// Reuse the preamble checks (not suspended, no adoption, no external auth).
 	if _, err := mintRecordScope(g, tn, ns); err != nil {
 		return nil, err
 	}
-	routes := g.Spec.Routes
-	routes.LAN = slices.Clone(routes.LAN)
-	slices.Sort(routes.LAN)
 	tags := slices.Clone(g.Spec.Tags)
 	slices.Sort(tags)
 	gateway := freshGatewayIdentity{
-		g.Spec.TailnetRef, g.Spec.StateSecretRef, g.Spec.Hostname, tags, g.Spec.Replicas, routes, g.Spec.Service,
+		g.Spec.TailnetRef, g.Spec.StateSecretRef, g.Spec.Hostname, tags, g.Spec.Replicas, g.Spec.Service.LoadBalancerIP, g.Spec.Service.LoadBalancerClass,
 		g.Spec.DNS.Zone, g.Spec.DNS.ServiceName, g.Spec.DNS.ServiceClusterIP, g.Spec.DNS.ExtraZones, g.Spec.ForwardImage, g.Spec.Forwards,
 	}
 	tailnet := struct{ Server, HostsConfigMap string }{tn.Spec.Server, tn.Spec.DNS.HostsConfigMap}
@@ -308,7 +307,7 @@ func freshScope(g *tnv1.TailnetGateway, tn *tnv1.Tailnet, ns string) (map[string
 	}
 	gh, th := sha256.Sum256(gb), sha256.Sum256(tb)
 	return map[string]string{
-		"format": "2", "gatewayName": g.Name, "gatewayUID": string(g.UID), "gatewayIdentitySHA256": hex.EncodeToString(gh[:]),
+		"format": "3", "gatewayName": g.Name, "gatewayUID": string(g.UID), "gatewayIdentitySHA256": hex.EncodeToString(gh[:]),
 		"tailnetName": tn.Name, "tailnetUID": string(tn.UID), "tailnetIdentitySHA256": hex.EncodeToString(th[:]),
 	}, nil
 }
@@ -392,10 +391,10 @@ func objectReceipt(obj client.Object) freshObjectReceipt {
 	for _, k := range []string{"apiVersion", "kind", "metadata", "status"} {
 		delete(data, k)
 	}
-	// Container images follow the Gateway spec via UpdateWorkloadRevision; the
-	// rest of the StatefulSet, including every other template field, stays bound.
+	// Container images and TS_ROUTES follow the Gateway spec via UpdateWorkloadRevision;
+	// the rest of the StatefulSet, including every other template field, stays bound.
 	if _, ok := obj.(*appsv1.StatefulSet); ok {
-		blankTemplateImages(data)
+		blankTemplateMutable(data)
 	}
 	// The derived DNS zone is reconciled live from the Tailnet hosts source via
 	// UpdateDNSRevision. Its integrity rides on the matching annotations and the
@@ -411,15 +410,28 @@ func objectReceipt(obj client.Object) freshObjectReceipt {
 	return freshObjectReceipt{Kind: writerObjectKind(obj), Name: obj.GetName(), UID: obj.GetUID(), Digest: hex.EncodeToString(hash[:])}
 }
 
-func blankTemplateImages(data map[string]any) {
+// blankTemplateMutable removes what UpdateWorkloadRevision rewrites: every container
+// image and the TS_ROUTES value of the tailscale container.
+func blankTemplateMutable(data map[string]any) {
 	spec, _ := data["spec"].(map[string]any)
 	template, _ := spec["template"].(map[string]any)
 	podSpec, _ := template["spec"].(map[string]any)
 	for _, key := range []string{"initContainers", "containers"} {
 		list, _ := podSpec[key].([]any)
 		for _, item := range list {
-			if container, ok := item.(map[string]any); ok {
-				delete(container, "image")
+			container, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			delete(container, "image")
+			if container["name"] != "tailscale" {
+				continue
+			}
+			env, _ := container["env"].([]any)
+			for _, e := range env {
+				if v, ok := e.(map[string]any); ok && v["name"] == "TS_ROUTES" {
+					delete(v, "value")
+				}
 			}
 		}
 	}
@@ -464,7 +476,7 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 		wanted[freshObjectKind(obj)+"/"+obj.GetName()] = emptyFreshObject(obj)
 	}
 	var sts *appsv1.StatefulSet
-	var workload freshObjectReceipt
+	var workload, lbService freshObjectReceipt
 	for _, ref := range receipt.Objects {
 		k := ref.Kind + "/" + ref.Name
 		obj := wanted[k]
@@ -476,6 +488,9 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 			sts = v
 			workload = ref
 		}
+		if v, ok := obj.(*corev1.Service); ok && v.Name == g.Name {
+			lbService = ref
+		}
 	}
 	if len(wanted) != 0 || sts == nil {
 		return bad()
@@ -484,7 +499,7 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 	if c.Get(ctx, client.ObjectKey{Namespace: ns, Name: string(g.Spec.StateSecretRef.Name)}, state) != nil || state.UID != receipt.StateUID || state.DeletionTimestamp != nil {
 		return bad()
 	}
-	result := FreshObservation{Completed: true, Routes: slices.Clone(receipt.Routes), workload: workload}
+	result := FreshObservation{Completed: true, Routes: slices.Clone(receipt.Routes), workload: workload, service: lbService}
 	pod := &corev1.Pod{}
 	err = c.Get(ctx, client.ObjectKey{Namespace: ns, Name: g.Name + "-0"}, pod)
 	if apierrors.IsNotFound(err) {
@@ -499,6 +514,12 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 	}
 	result.PodPresent = true
 	result.PodCurrent = podImagesCurrent(pod.Spec, freshImages(g))
+	// The Pod's own TS_ROUTES, not the receipt, is what it advertises; no routes, no Ready.
+	running, ok := podRoutes(pod.Spec)
+	if !ok {
+		return result, nil
+	}
+	result.PodRoutes = running
 	ready := false
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
@@ -527,11 +548,12 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 		}
 		advertised := slices.Clone(node.AvailableRoutes)
 		slices.Sort(advertised)
-		wantedRoutes := slices.Clone(receipt.Routes)
+		wantedRoutes := slices.Clone(running)
 		slices.Sort(wantedRoutes)
 		if !slices.Equal(advertised, wantedRoutes) {
 			return result, nil
 		}
+		result.Routes = wantedRoutes
 		result.Approved = slices.Clone(node.ApprovedRoutes)
 		slices.Sort(result.Approved)
 	}

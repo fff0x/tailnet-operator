@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -24,6 +25,22 @@ func freshImages(g *tnv1.TailnetGateway) map[string]string {
 	return map[string]string{"kernel-preflight": string(g.Spec.Image), "tailscale": string(g.Spec.Image), "coredns": string(g.Spec.DNS.Image)}
 }
 
+// podRoutes returns the routes a Pod template asks the tailscale container to advertise
+// (TS_ROUTES, in plan order). ok is false when the variable is absent or empty.
+func podRoutes(spec corev1.PodSpec) ([]string, bool) {
+	for _, c := range spec.Containers {
+		if c.Name != "tailscale" {
+			continue
+		}
+		for _, e := range c.Env {
+			if e.Name == "TS_ROUTES" && e.Value != "" && e.ValueFrom == nil {
+				return strings.Split(e.Value, ","), true
+			}
+		}
+	}
+	return nil, false
+}
+
 // podImagesCurrent reports whether every container we name already runs the
 // wanted image. Containers added by anyone else (admission, fixtures) are ignored.
 func podImagesCurrent(spec corev1.PodSpec, want map[string]string) bool {
@@ -37,15 +54,16 @@ func podImagesCurrent(spec corev1.PodSpec, want map[string]string) bool {
 	return true
 }
 
-// UpdateWorkloadRevision writes the wanted container images into the receipt's
-// StatefulSet. obs MUST come from a ReconcileFresh call that returned
-// Completed; g is the Gateway snapshot it observed. Only container images of
+// UpdateWorkloadRevision writes the wanted container images and the planned routes
+// (TS_ROUTES of the tailscale container) into the receipt's StatefulSet. obs MUST come
+// from a ReconcileFresh call that returned Completed; g is the Gateway snapshot it
+// observed and routes the sorted plan from PlanSpecRoutes. Only those fields of
 // spec.template change, with the resourceVersion of the Get as CAS, after the
 // UID and the image-less digest recorded in the receipt were re-verified. Under
 // OnDelete this never restarts the running Pod; that stays a manual,
 // identity-aware action (delete Pod <name>-0).
-func UpdateWorkloadRevision(ctx context.Context, c client.Client, namespace string, g *tnv1.TailnetGateway, obs FreshObservation) error {
-	if c == nil || g == nil || !obs.Completed || obs.workload.UID == "" {
+func UpdateWorkloadRevision(ctx context.Context, c client.Client, namespace string, g *tnv1.TailnetGateway, obs FreshObservation, routes []string) error {
+	if c == nil || g == nil || !obs.Completed || obs.workload.UID == "" || len(routes) == 0 {
 		return ErrWorkloadBlocked
 	}
 	sts := &appsv1.StatefulSet{}
@@ -61,7 +79,16 @@ func UpdateWorkloadRevision(ctx context.Context, c client.Client, namespace stri
 			}
 		}
 	}
-	if podImagesCurrent(sts.Spec.Template.Spec, want) {
+	wantRoutes := strings.Join(routes, ",")
+	for i := range updated.Spec.Template.Spec.Containers {
+		c := &updated.Spec.Template.Spec.Containers[i]
+		for j := range c.Env {
+			if c.Name == "tailscale" && c.Env[j].Name == "TS_ROUTES" {
+				c.Env[j].Value = wantRoutes
+			}
+		}
+	}
+	if current, _ := podRoutes(sts.Spec.Template.Spec); podImagesCurrent(sts.Spec.Template.Spec, want) && strings.Join(current, ",") == wantRoutes {
 		return nil
 	}
 	if err := c.Update(ctx, updated); err != nil {
