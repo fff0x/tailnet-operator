@@ -65,7 +65,11 @@ func gatewayDNSLiveCases(t *testing.T, newFixture func(*testing.T, bool) *gatewa
 		}
 	})
 
-	t.Run("corefile tamper is caught by the completion receipt", func(t *testing.T) {
+	t.Run("corefile tamper is caught by the live DNS writer", func(t *testing.T) {
+		// The Corefile is reconciled live (CoreDNS reload plugin picks up changes
+		// without a Pod restart), so Corefile drift is no longer bound by the
+		// completion receipt. Instead the live DNS writer's content-hash check
+		// catches the tamper and reports DNSReady=False/DNSUpdateBlocked.
 		f := newFixture(t, false)
 		f.reconcile("Provisioning")
 		f.assertComplete()
@@ -73,7 +77,15 @@ func gatewayDNSLiveCases(t *testing.T, newFixture func(*testing.T, bool) *gatewa
 		f.get(f.g.Name+"-coredns", cm)
 		cm.Data["Corefile"] += "\n# synthetic drift\n"
 		gatewayWriterMust(t, admin.Update(ctx, cm), "tamper with Corefile")
-		f.reconcile("FreshBlocked")
+		after := cm.ResourceVersion
+		f.reconcile("Provisioning")
+		f.get(f.g.Name+"-coredns", cm)
+		if cm.ResourceVersion != after {
+			t.Fatal("DNS writer overwrote a tampered Corefile instead of blocking")
+		}
+		if dns := meta.FindStatusCondition(f.g.Status.Conditions, "DNSReady"); dns == nil || dns.Status != metav1.ConditionFalse || dns.Reason != "DNSUpdateBlocked" {
+			t.Fatal("DNSReady did not report the blocked state after Corefile tamper")
+		}
 	})
 
 	t.Run("zone tamper without matching hash is not overwritten", func(t *testing.T) {

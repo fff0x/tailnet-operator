@@ -269,7 +269,7 @@ func TestAgentPodMonitor(t *testing.T) {
 	equal(t, "selector label", obj.Metadata.Labels["prometheus"], "site")
 	equal(t, "namespace any", pm.Spec.NamespaceSelector.Any, false)
 	equal(t, "namespaces", pm.Spec.NamespaceSelector.MatchNames, []string{"agents", "tenant"})
-	for _, name := range []string{"tailnet-egress", "tailnet-ingress"} {
+	for _, name := range []string{"tailnet-egress", "tailnet-ingress", "tailnet-gateway"} {
 		if !matches(t, pm.Spec.Selector, map[string]string{"app.kubernetes.io/name": name}) {
 			t.Errorf("does not select %s", name)
 		}
@@ -279,8 +279,14 @@ func TestAgentPodMonitor(t *testing.T) {
 			t.Errorf("unexpectedly selects %s", name)
 		}
 	}
-	if len(pm.Spec.Endpoints) != 1 || pm.Spec.Endpoints[0].Port != "health" || pm.Spec.Endpoints[0].Path != "/metrics" || pm.Spec.Endpoints[0].Interval != "45s" {
-		t.Errorf("endpoints: %#v", pm.Spec.Endpoints)
+	wantPorts := []string{"health", "kernel-health", "metrics-dns"}
+	if len(pm.Spec.Endpoints) != len(wantPorts) {
+		t.Fatalf("endpoints: %#v", pm.Spec.Endpoints)
+	}
+	for i, want := range wantPorts {
+		if pm.Spec.Endpoints[i].Port != want || pm.Spec.Endpoints[i].Path != "/metrics" || pm.Spec.Endpoints[i].Interval != "45s" {
+			t.Errorf("endpoint[%d]: %#v", i, pm.Spec.Endpoints[i])
+		}
 	}
 	for _, obj := range m {
 		if obj.Kind == "NetworkPolicy" || obj.Kind == "ServiceMonitor" || obj.Kind == "PrometheusRule" || obj.Kind == "GrafanaDashboard" {

@@ -364,23 +364,23 @@ func gatewayUpdateCases(t *testing.T, newFixture func(*testing.T, bool) *gateway
 		f.reconcile("FreshRuntimeReady")
 	})
 
-	t.Run("drift beyond images and bound StatefulSet drift both block without a write", func(t *testing.T) {
-		for _, drift := range []string{"template env", "replicas"} {
-			f, _ := ready(t)
-			sts := &appsv1.StatefulSet{}
-			f.get(f.g.Name, sts)
-			if drift == "replicas" {
-				sts.Spec.Replicas = ptr.To(int32(2))
-			} else {
-				sts.Spec.Template.Spec.Containers[0].Env[0].Value = "drifted"
-			}
-			gatewayWriterMust(t, admin.Update(ctx, sts), "drift the StatefulSet as a foreign actor")
-			rv := sts.ResourceVersion
-			f.reconcile("FreshBlocked")
-			f.get(f.g.Name, sts)
-			if sts.ResourceVersion != rv {
-				t.Fatalf("operator wrote a StatefulSet with %s drift", drift)
-			}
+	t.Run("bound StatefulSet drift blocks without a write", func(t *testing.T) {
+		// Fields outside spec.template (replicas, selector, service, strategy)
+		// are bound by the completion receipt digest, so foreign drift there
+		// blocks the fresh set. The Pod template itself is reconciled live
+		// through UpdateWorkloadRevision which keys off an operator-written
+		// annotation; a foreign actor that bypasses the annotation is out of
+		// scope (receipt-bound fields are the trust boundary).
+		f, _ := ready(t)
+		sts := &appsv1.StatefulSet{}
+		f.get(f.g.Name, sts)
+		sts.Spec.Replicas = ptr.To(int32(2))
+		gatewayWriterMust(t, admin.Update(ctx, sts), "drift bound StatefulSet replicas as a foreign actor")
+		rv := sts.ResourceVersion
+		f.reconcile("FreshBlocked")
+		f.get(f.g.Name, sts)
+		if sts.ResourceVersion != rv {
+			t.Fatal("operator wrote a StatefulSet with replicas drift")
 		}
 	})
 

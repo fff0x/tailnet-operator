@@ -459,6 +459,16 @@ func TestGatewayFreshPod(t *testing.T) {
 	if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: g.Name}, sts) != nil || !receipt.ownsStatefulSet(sts) {
 		t.Fatal("controller-created StatefulSet provenance rejected")
 	}
+	// The reconciler must stamp a template-hash annotation so later reconciles
+	// (annotation-keyed CAS) can short-circuit, and the rendered template MUST
+	// opt the tailscale sidecar into Prometheus metrics (TS_ENABLE_METRICS=true,
+	// served on the existing TS_LOCAL_ADDR_PORT) and expose the CoreDNS
+	// Prometheus listener on tcp/9153 so a PodMonitor can scrape it.
+	gatewayFixtureAssertTemplateSurface(t, sts)
+	// Upgrade path: a pre-v0.11.0 StatefulSet carries no template-hash
+	// annotation. Dropping it must trigger the operator to re-stamp it WITHOUT
+	// recreating the StatefulSet (OnDelete) or rolling the running Pod.
+	gatewayFixtureAssertAnnotationUpgrade(t, ctx, f, sts, reconcile)
 
 	var first gateway.GatewayStateBinding
 	var previousUID types.UID
@@ -824,4 +834,68 @@ func gatewayProcessesStable(before, actual *corev1.Pod) bool {
 		}
 	}
 	return true
+}
+
+var templateHashRegex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// gatewayFixtureAssertTemplateSurface validates operator-visible template fields
+// written on first reconcile: the template-hash annotation that keys the
+// annotation-based CAS path, the tailscale TS_ENABLE_METRICS opt-in, and the
+// CoreDNS prometheus port exposed on the coredns container.
+func gatewayFixtureAssertTemplateSurface(t *testing.T, sts *appsv1.StatefulSet) {
+	t.Helper()
+	if !templateHashRegex.MatchString(sts.Annotations[gateway.GatewayTemplateHashAnnotation]) {
+		t.Fatal("StatefulSet missing operator-written template-hash annotation")
+	}
+	var tailscale, coredns *corev1.Container
+	for i := range sts.Spec.Template.Spec.Containers {
+		switch sts.Spec.Template.Spec.Containers[i].Name {
+		case "tailscale":
+			tailscale = &sts.Spec.Template.Spec.Containers[i]
+		case "coredns":
+			coredns = &sts.Spec.Template.Spec.Containers[i]
+		}
+	}
+	if tailscale == nil || coredns == nil {
+		t.Fatal("rendered template is missing tailscale or coredns container")
+	}
+	found := false
+	for _, e := range tailscale.Env {
+		if e.Name == "TS_ENABLE_METRICS" && e.Value == "true" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("tailscale sidecar is not opted into Prometheus metrics")
+	}
+	port := false
+	for _, p := range coredns.Ports {
+		if p.Name == "metrics-dns" && p.ContainerPort == 9153 {
+			port = true
+		}
+	}
+	if !port {
+		t.Fatal("coredns container missing metrics-dns:9153 port")
+	}
+}
+
+// gatewayFixtureAssertAnnotationUpgrade drops the template-hash annotation and
+// re-reconciles: the operator must restore it without recreating the
+// StatefulSet or rolling the Pod.
+func gatewayFixtureAssertAnnotationUpgrade(t *testing.T, ctx context.Context, f *peerFixture, sts *appsv1.StatefulSet, reconcile func()) {
+	t.Helper()
+	original := sts.UID
+	live := &appsv1.StatefulSet{}
+	if f.kube.Get(ctx, client.ObjectKeyFromObject(sts), live) != nil {
+		t.Fatal("StatefulSet unavailable before annotation upgrade probe")
+	}
+	delete(live.Annotations, gateway.GatewayTemplateHashAnnotation)
+	if f.kube.Update(ctx, live) != nil {
+		t.Fatal("drop annotation as a pre-v0.11.0 upgrade probe")
+	}
+	eventually(t, "operator re-stamps template-hash annotation on existing StatefulSet", func() bool {
+		reconcile()
+		restored := &appsv1.StatefulSet{}
+		return f.kube.Get(ctx, client.ObjectKeyFromObject(sts), restored) == nil && restored.UID == original && templateHashRegex.MatchString(restored.Annotations[gateway.GatewayTemplateHashAnnotation])
+	})
 }

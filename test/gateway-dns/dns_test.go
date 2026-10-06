@@ -347,6 +347,68 @@ func TestRenderedDNS(t *testing.T) {
 	}
 }
 
+// assertCNAMEResolves verifies CoreDNS returns a CNAME chain followed by the
+// target's address, mirroring what a real resolver would see.
+func assertCNAMEResolves(t *testing.T, address, name, target, want string) {
+	t.Helper()
+	for _, network := range []string{"udp", "tcp"} {
+		m, err := exchange(network, address, name, dnsmessage.TypeA)
+		if err != nil {
+			t.Fatalf("%s query failed for CNAME fixture %s", network, name)
+		}
+		if m.RCode != dnsmessage.RCodeSuccess || len(m.Answers) < 2 {
+			t.Fatalf("%s fixture %s: rcode=%d answers=%d (want chain)", network, name, m.RCode, len(m.Answers))
+		}
+		cname, ok := m.Answers[0].Body.(*dnsmessage.CNAMEResource)
+		if !ok || cname.CNAME.String() != target+"." {
+			t.Fatalf("%s fixture %s: first answer not CNAME to %s", network, name, target)
+		}
+		final, ok := m.Answers[len(m.Answers)-1].Body.(*dnsmessage.AResource)
+		if !ok || netip.AddrFrom4(final.A).String() != want {
+			t.Fatalf("%s fixture %s: CNAME chain did not resolve to %s", network, name, want)
+		}
+	}
+}
+
+// Static CNAME records within the zone resolve to the target's A/AAAA records,
+// and the Corefile that the operator renders enables the metrics (prometheus)
+// and in-place reload plugins so CoreDNS can be probed and so Corefile
+// changes land without a Pod restart.
+func TestRenderedDNSCNAME(t *testing.T) {
+	binary := coreDNSBinary(t)
+	root := t.TempDir()
+	in := gateway.DNSInputs{
+		Config: tnv1.GatewayDNS{Zone: "tail.example", StaticRecords: []tnv1.GatewayStaticRecord{
+			{Name: "k8s", Target: "app.tail.example"},
+			{Name: "nested", Target: "deep.sub.tail.example"},
+		}},
+		ServerIP:      "192.0.2.1",
+		Serial:        1,
+		BindAddresses: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
+		Hosts:         "192.0.2.7 app.tail.example\n192.0.2.8 deep.sub.tail.example\n",
+	}
+	plan, err := gateway.RenderDNS(in)
+	if err != nil {
+		t.Fatal("render CNAME fixture")
+	}
+	// The operator's render MUST wire the metrics plugin and the global reload
+	// so Corefile changes propagate without restart.
+	if !strings.Contains(plan.Corefile, "prometheus :9153") {
+		t.Fatal("rendered Corefile missing prometheus listener")
+	}
+	if !strings.Contains(plan.Corefile, "\n    reload\n") {
+		t.Fatal("rendered Corefile missing global reload plugin")
+	}
+	project(t, root, "v1", map[string]string{"Corefile": plan.Corefile, "zone.db": plan.ZoneFile}, true)
+	address := start(t, binary, root, "app.tail.example", "127.0.0.1")
+	// In-zone CNAME follows to the target's A record.
+	assertCNAMEResolves(t, address, "k8s.tail.example", "app.tail.example", "192.0.2.7")
+	// Nested FQDN target (host under a sub-label) is also followed.
+	assertCNAMEResolves(t, address, "nested.tail.example", "deep.sub.tail.example", "192.0.2.8")
+	// Direct A query for the target host still works.
+	assertAnswer(t, address, "app.tail.example", dnsmessage.TypeA, dnsmessage.RCodeSuccess, "192.0.2.7")
+}
+
 func TestRenderedDNSIPv6(t *testing.T) {
 	binary := coreDNSBinary(t)
 	root := t.TempDir()
