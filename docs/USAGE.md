@@ -542,6 +542,10 @@ monitoring:
   dashboard: { enabled: true, kind: GrafanaDashboard, datasourceName: Prometheus }
 ```
 
+The agent `PodMonitor` also covers `TailnetGateway` pods: it scrapes the Tailscale
+sidecar's Prometheus endpoint on tcp/8080 (`TS_ENABLE_METRICS=true` is wired by
+the operator) and the CoreDNS Prometheus endpoint on tcp/9153.
+
 The default Grafana selector is `grafana.internal/instance: grafana`; `kind: ConfigMap` serves
 sidecar setups. Non-empty `rules.groups` or `dashboard.json` replace the bundled content.
 A PodMonitor grants no network access: agent NetworkPolicies allow TCP 9080 from the operator

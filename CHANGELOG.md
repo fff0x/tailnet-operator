@@ -4,6 +4,46 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Release notes
+
+A `TailnetGateway` static DNS record can now be a CNAME inside the same zone:
+`dns.staticRecords[]` admits an optional `target` FQDN as a mutually exclusive
+alternative to `address`. The target must lie within `dns.zone` (equal to the
+zone or ending in `.<zone>`) and must differ from the record's own FQDN. The
+rendered Corefile also enables the CoreDNS `prometheus :9153` listener and a
+global `reload` plugin so that Corefile changes land without a Pod restart,
+and the tailscale sidecar is now started with `TS_ENABLE_METRICS=true` on the
+existing `TS_LOCAL_ADDR_PORT` (tcp/8080). The default chart's `PodMonitor`
+scrapes both ports. The completion receipt remains format 3; the Pod template
+and the derived `Corefile` are now reconciled live, keyed off the operator-
+written `tsunaro.io/template-sha256` annotation on the `StatefulSet`
+(StatefulSets outside receipt-bound fields like `replicas`, `selector`,
+`serviceName` and `updateStrategy` are still bound). Existing fresh gateways
+upgrade in place: on the first reconcile after upgrade the operator stamps
+the annotation and (idempotently) rewrites the template with the new metrics
+env/port; the running Pod picks up the new Corefile via `reload 1s`, and
+delete `Pod <name>-0` once to also roll the sidecar for `TS_ENABLE_METRICS`.
+No CRD, RBAC or chart contract change beyond the additive `target` field.
+
+### Added
+
+- `GatewayStaticRecord.target`: mutually exclusive with `address`, admits an
+  FQDN inside the same `dns.zone` and renders a CNAME in `zone.db`. CRD CEL
+  rejects both-set, neither-set, out-of-zone and self-FQDN targets at admission.
+- Operator metrics coverage for `TailnetGateway` pods: Tailscale sidecar
+  Prometheus endpoint on tcp/8080 (`TS_ENABLE_METRICS=true`), CoreDNS
+  Prometheus endpoint on tcp/9153, both scraped by the default `PodMonitor`.
+
+### Changed
+
+- The completion receipt no longer binds the `StatefulSet` Pod template or the
+  derived `Corefile`; both are reconciled live. Template drift is tracked
+  through a `tsunaro.io/template-sha256` annotation on the `StatefulSet`
+  (annotation-keyed CAS), `Corefile` drift through the existing
+  `tsunaro.io/dns-content-sha256` annotation on the `-coredns` `ConfigMap`.
+  `WorkloadCurrent` now reads `pod.labels[controller-revision-hash]` against
+  `sts.Status.UpdateRevision` instead of comparing container images.
+
 ## [0.10.0] - 2026-10-06
 
 ### Release notes
