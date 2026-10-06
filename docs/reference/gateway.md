@@ -85,7 +85,7 @@ There is no configurable target namespace or arbitrary Pod/Corefile/shell templa
 | `dns.serviceName`, `dns.serviceClusterIP` | Explicit stable DNS Service name/address, immutable |
 | `dns.image` | Separate CoreDNS version/digest pin |
 | `dns.extraZones[]` | Unique, non-overlapping zones with explicit unicast-IP upstreams; no resolver URLs |
-| `dns.staticRecords[]` | Unique relative labels and explicit A/AAAA addresses below the primary zone |
+| `dns.staticRecords[]` | Unique relative labels below the primary zone with EITHER an explicit A/AAAA `address` OR a `target` FQDN inside the same zone (CNAME, never both and never neither; a target that equals the record's own FQDN is rejected) |
 | `dns.wildcardAddress` | Optional file-zone fallback; never a `template` plugin that shadows dynamic hosts |
 | `forwards[]` | Named TCP port to `targetAddress` IP and `targetPort`; unique listener ports |
 | `forwardImage` | Separate socat version/digest pin, required when forwards are present |
@@ -591,7 +591,12 @@ Initial creation checks scope and ownership. Future dynamic DNS integration must
 - Project the configuration directory without `subPath` and set CoreDNS's working
   directory to `/etc/coredns`. The file plugin checks for zone updates each second.
 - Select supported bind addresses explicitly and verify the actual image, Service
-  allocation and DNS reachability. No management/metrics ports are rendered yet.
+  allocation and DNS reachability.
+- The rendered Corefile wires the CoreDNS `prometheus :9153` listener and a
+  global `reload` plugin so that Corefile edits (e.g. a new static record) land
+  without a Pod restart. The tailscale sidecar also runs with
+  `TS_ENABLE_METRICS=true` on the existing `TS_LOCAL_ADDR_PORT` (tcp/8080).
+  The default chart's `PodMonitor` scrapes both.
 
 The renderer rejects malformed input with fixed errors and no partial files.
 Like `GatewayIP`, snapshot addresses must be canonical unicast literals, excluding
