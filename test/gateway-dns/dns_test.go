@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -407,6 +408,31 @@ func TestRenderedDNSCNAME(t *testing.T) {
 	assertCNAMEResolves(t, address, "nested.tail.example", "deep.sub.tail.example", "192.0.2.8")
 	// Direct A query for the target host still works.
 	assertAnswer(t, address, "app.tail.example", dnsmessage.TypeA, dnsmessage.RCodeSuccess, "192.0.2.7")
+	// The Prometheus plugin the operator renders actually serves CoreDNS metrics
+	// on :9153 (what the PodMonitor scrapes), not just a syntactically valid
+	// Corefile directive.
+	assertMetricsServed(t, "127.0.0.1:9153")
+}
+
+// assertMetricsServed verifies the CoreDNS Prometheus endpoint answers on the
+// rendered :9153 listener with its build-info gauge.
+func assertMetricsServed(t *testing.T, hostPort string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := http.Get("http://" + hostPort + "/metrics")
+		if err == nil {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == 200 && strings.Contains(string(body), "coredns_build_info") {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("CoreDNS metrics endpoint did not serve coredns_build_info on :9153")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func TestRenderedDNSIPv6(t *testing.T) {

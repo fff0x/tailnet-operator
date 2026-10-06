@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -69,6 +70,26 @@ func gatewayTeardownCases(t *testing.T, newFixture func(*testing.T, bool) *gatew
 		f.assertNoRuntime()
 		f.assertHeadscale([]string{node.ID}, []string{"9"})
 		f.assertMints(1)
+	})
+
+	t.Run("delete also removes a leftover migration stage", func(t *testing.T) {
+		f := newFixture(t, false)
+		f.reconcile("Provisioning")
+		f.assertComplete()
+		// A -fresh-next left by an interrupted receipt migration must not survive
+		// teardown.
+		fresh := &corev1.ConfigMap{}
+		f.get(f.g.Name+"-fresh", fresh)
+		stage := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.g.Name + "-fresh-next", Namespace: f.ns, Labels: fresh.Labels}, Immutable: ptr.To(true), Data: map[string]string{"receipt.json": fresh.Data["receipt.json"]}}
+		gatewayWriterMust(t, f.c.Create(f.ctx, stage), "seed a leftover migration stage")
+		f.setDeletionPolicy(tnv1.GatewayDeletionPolicyDelete)
+		f.reconcile("Provisioning")
+		gatewayWriterMust(t, f.c.Delete(f.ctx, f.g), "delete gateway")
+		if !f.teardownReconcile() {
+			t.Fatal("teardown did not complete for a never-started workload")
+		}
+		f.assertNoRuntime()
+		f.absent(f.g.Name+"-fresh-next", &corev1.ConfigMap{})
 	})
 
 	t.Run("replaced child blocks at that step until removed", func(t *testing.T) {

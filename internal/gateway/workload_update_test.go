@@ -105,6 +105,78 @@ func TestObjectReceiptStatefulSetTemplateExcluded(t *testing.T) {
 	}
 }
 
+// legacyObjectReceipt is the migration shim recognising v0.10.0 receipts. It must
+// bind what the old rule bound (every template field except container images and
+// TS_ROUTES, and the Corefile) and must differ from the current digest for an
+// unmodified object, so observeFresh can tell a v0.10.0 receipt from a current
+// one and from tampering.
+func TestLegacyObjectReceiptMatchesV0100Rule(t *testing.T) {
+	sts := freshStatefulSet(t)
+	// For an unmodified object the two rules disagree (new blanks the whole
+	// template + Corefile, legacy only images/TS_ROUTES + zone.db).
+	if legacyObjectReceipt(sts) == objectReceipt(sts) {
+		t.Fatal("legacy and current StatefulSet digests must differ for migration detection")
+	}
+	// Legacy still binds template fields other than images/TS_ROUTES (env, ports),
+	// which the current rule ignores.
+	base := legacyObjectReceipt(sts)
+	for name, mutate := range map[string]func(*appsv1.StatefulSet){
+		"env":  func(s *appsv1.StatefulSet) { s.Spec.Template.Spec.Containers[0].Env[0].Value = "x" },
+		"port": func(s *appsv1.StatefulSet) { s.Spec.Template.Spec.Containers[1].Ports = nil },
+	} {
+		c := sts.DeepCopy()
+		mutate(c)
+		if legacyObjectReceipt(c) == base {
+			t.Fatalf("%s drift escaped the legacy digest", name)
+		}
+	}
+	// Legacy ignores exactly images and TS_ROUTES.
+	for name, mutate := range map[string]func(*appsv1.StatefulSet){
+		"image": func(s *appsv1.StatefulSet) {
+			s.Spec.Template.Spec.Containers[0].Image = "ghcr.io/tailscale/tailscale:v1.102.5"
+		},
+		"ts_routes": func(s *appsv1.StatefulSet) {
+			for i, e := range s.Spec.Template.Spec.Containers[0].Env {
+				if e.Name == "TS_ROUTES" {
+					s.Spec.Template.Spec.Containers[0].Env[i].Value = "9.9.9.0/24"
+				}
+			}
+		},
+	} {
+		c := sts.DeepCopy()
+		mutate(c)
+		if legacyObjectReceipt(c) != base {
+			t.Fatalf("%s must stay out of the legacy digest", name)
+		}
+	}
+	// The -coredns Corefile is bound by the legacy rule but not by the current one.
+	cm := freshCoreDNS(t)
+	legacyBase := legacyObjectReceipt(cm)
+	cm2 := cm.DeepCopy()
+	cm2.Data["Corefile"] += "\n# drift\n"
+	if legacyObjectReceipt(cm2) == legacyBase {
+		t.Fatal("Corefile drift escaped the legacy -coredns digest")
+	}
+	if objectReceipt(cm2) != objectReceipt(cm) {
+		t.Fatal("Corefile drift must stay out of the current -coredns digest")
+	}
+}
+
+func freshCoreDNS(t *testing.T) *corev1.ConfigMap {
+	t.Helper()
+	plan, err := RenderFresh(freshFixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obj := range plan.Objects {
+		if v, ok := obj.(*corev1.ConfigMap); ok && v.Name == "router-coredns" {
+			return v
+		}
+	}
+	t.Fatal("no -coredns ConfigMap rendered")
+	return nil
+}
+
 func TestSpecRouteInputsScope(t *testing.T) {
 	in := freshFixture()
 	in.Egresses = append(in.Egresses,

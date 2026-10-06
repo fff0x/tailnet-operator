@@ -329,6 +329,7 @@ func TestGatewayFreshWriter(t *testing.T) {
 	gatewayTeardownCases(t, newFixture)
 	gatewayDNSLiveCases(t, newFixture, admin, ctx)
 	gatewayUpdateCases(t, newFixture, admin, ctx)
+	gatewayMigrationCases(t, newFixture, admin, ctx)
 }
 
 // syntheticRevisionHash picks a Pod-label-safe (<=63 chars) revision token from
