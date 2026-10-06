@@ -59,12 +59,13 @@ activates fresh-only IPv4 creation; existing gateways are never adopted or repla
 The operator/chart require this fourth CRD, gateway read/status authorization and
 operator-namespace get/create/delete for StatefulSets, PDBs, ServiceAccounts, Roles and
 RoleBindings plus `patch` on `tailnetgateways` for the teardown finalizer. StatefulSets
-additionally get `update`, used only to follow `image`/`dns.image` in the Pod template
-(`OnDelete`: no Pod restart; `WorkloadCurrent` reports staleness). Suspension freezes
-reconciliation, not the running Pod. The completion receipt is format 2 and pins identity
-fields only: `deletionPolicy`, `suspend`, static records and unrelated Tailnet fields no
-longer block a running gateway, and a changed identity field reports `IdentityChanged`.
-Gateways created by 0.8.0 or earlier carry a format-1 receipt; delete them with
+additionally get `update`, used only to follow `image`/`dns.image` and the planned routes in
+the Pod template (`OnDelete`: no Pod restart; `WorkloadCurrent` reports staleness); the
+LoadBalancer Service gets `update` for `service.poolLabels`. Suspension freezes
+reconciliation, not the running Pod. The completion receipt is format 3 and pins identity
+fields only: `deletionPolicy`, `suspend`, static records, routes, pool labels and unrelated
+Tailnet fields no longer block a running gateway, and a changed identity field reports
+`IdentityChanged`. Gateways created by 0.9.0 or earlier carry a format-1 or format-2 receipt; delete them with
 `deletionPolicy: Delete` and recreate.
 CR deletion retains resources unless `deletionPolicy: Delete` explicitly consents to
 the UID-preconditioned teardown. Partial creation remains blocked without automatic
