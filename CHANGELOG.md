@@ -13,8 +13,19 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   routes without a manual `headscale nodes approve-routes`. Gateway create, change and
   delete trigger a re-render. Base `autoApprovers` entries stay and are merged by union.
 
+- A running fresh `TailnetGateway` now follows `routes.lan`, `routes.advertiseEgressTargets`,
+  `service.tailnetLBCIDR` and the targets of the Tailnet's `TailnetEgress` objects into
+  `TS_ROUTES` of the StatefulSet template, and `service.poolLabels` onto the LoadBalancer
+  Service. The Pod is never restarted (`OnDelete`); `WorkloadCurrent=False/PodTemplateStale`
+  names the routes it does not advertise yet. New reasons `ServiceUpdateBlocked` and
+  `ServiceUpdateConflict`. The policy controller plans the same routes from the spec.
+
 ### Changed
 
+- The `TailnetGateway` completion receipt is now format 3: routes, `tailnetLBCIDR` and
+  `poolLabels` are no longer pinned, and `Ready` binds to the running Pod's own
+  `TS_ROUTES`. Gateways with a format-1 or format-2 receipt report `IdentityChanged`;
+  delete (`deletionPolicy: Delete`) and recreate them.
 - `TailnetGateway` `RoutesInSync` now reports `True/Approved` or `False/NotApproved`
   (missing prefixes named) for a Ready fresh gateway instead of
   `Unknown/ExternallyManaged`. It is read-only.

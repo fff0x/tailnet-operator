@@ -40,7 +40,7 @@ IPv6, extra DNS zones and TCP forwards remain unsupported by this writer.
 6. Observe the retained set. Report runtime Ready only after a running, Ready Pod matches
    the StatefulSet and its state binds to an online Headscale node with the advertised routes.
 
-The completion record (format 2) binds Gateway/Tailnet UIDs and hashes of the
+The completion record (format 3) binds Gateway/Tailnet UIDs and hashes of the
 [identity fields](#spec-updates), not generations or full specs. It permits later
 metadata/status-only CR revision changes and the mutable spec changes listed below.
 Replaced state/resources, payload drift, expired auth or a changed identity field block observation.
@@ -466,24 +466,46 @@ receipt ConfigMaps still demand the trust of a Secret; whoever can rewrite the
 
 ## Spec updates
 
-A completed Gateway tolerates spec changes by field class. The receipt (format 2)
+A completed Gateway tolerates spec changes by field class. The receipt (format 3)
 pins an identity hash of the fields whose change would need a new node or a new
 runtime shape; everything else is either reconciled or irrelevant to the retained set.
 
 | Class | Fields | Effect of a change |
 |---|---|---|
-| Pinned identity | `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `routes.*`, `service.*`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP`, `dns.extraZones`, `forwardImage`, `forwards`; Tailnet `spec.server` and `spec.dns.hostsConfigMap` | `Ready=False/IdentityChanged`; nothing is written. Revert the field, or delete with `deletionPolicy: Delete` and recreate. |
+| Pinned identity | `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `service.loadBalancerIP`, `service.loadBalancerClass`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP`, `dns.extraZones`, `forwardImage`, `forwards`; Tailnet `spec.server` and `spec.dns.hostsConfigMap` | `Ready=False/IdentityChanged`; nothing is written. Revert the field, or delete with `deletionPolicy: Delete` and recreate. |
 | Live DNS | `dns.staticRecords`, `dns.wildcardAddress`, the hosts source | Re-rendered into `zone.db` ([Live DNS reconcile](#live-dns-reconcile)). |
 | Images | `image` (tailscale and kernel-preflight), `dns.image` | Written into `spec.template` of the receipt StatefulSet; see below. |
+| Routes | `routes.lan`, `routes.advertiseEgressTargets`, `service.tailnetLBCIDR`, the targets of the Tailnet's `TailnetEgress` objects | The planned set is written into `TS_ROUTES` of the template; see below. |
+| Pool labels | `service.poolLabels` | Written onto the receipt's LoadBalancer Service (same object); see below. |
 | Consent / lifecycle | `deletionPolicy`, `suspend` | No effect on the receipt. |
 | Other Tailnet fields | everything except `server` and `dns.hostsConfigMap` | No effect on the receipt. |
 
-Routes stay pinned until a route reconciler exists. Receipts written before format 2
-(releases up to 0.8.0) report `IdentityChanged`; migrate by deleting with
-`deletionPolicy: Delete` and recreating.
+Receipts written before format 3 (releases up to 0.9.0) report `IdentityChanged`;
+migrate by deleting with `deletionPolicy: Delete` and recreating.
 
-**Images.** `UpdateWorkloadRevision` rewrites only the container `image` fields of the
-StatefulSet template, after re-verifying the receipt UID and the image-less digest, with
+**Routes.** The route plan is computed from the spec (LAN, `tailnetLBCIDR`, and, unless
+`advertiseEgressTargets` is `false`, the IPv4 targets of `TailnetEgress` objects of the
+same Tailnet in the operator namespace) and written into `TS_ROUTES` of the `tailscale`
+container. The Pod itself is never restarted: it advertises the routes it started with
+until you delete it (`PodTemplateStale` names the routes not yet advertised, and says so
+when the Pod still advertises more than the spec). `Ready` binds to the running Pod's own
+`TS_ROUTES`, so a node that advertises something else than its Pod started with is not
+Ready. Removed routes stay approved in Headscale; the policy controller only adds
+approvals. A `tailnetLBCIDR` that no longer contains `loadBalancerIP`, an invalid
+prefix or an IPv6 route reports `WorkloadUpdateBlocked` and writes nothing. Egress
+changes reach the gateway at the next reconcile (within 5 seconds).
+
+**Pool labels.** `UpdateServiceRevision` sets and removes the pool labels on the
+LoadBalancer Service after re-verifying its UID and receipt digest (labels and
+annotations are not part of the digest). The keys it wrote are recorded in the
+annotation `tsunaro.io/pool-label-keys`; only those keys are ever removed. A pool key
+that collides with a label somebody else put on the Service reports
+`ServiceUpdateBlocked` (a concurrent change reports `ServiceUpdateConflict`); a pool key
+that collides with one of the operator's own labels is refused at render time
+(`Ready=False/FreshBlocked`).
+
+**Images.** `UpdateWorkloadRevision` rewrites only the container `image` fields and the
+`TS_ROUTES` value of the StatefulSet template, after re-verifying the receipt UID and the image-less digest, with
 the observed `resourceVersion` as CAS. The StatefulSet uses `OnDelete`: the operator
 never restarts the Pod. The `WorkloadCurrent` condition reports the result:
 
@@ -494,20 +516,22 @@ never restarts the Pod. The `WorkloadCurrent` condition reports the result:
 - `False / WorkloadUpdateBlocked` — StatefulSet or receipt is not verified; nothing is written.
 
 The condition is absent while suspended, terminating or before a completion receipt.
-The StatefulSet digest in the receipt covers everything except container images:
+The StatefulSet digest in the receipt covers everything except container images and `TS_ROUTES`:
 selector, `serviceName`, `updateStrategy`, `replicas` and every other template field
 (command, env, volumes, security context, labels) still trip `FreshBlocked` on drift.
 
 Ready no longer requires the Pod to match the current template (it may legitimately
 predate an image change); it requires StatefulSet ownership by UID, the gateway and
 state-UID labels, the service account, running and Ready containers, a verified state
-binding and the advertised routes. The `update` verb on `statefulsets` is the only
+binding and the routes the Pod itself was started with. The `update` verb on `statefulsets` is the only
 write right added for this; it is never used on other kinds.
 
 Envtest covers the controller path against a real API server with a synthetic Pod.
 Kind proves, with the real StatefulSet controller, that an `image` change updates the
 template, reports `PodTemplateStale`, keeps the Pod UID and container IDs, and
-converges back after reverting. Rolling a Pod onto a *different* image is not proven in
+converges back after reverting. A route and pool-label change reaches the template and
+the same Service while the Pod keeps running; after the Pod is deleted the new Pod
+advertises exactly the planned set. Rolling a Pod onto a *different* image is not proven in
 kind: the startup gate binds the exact pinned reference.
 
 ## Fresh DNS rendering: partial implementation
