@@ -460,41 +460,6 @@ func TestGatewayFreshPod(t *testing.T) {
 		t.Fatal("controller-created StatefulSet provenance rejected")
 	}
 
-	// Live DNS: write the probe-matching record and verify the controller
-	// advances the derived zone's SOA serial through the public UpdateDNSRevision
-	// path, without touching any other receipt child.
-	coreDNSBefore := &corev1.ConfigMap{}
-	if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: g.Name + "-coredns"}, coreDNSBefore) != nil || coreDNSBefore.Annotations["tsunaro.io/dns-serial"] != "1" {
-		t.Fatal("initial derived zone did not record CAS annotations")
-	}
-	if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: tn.Spec.DNS.HostsConfigMap}, hosts) != nil {
-		t.Fatal("hosts source disappeared before live DNS update")
-	}
-	hosts.Data = map[string]string{"hosts": "198.51.100.8 app.tail.example\n"}
-	if f.kube.Update(ctx, hosts) != nil {
-		t.Fatal("hosts source update rejected")
-	}
-	coreDNSAfter := &corev1.ConfigMap{}
-	eventually(t, "live DNS reconcile advances the derived zone", func() bool {
-		reconcile()
-		if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: g.Name + "-coredns"}, coreDNSAfter) != nil {
-			return false
-		}
-		if dns := meta.FindStatusCondition(g.Status.Conditions, "DNSReady"); dns == nil || dns.Reason != "DNSInSync" {
-			return false
-		}
-		return coreDNSAfter.Annotations["tsunaro.io/dns-serial"] == "2" && strings.Contains(coreDNSAfter.Data["zone.db"], "198.51.100.8")
-	})
-	pf.save("gateway-dns-live.json", map[string]any{
-		"source":  map[string]string{"name": hosts.Name, "uid": string(hosts.UID), "resourceVersion": hosts.ResourceVersion},
-		"before":  map[string]string{"serial": coreDNSBefore.Annotations["tsunaro.io/dns-serial"], "hash": coreDNSBefore.Annotations["tsunaro.io/dns-content-sha256"], "uid": string(coreDNSBefore.UID), "resourceVersion": coreDNSBefore.ResourceVersion},
-		"after":   map[string]string{"serial": coreDNSAfter.Annotations["tsunaro.io/dns-serial"], "hash": coreDNSAfter.Annotations["tsunaro.io/dns-content-sha256"], "uid": string(coreDNSAfter.UID), "resourceVersion": coreDNSAfter.ResourceVersion},
-		"zoneHas": strings.Contains(coreDNSAfter.Data["zone.db"], "198.51.100.8"),
-	})
-	if coreDNSBefore.UID != coreDNSAfter.UID {
-		t.Fatal("live reconcile replaced the derived ConfigMap")
-	}
-
 	var first gateway.GatewayStateBinding
 	var previousUID types.UID
 	for _, phase := range []string{"initial", "recreated"} {
@@ -589,6 +554,44 @@ func TestGatewayFreshPod(t *testing.T) {
 			first = binding
 		} else if binding.NodeID != first.NodeID || binding.IPv4 != first.IPv4 || binding.StateUID != first.StateUID {
 			t.Fatal("gateway identity changed after Pod recreation")
+		}
+		if phase == "initial" {
+			// Live DNS against a running Pod: CoreDNS started with the 198.51.100.7 seed. The
+			// hosts change must advance the derived zone's SOA serial through the public
+			// UpdateDNSRevision path without touching any other receipt child, and the
+			// following prove() (pinned to .8) then shows the running CoreDNS reloaded it.
+			coreDNSBefore := &corev1.ConfigMap{}
+			if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: g.Name + "-coredns"}, coreDNSBefore) != nil || coreDNSBefore.Annotations["tsunaro.io/dns-serial"] != "1" {
+				t.Fatal("initial derived zone did not record CAS annotations")
+			}
+			if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: tn.Spec.DNS.HostsConfigMap}, hosts) != nil {
+				t.Fatal("hosts source disappeared before live DNS update")
+			}
+			hosts.Data = map[string]string{"hosts": "198.51.100.8 app.tail.example\n"}
+			if f.kube.Update(ctx, hosts) != nil {
+				t.Fatal("hosts source update rejected")
+			}
+			coreDNSAfter := &corev1.ConfigMap{}
+			eventually(t, "live DNS reconcile advances the derived zone", func() bool {
+				reconcile()
+				if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: g.Name + "-coredns"}, coreDNSAfter) != nil {
+					return false
+				}
+				if dns := meta.FindStatusCondition(g.Status.Conditions, "DNSReady"); dns == nil || dns.Reason != "DNSInSync" {
+					return false
+				}
+				return coreDNSAfter.Annotations["tsunaro.io/dns-serial"] == "2" && strings.Contains(coreDNSAfter.Data["zone.db"], "198.51.100.8")
+			})
+			pf.save("gateway-dns-live.json", map[string]any{
+				"source":  map[string]string{"name": hosts.Name, "uid": string(hosts.UID), "resourceVersion": hosts.ResourceVersion},
+				"before":  map[string]string{"serial": coreDNSBefore.Annotations["tsunaro.io/dns-serial"], "hash": coreDNSBefore.Annotations["tsunaro.io/dns-content-sha256"], "uid": string(coreDNSBefore.UID), "resourceVersion": coreDNSBefore.ResourceVersion},
+				"after":   map[string]string{"serial": coreDNSAfter.Annotations["tsunaro.io/dns-serial"], "hash": coreDNSAfter.Annotations["tsunaro.io/dns-content-sha256"], "uid": string(coreDNSAfter.UID), "resourceVersion": coreDNSAfter.ResourceVersion},
+				"zoneHas": strings.Contains(coreDNSAfter.Data["zone.db"], "198.51.100.8"),
+				"podUID":  p.UID, "podRunningBeforeUpdate": true,
+			})
+			if coreDNSBefore.UID != coreDNSAfter.UID {
+				t.Fatal("live reconcile replaced the derived ConfigMap")
+			}
 		}
 		dataPlane.prove(t, phase, p, binding)
 		pf.save("gateway-"+phase+"-result.json", map[string]any{"controllerReady": true, "statefulSetOwned": true, "stateBound": true, "stateUIDRetained": binding.StateUID == stateUID, "nodeID": binding.NodeID, "ipv4": binding.IPv4, "podUID": p.UID, "kernelPreflightPassed": true, "imagesBound": true, "routesAdvertised": receipt.Routes, "routesForwarded": true, "knownLocalDNSVerified": true})
