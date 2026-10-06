@@ -36,7 +36,7 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 		message = "Fresh resources are retained; waiting for a running Pod and verified persistent identity."
 	}
 	if reason == "IdentityChanged" {
-		message = "Identity fields pinned at creation (tailnetRef, hostname, stateSecretRef, tags, routes, service, dns zone/service/extraZones, forwards; Tailnet server and dns.hostsConfigMap) differ from the completion receipt, or the receipt predates format 2. Nothing is written: revert the change, or delete with deletionPolicy=Delete and recreate."
+		message = "Identity fields pinned at creation (tailnetRef, hostname, stateSecretRef, tags, replicas, service.loadBalancerIP/loadBalancerClass, dns zone/service/extraZones, forwards; Tailnet server and dns.hostsConfigMap) differ from the completion receipt, or the receipt predates format 3. Nothing is written: revert the change, or delete with deletionPolicy=Delete and recreate."
 	}
 	if observation.Ready {
 		reason = "FreshRuntimeReady"
@@ -60,20 +60,10 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 		}
 	}
 	meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "DNSReady", Status: dnsStatus, Reason: dnsReason, Message: dnsMessage, ObservedGeneration: g.Generation})
-	// Container images in the Pod template follow image/dns.image. The running Pod is never
+	// Images, routes (TS_ROUTES) and LB pool labels follow the spec. The running Pod is never
 	// restarted by the operator (StatefulSet OnDelete): staleness is reported.
 	if observation.Completed {
-		status, wReason, wMessage := metav1.ConditionUnknown, "Provisioning", "No verified Pod yet."
-		switch err := gateway.UpdateWorkloadRevision(ctx, r.RuntimeClient, r.OperatorNamespace, g, observation); {
-		case errors.Is(err, gateway.ErrWorkloadConflict):
-			status, wReason, wMessage = metav1.ConditionFalse, "WorkloadUpdateConflict", "Concurrent change on the StatefulSet; a later reconcile will retry."
-		case err != nil:
-			status, wReason, wMessage = metav1.ConditionFalse, "WorkloadUpdateBlocked", "StatefulSet or completion receipt is not verified; the Pod template is not updated."
-		case observation.PodCurrent:
-			status, wReason, wMessage = metav1.ConditionTrue, "PodCurrent", "Running Pod matches the template wanted by the spec."
-		case observation.PodPresent:
-			status, wReason, wMessage = metav1.ConditionFalse, "PodTemplateStale", "StatefulSet images follow the spec; delete Pod "+g.Name+"-0 to apply it (OnDelete). The running Pod keeps serving."
-		}
+		status, wReason, wMessage := r.reconcileWorkload(ctx, g, observation)
 		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "WorkloadCurrent", Status: status, Reason: wReason, Message: wMessage, ObservedGeneration: g.Generation})
 	} else {
 		meta.RemoveStatusCondition(&g.Status.Conditions, "WorkloadCurrent")
@@ -92,6 +82,47 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 		}
 	}
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+}
+
+// reconcileWorkload brings the Service pool labels and the StatefulSet template (images, routes)
+// in line with the spec and reports whether the running Pod already matches.
+func (r *TailnetGatewayReconciler) reconcileWorkload(ctx context.Context, g *tnv1.TailnetGateway, o gateway.FreshObservation) (metav1.ConditionStatus, string, string) {
+	plan, err := gateway.PlanSpecRoutes(ctx, r.RuntimeClient, r.OperatorNamespace, g)
+	if err != nil {
+		return metav1.ConditionFalse, "WorkloadUpdateBlocked", "Spec routes do not plan (invalid prefix, tailnetLBCIDR without loadBalancerIP, or a non-IPv4 route); nothing is written."
+	}
+	switch err := gateway.UpdateServiceRevision(ctx, r.RuntimeClient, r.OperatorNamespace, g, o); {
+	case errors.Is(err, gateway.ErrServiceConflict):
+		return metav1.ConditionFalse, "ServiceUpdateConflict", "Concurrent change on the LoadBalancer Service; a later reconcile will retry."
+	case err != nil:
+		return metav1.ConditionFalse, "ServiceUpdateBlocked", "LoadBalancer Service or completion receipt is not verified, or a pool label collides with a label the operator did not write; the Service is not updated."
+	}
+	switch err := gateway.UpdateWorkloadRevision(ctx, r.RuntimeClient, r.OperatorNamespace, g, o, plan.Routes); {
+	case errors.Is(err, gateway.ErrWorkloadConflict):
+		return metav1.ConditionFalse, "WorkloadUpdateConflict", "Concurrent change on the StatefulSet; a later reconcile will retry."
+	case err != nil:
+		return metav1.ConditionFalse, "WorkloadUpdateBlocked", "StatefulSet or completion receipt is not verified; the Pod template is not updated."
+	}
+	if !o.PodPresent {
+		return metav1.ConditionUnknown, "Provisioning", "No verified Pod yet."
+	}
+	var pending []string
+	for _, route := range plan.Routes {
+		if !slices.Contains(o.PodRoutes, route) {
+			pending = append(pending, route)
+		}
+	}
+	if o.PodCurrent && slices.Equal(o.PodRoutes, plan.Routes) {
+		return metav1.ConditionTrue, "PodCurrent", "Running Pod matches the template wanted by the spec."
+	}
+	message := "StatefulSet follows the spec; delete Pod " + g.Name + "-0 to apply it (OnDelete). The running Pod keeps serving."
+	if len(pending) > 0 {
+		message += " Routes not yet advertised: " + strings.Join(pending, ", ") + "."
+	}
+	if len(o.PodRoutes) > len(plan.Routes)-len(pending) {
+		message += " Routes the Pod advertises beyond the spec stay until it restarts."
+	}
+	return metav1.ConditionFalse, "PodTemplateStale", message
 }
 
 // routesInSync reports whether Headscale approved every route the completion receipt advertises.

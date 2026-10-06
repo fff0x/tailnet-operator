@@ -45,6 +45,12 @@ func TestFreshCompletionScope(t *testing.T) {
 		"deletion policy": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) {
 			g.Spec.DeletionPolicy = tnv1.GatewayDeletionPolicyDelete
 		},
+		"lan": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) {
+			g.Spec.Routes.LAN = append(g.Spec.Routes.LAN, "10.9.0.0/16")
+		},
+		"egress adv":      func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Routes.AdvertiseEgressTargets = ptr.To(false) },
+		"lb cidr":         func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Service.TailnetLBCIDR = "198.51.0.0/16" },
+		"pool labels":     func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Service.PoolLabels = nil },
 		"tag order":       func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Tags = []string{"tag:fabric", "tag:mesh"} },
 		"tailnet api url": func(_ *tnv1.TailnetGateway, tn *tnv1.Tailnet) { tn.Spec.APIURL = "https://api.example" },
 	} {
@@ -59,17 +65,12 @@ func TestFreshCompletionScope(t *testing.T) {
 	}
 	// ... while every pinned identity field must not reuse it.
 	for name, mutate := range map[string]func(*tnv1.TailnetGateway, *tnv1.Tailnet){
-		"gatewayUID": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.UID = "replacement" },
-		"tailnetUID": func(_ *tnv1.TailnetGateway, tn *tnv1.Tailnet) { tn.UID = "replacement" },
-		"hostname":   func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Hostname = "different" },
-		"tags":       func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Tags = []string{"tag:fabric"} },
-		"lan": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) {
-			g.Spec.Routes.LAN = append(g.Spec.Routes.LAN, "10.9.0.0/16")
-		},
-		"egress adv":  func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Routes.AdvertiseEgressTargets = ptr.To(false) },
+		"gatewayUID":  func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.UID = "replacement" },
+		"tailnetUID":  func(_ *tnv1.TailnetGateway, tn *tnv1.Tailnet) { tn.UID = "replacement" },
+		"hostname":    func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Hostname = "different" },
+		"tags":        func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Tags = []string{"tag:fabric"} },
 		"lb ip":       func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Service.LoadBalancerIP = "198.51.100.2" },
-		"lb cidr":     func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Service.TailnetLBCIDR = "198.51.0.0/16" },
-		"pool labels": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Service.PoolLabels = nil },
+		"lb class":    func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.Service.LoadBalancerClass = "example.com/other" },
 		"dns zone":    func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.DNS.Zone = "other.example" },
 		"dns service": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.DNS.ServiceName = "other-dns" },
 		"dns cluster": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.DNS.ServiceClusterIP = "10.96.0.54" },

@@ -6,6 +6,8 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+
+	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
 // RouteInputs describes explicit gateway routes and optional automatic host routes.
@@ -16,6 +18,29 @@ type RouteInputs struct {
 	LoadBalancerCIDR       string
 	AdvertiseEgressTargets bool
 	EgressTargets          []string
+}
+
+// SpecRouteInputs builds the RouteInputs a Gateway wants from its spec: LAN, the tailnet
+// LB CIDR and, unless advertiseEgressTargets is false, the targets of the non-deleting
+// TailnetEgress CRs of this operator namespace and Tailnet. egresses may contain other
+// scopes. RenderFresh, the route reconciler and the policy render all use it, so the
+// advertised set and the approved set cannot drift apart.
+func SpecRouteInputs(g *tnv1.TailnetGateway, tailnet, namespace string, egresses []tnv1.TailnetEgress) RouteInputs {
+	ri := RouteInputs{LoadBalancerCIDR: string(g.Spec.Service.TailnetLBCIDR), AdvertiseEgressTargets: g.Spec.Routes.AdvertiseEgressTargets == nil || *g.Spec.Routes.AdvertiseEgressTargets}
+	for _, prefix := range g.Spec.Routes.LAN {
+		ri.LAN = append(ri.LAN, string(prefix))
+	}
+	if ri.AdvertiseEgressTargets {
+		for _, eg := range egresses {
+			if eg.Namespace != namespace || eg.Spec.TailnetRef.Name != tailnet || !eg.DeletionTimestamp.IsZero() {
+				continue
+			}
+			for _, target := range eg.Spec.Targets {
+				ri.EgressTargets = append(ri.EgressTargets, target.Address)
+			}
+		}
+	}
+	return ri
 }
 
 // RoutePlan contains canonical routes sorted by netip address, then prefix bits.

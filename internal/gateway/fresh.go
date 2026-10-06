@@ -98,20 +98,7 @@ func RenderFresh(in FreshInputs) (FreshPlan, error) {
 		len(validation.IsDNS1035Label(dnsName)) != 0 || dnsName == g.Name || dnsName == g.Name+"-headless" {
 		return FreshPlan{}, ErrFreshConfiguration
 	}
-	ri := RouteInputs{LoadBalancerCIDR: string(g.Spec.Service.TailnetLBCIDR), AdvertiseEgressTargets: g.Spec.Routes.AdvertiseEgressTargets == nil || *g.Spec.Routes.AdvertiseEgressTargets}
-	for _, prefix := range g.Spec.Routes.LAN {
-		ri.LAN = append(ri.LAN, string(prefix))
-	}
-	if ri.AdvertiseEgressTargets {
-		for _, eg := range in.Egresses {
-			if eg.Namespace != in.Namespace || eg.Spec.TailnetRef.Name != tn.Name || !eg.DeletionTimestamp.IsZero() {
-				continue
-			}
-			for _, target := range eg.Spec.Targets {
-				ri.EgressTargets = append(ri.EgressTargets, target.Address)
-			}
-		}
-	}
+	ri := SpecRouteInputs(g, tn.Name, in.Namespace, in.Egresses)
 	routes, err := PlanRoutes(ri)
 	if err != nil {
 		return FreshPlan{}, err
@@ -160,6 +147,8 @@ func RenderFresh(in FreshInputs) (FreshPlan, error) {
 		}
 		lb.Labels[key] = string(value)
 	}
+	// Pool labels follow the spec (UpdateServiceRevision); this records which keys are ours.
+	lb.Annotations = map[string]string{PoolLabelKeysAnnotation: poolLabelKeys(g.Spec.Service.PoolLabels)}
 	clusterDNS := service(dnsName, dnsIP)
 	clusterDNS.Spec.ClusterIP, clusterDNS.Spec.ClusterIPs = dnsIP.String(), []string{dnsIP.String()}
 	headless := service(g.Name+"-headless", dnsIP)
