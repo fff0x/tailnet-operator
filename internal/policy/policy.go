@@ -45,6 +45,13 @@ type Ingress struct {
 	Ports     []int32
 }
 
+// Gateway is one TailnetGateway as seen by the policy: the tags its node carries and the canonical
+// routes it advertises (gateway.PlanRoutes output). Its node may auto-approve exactly those.
+type Gateway struct {
+	Tags   []string
+	Routes []string
+}
+
 // Inputs is everything Render needs besides the base document.
 type Inputs struct {
 	TagOwners              []string
@@ -52,6 +59,7 @@ type Inputs struct {
 	IngressSourceAllowlist []string
 	Egresses               []Egress
 	Ingresses              []Ingress
+	Gateways               []Gateway
 }
 
 // Summary counts what was added and which ingress tags were denied a grant.
@@ -71,7 +79,8 @@ func Allowed(src string, allowlist []string) bool {
 	return false
 }
 
-// Render returns the base with the generated tagOwners, autoApprovers.routes and grants appended,
+// Render returns the base with the generated tagOwners, autoApprovers.routes and grants appended
+// (egress targets, ingresses and gateway routes),
 // as indented JSON (comments of the base are not carried over; they live in Git).
 func Render(base []byte, in Inputs) ([]byte, Summary, error) {
 	var sum Summary
@@ -86,6 +95,9 @@ func Render(base []byte, in Inputs) ([]byte, Summary, error) {
 
 	// tagOwners: declare every CR tag the base does not already own.
 	tags := make([]string, 0, len(in.Egresses)+len(in.Ingresses))
+	for _, g := range in.Gateways {
+		tags = append(tags, g.Tags...)
+	}
 	for _, e := range in.Egresses {
 		tags = append(tags, e.Tag)
 	}
@@ -93,6 +105,7 @@ func Render(base []byte, in Inputs) ([]byte, Summary, error) {
 		tags = append(tags, i.Tag)
 	}
 	sort.Strings(tags)
+	tags = dedupe(tags)
 	for _, t := range tags {
 		if _, exists := owners[t]; !exists {
 			owners[t] = toAny(in.TagOwners)
@@ -117,6 +130,19 @@ func Render(base []byte, in Inputs) ([]byte, Summary, error) {
 			merged, added := union(cur, in.RouteApprovers)
 			if added {
 				routes[t.CIDR] = toAny(merged)
+				sum.Routes++
+			}
+		}
+	}
+
+	// A gateway's own tags may approve exactly the routes it advertises (site LAN, tailnet LB
+	// CIDR, egress host routes). Merged like the egress entries: base approvers stay.
+	for _, g := range in.Gateways {
+		gatewayTags := dedupe(g.Tags) // sorted: spec.tags is a set, the render must not depend on its order
+		for _, cidr := range g.Routes {
+			merged, added := union(strs(routes[cidr]), gatewayTags)
+			if added {
+				routes[cidr] = toAny(merged)
 				sum.Routes++
 			}
 		}

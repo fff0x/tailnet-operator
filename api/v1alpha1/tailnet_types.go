@@ -68,8 +68,9 @@ type DNSSpec struct {
 
 // PolicySpec lets the operator own the control server's policy (Headscale "database" policy mode).
 // A human-written base document stays in Git; the operator appends what the CRs imply — tagOwners
-// for every egress/ingress tag, autoApprovers for every egress target /32 and one grant per
-// (egress, port) or ingress — and writes the union with PUT /api/v1/policy. Base entries always win
+// for every egress/ingress/gateway tag, autoApprovers for every egress target /32 (approved by
+// routeApprovers) and for every TailnetGateway route (approved by that gateway's own tags), and one
+// grant per (egress, port) or ingress — and writes the union with PUT /api/v1/policy. Base entries always win
 // over generated ones; the operator never removes anything from the base.
 // Exactly one operator may run in Apply mode against a control server.
 // +kubebuilder:validation:XValidation:rule="!has(self.baseConfigMap) || size(self.baseConfigMap) == 0 || (has(self.tagOwners) && size(self.tagOwners) > 0 && has(self.routeApprovers) && size(self.routeApprovers) > 0)",message="policy.tagOwners and policy.routeApprovers are required when baseConfigMap is set"
