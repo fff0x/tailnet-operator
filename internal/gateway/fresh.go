@@ -142,7 +142,8 @@ func RenderFresh(in FreshInputs) (FreshPlan, error) {
 		lb.Spec.LoadBalancerClass = ptr.To(string(g.Spec.Service.LoadBalancerClass))
 	}
 	for key, value := range g.Spec.Service.PoolLabels {
-		if old, exists := lb.Labels[key]; exists && old != string(value) {
+		// A base label key is never a pool key, whatever the value: pool keys are removable.
+		if _, exists := lb.Labels[key]; exists {
 			return FreshPlan{}, ErrFreshConfiguration
 		}
 		lb.Labels[key] = string(value)

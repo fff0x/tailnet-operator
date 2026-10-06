@@ -200,10 +200,12 @@ func TestUpdateServiceRevision(t *testing.T) {
 	if v := get(); v.Labels["zone"] != "" || v.Labels["example.com/pool"] != "" || v.Labels["app.kubernetes.io/managed-by"] == "" || v.Annotations[PoolLabelKeysAnnotation] != "" {
 		t.Fatalf("labels after removal = %v %v", v.Labels, v.Annotations)
 	}
-	// collision with a label we did not write
-	g.Spec.Service.PoolLabels = map[string]tnv1.GatewayLabelValue{"app.kubernetes.io/managed-by": "someone-else"}
-	if err := run(g); !errors.Is(err, ErrServiceBlocked) {
-		t.Fatalf("collision = %v", err)
+	// collision with a label we did not write, even with the same value
+	for _, v := range []tnv1.GatewayLabelValue{"someone-else", "tailnet-operator"} {
+		g.Spec.Service.PoolLabels = map[string]tnv1.GatewayLabelValue{"app.kubernetes.io/managed-by": v}
+		if err := run(g); !errors.Is(err, ErrServiceBlocked) {
+			t.Fatalf("collision = %v", err)
+		}
 	}
 	// wrong UID in the receipt
 	obs.service.UID = "different"

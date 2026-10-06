@@ -61,7 +61,8 @@ func PlanSpecRoutes(ctx context.Context, c client.Client, namespace string, g *t
 // spec.service.poolLabels. obs MUST come from a ReconcileFresh call that returned
 // Completed. Only labels and the key-list annotation change, with the resourceVersion of
 // the Get as CAS, after the UID and digest recorded in the receipt were re-verified.
-// A pool key that collides with a label this operator did not write blocks the update.
+// A pool key that already exists as a label this reconciler did not write blocks the
+// update, whatever its value: only keys recorded in the annotation are ever removed.
 func UpdateServiceRevision(ctx context.Context, c client.Client, namespace string, g *tnv1.TailnetGateway, obs FreshObservation) error {
 	if c == nil || g == nil || !obs.Completed || obs.service.UID == "" {
 		return ErrServiceBlocked
@@ -87,7 +88,7 @@ func UpdateServiceRevision(ctx context.Context, c client.Client, namespace strin
 		}
 	}
 	for k, v := range g.Spec.Service.PoolLabels {
-		if old, exists := svc.Labels[k]; exists && !owned[k] && old != string(v) {
+		if _, exists := svc.Labels[k]; exists && !owned[k] {
 			return ErrServiceBlocked
 		}
 		updated.Labels[k] = string(v)

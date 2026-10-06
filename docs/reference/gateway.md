@@ -499,10 +499,11 @@ changes reach the gateway at the next reconcile (within 5 seconds).
 LoadBalancer Service after re-verifying its UID and receipt digest (labels and
 annotations are not part of the digest). The keys it wrote are recorded in the
 annotation `tsunaro.io/pool-label-keys`; only those keys are ever removed. A pool key
-that collides with a label somebody else put on the Service reports
-`ServiceUpdateBlocked` (a concurrent change reports `ServiceUpdateConflict`); a pool key
-that collides with one of the operator's own labels is refused at render time
-(`Ready=False/FreshBlocked`).
+that already exists as a label somebody else put on the Service is refused whatever its
+value (`ServiceUpdateBlocked`; a concurrent change reports `ServiceUpdateConflict`), so a
+base label can never become removable. A pool key that equals one of the operator's own
+label keys is refused at render time (`Ready=False/FreshBlocked`). Service and template
+writes are independent: a blocked Service does not stall the routes.
 
 **Images.** `UpdateWorkloadRevision` rewrites only the container `image` fields and the
 `TS_ROUTES` value of the StatefulSet template, after re-verifying the receipt UID and the image-less digest, with
