@@ -6,10 +6,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/policy"
@@ -149,6 +157,86 @@ func TestPolicyLifecycle(t *testing.T) {
 			updateBase(t, ctx, name, second)
 			waitApplied(t, ctx, name, "192.0.2.2:443", hs)
 			waitCondition(t, ctx, name, "PolicyApplied", metav1.ConditionTrue, "InSync")
+		})
+	}
+}
+
+// A TailnetGateway of the Tailnet contributes its tags to tagOwners and its routes to
+// autoApprovers.routes, and a gateway change re-renders. DryRun makes the render observable in the
+// rendered ConfigMap while the real Headscale must see no write.
+func TestPolicyGatewayRoutes(t *testing.T) {
+	for _, version := range versions {
+		t.Run(version, func(t *testing.T) {
+			if version == "v0.28.0" {
+				t.Skip("unsupported capability row; covered by TestPreflight")
+			}
+			ctx := testContext(t)
+			hs := startHeadscale(t, ctx, version, "database", false)
+			name := createTailnet(t, ctx, hs)
+			enablePolicy(t, ctx, name, policyBase("accept", "192.0.2.1:443"), "DryRun")
+			waitCondition(t, ctx, name, "PolicyApplied", metav1.ConditionFalse, "DryRun")
+			writesBefore := len(hs.policyWrites())
+
+			data, err := os.ReadFile(filepath.Join(root, "deploy", "examples", "tailnetgateway.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			gw := &tnv1.TailnetGateway{}
+			if err := yaml.Unmarshal(data, gw); err != nil {
+				t.Fatal(err)
+			}
+			gw.Name = name + "-gw"
+			gw.Spec.TailnetRef.Name = tnv1.GatewayName(name)
+			gw.Spec.Tags = []string{"tag:e2e-site"}
+			gw.Spec.Routes = tnv1.GatewayRoutes{LAN: []tnv1.GatewayPrefix{"10.77.0.0/24"}, AdvertiseEgressTargets: ptr.To(false)}
+			if err := kube.Create(ctx, gw); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				_ = client.IgnoreNotFound(kube.Delete(cleanup, gw))
+			})
+			approvers := func(doc map[string]any, cidr string) string {
+				routes, _ := doc["autoApprovers"].(map[string]any)["routes"].(map[string]any)
+				b, _ := json.Marshal(routes[cidr])
+				return string(b)
+			}
+			rendered := func() map[string]any {
+				var cm corev1.ConfigMap
+				if kube.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name + "-base-rendered"}, &cm) != nil {
+					return nil
+				}
+				var doc map[string]any
+				if json.Unmarshal([]byte(cm.Data["policy"]), &doc) != nil {
+					return nil
+				}
+				return doc
+			}
+			eventually(t, ctx, "gateway tag and routes rendered", func() bool {
+				doc := rendered()
+				if doc == nil {
+					return false
+				}
+				owner, _ := json.Marshal(doc["tagOwners"].(map[string]any)["tag:e2e-site"])
+				return string(owner) == `["autogroup:member"]` && approvers(doc, "10.77.0.0/24") == `["tag:e2e-site"]` && approvers(doc, "198.51.100.0/24") == `["tag:e2e-site"]`
+			})
+			if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+				if err := kube.Get(ctx, client.ObjectKeyFromObject(gw), gw); err != nil {
+					return err
+				}
+				gw.Spec.Routes.LAN = []tnv1.GatewayPrefix{"10.78.0.0/24"}
+				return kube.Update(ctx, gw)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			eventually(t, ctx, "gateway change re-rendered", func() bool {
+				doc := rendered()
+				return doc != nil && approvers(doc, "10.78.0.0/24") == `["tag:e2e-site"]` && approvers(doc, "10.77.0.0/24") == "null"
+			})
+			if len(hs.policyWrites()) != writesBefore {
+				t.Fatal("DryRun gateway render reached Headscale")
+			}
 		})
 	}
 }
