@@ -593,6 +593,40 @@ func TestGatewayFreshPod(t *testing.T) {
 		dataPlane.prove(t, phase, p, binding)
 		pf.save("gateway-"+phase+"-result.json", map[string]any{"controllerReady": true, "statefulSetOwned": true, "stateBound": true, "stateUIDRetained": binding.StateUID == stateUID, "nodeID": binding.NodeID, "ipv4": binding.IPv4, "podUID": p.UID, "kernelPreflightPassed": true, "imagesBound": true, "routesAdvertised": receipt.Routes, "routesForwarded": true, "knownLocalDNSVerified": true})
 		if phase == "initial" {
+			// RoutesInSync reads the real Headscale approvals of this isolated node: nothing, a
+			// strict subset (only the LB CIDR), then everything approved, then revoked again.
+			// The controller never writes them; the CLI stands in for the policy replay here.
+			lb := string(g.Spec.Service.TailnetLBCIDR)
+			observed := map[string]string{}
+			expectRoutes := func(step string, approve []string, status metav1.ConditionStatus, reason string, mentions, omits []string) {
+				t.Helper()
+				pf.cli("nodes", "approve-routes", "--identifier", binding.NodeID, "--routes", strings.Join(approve, ","), "--output", "json")
+				eventually(t, "RoutesInSync "+step, func() bool {
+					reconcile()
+					c := meta.FindStatusCondition(g.Status.Conditions, "RoutesInSync")
+					if c == nil || c.Status != status || c.Reason != reason || !meta.IsStatusConditionTrue(g.Status.Conditions, "Ready") {
+						return false
+					}
+					for _, m := range mentions {
+						if !strings.Contains(c.Message, m) {
+							return false
+						}
+					}
+					for _, o := range omits {
+						if strings.Contains(c.Message, o) {
+							return false
+						}
+					}
+					observed[step] = c.Message
+					return true
+				})
+			}
+			expectRoutes("none approved", nil, metav1.ConditionFalse, "NotApproved", []string{dataPlane.prefix, lb}, nil)
+			expectRoutes("only LB CIDR approved", []string{lb}, metav1.ConditionFalse, "NotApproved", []string{dataPlane.prefix}, []string{lb})
+			expectRoutes("all approved", receipt.Routes, metav1.ConditionTrue, "Approved", nil, nil)
+			expectRoutes("revoked", nil, metav1.ConditionFalse, "NotApproved", []string{dataPlane.prefix, lb}, nil)
+			pf.save("gateway-routes-insync.json", observed)
+
 			// Spec update on a Ready gateway: the template follows spec.image, but
 			// under OnDelete the running Pod is neither restarted nor replaced. The
 			// alias (tag + same digest) is only a spec change; the startup gate
