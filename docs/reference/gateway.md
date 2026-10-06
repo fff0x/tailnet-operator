@@ -52,7 +52,20 @@ Partial creation without a complete receipt remains blocked, even if a workload 
 A lost completion response may be recovered only when the complete immutable record actually exists.
 These are sequential checks, not a transaction or a general crash-recovery protocol.
 
-Protect both receipt ConfigMaps as strictly as Secrets. An administrator who can replace
+A format-3 receipt written by v0.10.0 records the StatefulSet and `Corefile` digests
+under the previous rule (only container images/`TS_ROUTES` and `zone.db` excluded).
+On the first reconcile after an upgrade the operator recognises that rule, re-verifies
+the entire retained set and rewrites the immutable `-fresh` receipt to the current
+digests in place. Because an immutable ConfigMap can only be deleted and recreated,
+the new payload is first staged in a transient `<gateway>-fresh-next`, then `-fresh`
+is deleted (UID + resourceVersion CAS) and recreated, then the stage is removed. A
+crash between the delete and the recreate leaves `-fresh-next`; the next reconcile
+promotes it to `-fresh` instead of minting a new identity, and a foreign or
+scope-mismatched stage blocks rather than being adopted. A format-1/2 receipt is
+not migrated and still reports `IdentityChanged`.
+
+Protect all receipt ConfigMaps (`-auth-receipt`, `-fresh` and the transient
+`-fresh-next`) as strictly as Secrets. An administrator who can replace
 all retained evidence can forge it. The initial zone is rendered at SOA serial 1 and
 carries the `tsunaro.io/dns-serial` and `tsunaro.io/dns-content-sha256` annotations.
 Changes to the Tailnet hosts source are reconciled live into the derived `-coredns`
@@ -414,7 +427,8 @@ fail-closed, only what this Gateway provably created:
    key is expired by its recorded ID. A user-supplied `authKeySecretRef` is never touched.
 3. The remaining receipt children, each by the UID recorded at creation.
 4. The auth Secret, the state Secret (UID must equal the receipt's), then the
-   `-auth-receipt` and `-fresh` ConfigMaps last: the receipt is the inventory.
+   `-auth-receipt`, `-fresh` and any transient `-fresh-next` ConfigMaps last: the
+   receipt is the inventory.
 
 Every Kubernetes delete carries a UID precondition. An object under one of our names
 with a different UID, a receipt without our label, or a Headscale error other than 404

@@ -17,12 +17,19 @@ existing `TS_LOCAL_ADDR_PORT` (tcp/8080). The default chart's `PodMonitor`
 scrapes both ports. The completion receipt remains format 3; the Pod template
 and the derived `Corefile` are now reconciled live, keyed off the operator-
 written `tsunaro.io/template-sha256` annotation on the `StatefulSet`
-(StatefulSets outside receipt-bound fields like `replicas`, `selector`,
-`serviceName` and `updateStrategy` are still bound). Existing fresh gateways
-upgrade in place: on the first reconcile after upgrade the operator stamps
-the annotation and (idempotently) rewrites the template with the new metrics
-env/port; the running Pod picks up the new Corefile via `reload 1s`, and
-delete `Pod <name>-0` once to also roll the sidecar for `TS_ENABLE_METRICS`.
+(StatefulSet fields outside the template, like `replicas`, `selector`,
+`serviceName` and `updateStrategy`, are still bound). Existing fresh gateways
+upgrade in place. A v0.10.0 completion receipt stores the `StatefulSet` and
+`Corefile` digests under the old rule; on the first reconcile after upgrade the
+operator recognises the old rule, re-verifies the whole retained set and rewrites
+the immutable `-fresh` receipt to the new digests. The rewrite is crash-safe
+through a transient `-fresh-next` staging `ConfigMap`: if the operator dies
+between deleting and recreating `-fresh`, the next reconcile recovers from the
+stage instead of minting a new identity. Afterwards the operator (idempotently)
+rewrites the Pod template with the new metrics env/port; the running Pod picks up
+the new `Corefile` via `reload 1s`, and you delete `Pod <name>-0` once to also
+roll the sidecar onto `TS_ENABLE_METRICS`. A format-1/2 receipt still reports
+`IdentityChanged` and must be recreated.
 No CRD, RBAC or chart contract change beyond the additive `target` field.
 
 ### Added
@@ -43,6 +50,9 @@ No CRD, RBAC or chart contract change beyond the additive `target` field.
   `tsunaro.io/dns-content-sha256` annotation on the `-coredns` `ConfigMap`.
   `WorkloadCurrent` now reads `pod.labels[controller-revision-hash]` against
   `sts.Status.UpdateRevision` instead of comparing container images.
+- A v0.10.0 (format-3) completion receipt is migrated to the new digest rule in
+  place on the first reconcile, via a crash-safe `-fresh-next` staging ConfigMap;
+  no gateway identity is reminted. Teardown also removes a leftover `-fresh-next`.
 
 ## [0.10.0] - 2026-10-06
 
