@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -27,7 +29,7 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 		return ctrl.Result{}, nil
 	}
 	before := g.DeepCopy()
-	observation, reason := r.observeFreshRuntime(ctx, g)
+	observation, tn, reason := r.observeFreshRuntime(ctx, g)
 	message := "Fresh prerequisites or retained provenance are unverified; no adoption or automatic retry of partial creation."
 	ready := metav1.ConditionFalse
 	if reason == "Provisioning" {
@@ -76,8 +78,9 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 	} else {
 		meta.RemoveStatusCondition(&g.Status.Conditions, "WorkloadCurrent")
 	}
-	for _, name := range []string{"RoutesInSync", "StaleNodes", "ClusterDNSForward"} {
-		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: name, Status: metav1.ConditionUnknown, Reason: "ExternallyManaged", Message: "Fresh bootstrap does not manage route approvals, stale nodes or cluster DNS forwarding.", ObservedGeneration: g.Generation})
+	meta.SetStatusCondition(&g.Status.Conditions, routesInSync(g, observation, tn, reason))
+	for _, name := range []string{"StaleNodes", "ClusterDNSForward"} {
+		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: name, Status: metav1.ConditionUnknown, Reason: "ExternallyManaged", Message: "Fresh bootstrap does not manage stale nodes or cluster DNS forwarding.", ObservedGeneration: g.Generation})
 	}
 	if observation.Ready {
 		g.Status.NodeID, g.Status.IPv4 = observation.Binding.NodeID, observation.Binding.IPv4
@@ -91,19 +94,46 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
-func (r *TailnetGatewayReconciler) observeFreshRuntime(ctx context.Context, g *tnv1.TailnetGateway) (gateway.FreshObservation, string) {
+// routesInSync reports whether Headscale approved every route the completion receipt advertises.
+// It only reads: approvals come from the policy controller (autoApprovers replay), never from here.
+func routesInSync(g *tnv1.TailnetGateway, o gateway.FreshObservation, tn *tnv1.Tailnet, reason string) metav1.Condition {
+	c := metav1.Condition{Type: "RoutesInSync", Status: metav1.ConditionUnknown, Reason: reason, Message: "Routes are judged once the gateway is Ready.", ObservedGeneration: g.Generation}
+	if !o.Ready {
+		return c
+	}
+	var missing []string
+	for _, route := range o.Routes {
+		if !slices.Contains(o.Approved, route) {
+			missing = append(missing, route)
+		}
+	}
+	if len(missing) == 0 {
+		c.Status, c.Reason, c.Message = metav1.ConditionTrue, "Approved", "Every advertised route is approved."
+		return c
+	}
+	c.Status, c.Reason = metav1.ConditionFalse, "NotApproved"
+	c.Message = "Advertised but not approved: " + strings.Join(missing, ", ") + ". "
+	if tn != nil && policyOwned(tn) {
+		c.Message += "The policy controller approves them from autoApprovers within 5 minutes; if this persists, check the Tailnet's PolicyRendered condition."
+	} else {
+		c.Message += "The Tailnet does not own its policy (needs policy.baseConfigMap and mode Apply): approve them in Headscale (headscale nodes approve-routes) or via your own autoApprovers."
+	}
+	return c
+}
+
+func (r *TailnetGatewayReconciler) observeFreshRuntime(ctx context.Context, g *tnv1.TailnetGateway) (gateway.FreshObservation, *tnv1.Tailnet, string) {
 	tn, hs, reason := r.freshHeadscale(ctx, g)
 	if hs == nil {
-		return gateway.FreshObservation{}, reason
+		return gateway.FreshObservation{}, tn, reason
 	}
 	observation, err := gateway.ReconcileFresh(ctx, r.RuntimeClient, r.OperatorNamespace, g, tn, hs, time.Now)
 	if errors.Is(err, gateway.ErrFreshIdentity) {
-		return gateway.FreshObservation{}, "IdentityChanged"
+		return gateway.FreshObservation{}, tn, "IdentityChanged"
 	}
 	if err != nil {
-		return gateway.FreshObservation{}, "FreshBlocked"
+		return gateway.FreshObservation{}, tn, "FreshBlocked"
 	}
-	return observation, "Provisioning"
+	return observation, tn, "Provisioning"
 }
 
 // freshHeadscale resolves the Tailnet and an authenticated client, or a reason.

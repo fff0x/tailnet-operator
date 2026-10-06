@@ -160,6 +160,40 @@ func gatewayUpdateCases(t *testing.T, newFixture func(*testing.T, bool) *gateway
 		}
 	})
 
+	t.Run("RoutesInSync reports approvals from the node (the fake Headscale fails on any unexpected write)", func(t *testing.T) {
+		f, node := ready(t)
+		routes := func() *metav1.Condition {
+			gatewayWriterMust(t, admin.Get(ctx, client.ObjectKeyFromObject(f.g), f.g), "read gateway")
+			return meta.FindStatusCondition(f.g.Status.Conditions, "RoutesInSync")
+		}
+		// Nothing approved, Tailnet without policy ownership: the hint names the manual path.
+		c := routes()
+		if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "NotApproved" || !strings.Contains(c.Message, "192.0.2.0/24, 198.51.100.0/24") || !strings.Contains(c.Message, "approve-routes") {
+			t.Fatalf("RoutesInSync = %+v", c)
+		}
+		// Only one of the two approved: the missing one is named, the approved one is not.
+		node.ApprovedRoutes = []string{"198.51.100.0/24"}
+		f.hs.setNodes([]headscale.Node{node})
+		f.reconcile("FreshRuntimeReady")
+		if c := routes(); c.Status != metav1.ConditionFalse || !strings.HasPrefix(c.Message, "Advertised but not approved: 192.0.2.0/24. ") {
+			t.Fatalf("partial approval = %+v", c)
+		}
+		// Policy-owned Tailnet: the hint points at the policy controller instead.
+		gatewayWriterMust(t, admin.Get(ctx, client.ObjectKeyFromObject(f.tn), f.tn), "read Tailnet")
+		f.tn.Spec.Policy = tnv1.PolicySpec{BaseConfigMap: "policy", Mode: "Apply", TagOwners: []string{"group:operator"}, RouteApprovers: []string{"tag:fabric"}}
+		gatewayWriterMust(t, admin.Update(ctx, f.tn), "make the Tailnet own its policy")
+		f.reconcile("FreshRuntimeReady")
+		if c := routes(); !strings.Contains(c.Message, "policy controller approves") {
+			t.Fatalf("policy-owned hint = %+v", c)
+		}
+		node.ApprovedRoutes = []string{"192.0.2.0/24", "198.51.100.0/24"}
+		f.hs.setNodes([]headscale.Node{node})
+		f.reconcile("FreshRuntimeReady")
+		if c := routes(); c.Status != metav1.ConditionTrue || c.Reason != "Approved" {
+			t.Fatalf("all approved = %+v", c)
+		}
+	})
+
 	t.Run("pinned routes report IdentityChanged and recover on revert", func(t *testing.T) {
 		f, _ := ready(t)
 		update(t, f, func(g *tnv1.TailnetGateway) { g.Spec.Routes.LAN = append(g.Spec.Routes.LAN, "10.9.0.0/16") })
