@@ -380,8 +380,9 @@ kubectl -n tailnet-system get cm headscale-policy-rendered -o jsonpath='{.data.p
 # { "10.0.0.0/24": ["tag:fabric"], "10.0.10.20/32": ["tag:fabric"] }
 ```
 
-`PolicyRendered`'s message lists denied ingress tags and name-addressed targets (which get no
-grant). `renderedHash == appliedHash` means Headscale runs exactly this document.
+`PolicyRendered`'s message lists denied ingress tags and skipped inputs: name-addressed targets
+(which get no grant) and gateways whose routes do not plan (`gateway/<name>`).
+`renderedHash == appliedHash` means Headscale runs exactly this document.
 
 ## 8. Policy: change the base policy (admin)
 

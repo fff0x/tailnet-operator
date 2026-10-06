@@ -383,7 +383,10 @@ The same gate also checks the actual IPv4 data path, before and after Pod recrea
 
 The target, peer and gateway retain their verified UIDs/processes throughout each phase.
 This proves one IPv4 TCP subnet path and one local DNS name over UDP/TCP, not every route
-or DNS feature. It does **not** prove DNS reload, egress-derived host routes, IPv6 routing,
+or DNS feature. The hosts source changes while the gateway Pod is already running, so the
+same CoreDNS process serving the seeded answer must pick up the live zone (kubelet volume
+refresh plus `reload 1s`) before the DNS proof passes. It does **not** prove egress-derived
+host routes, IPv6 routing,
 arm64 execution, crash-safe writer recovery or interruption-free adoption. The same
 run ends with a `deletionPolicy: Delete` teardown and checks that no labelled object,
 the Headscale node or a usable bootstrap key remains. Activation requires explicit `suspend: false`; no production Pod-template
@@ -541,12 +544,13 @@ Initial creation checks scope and ownership. Future dynamic DNS integration must
   persists or compare-and-swaps anything.** A writer must store serial/hash with
   the rendered ConfigMap, verify the stored payload, and retry from fresh source
   and target snapshots on conflict; it must never reset the serial on restart.
-  A package-private `updateDNSRevision` now exercises that CAS for an **existing,
+  The exported `UpdateDNSRevision` performs that CAS for an **existing,
   revisioned, UID-labelled** ConfigMap through an explicit client. It re-reads
   Gateway, Tailnet and owned hosts source before updating, retries conflicts
-  from a fresh snapshot and refuses to create/adopt a target. It is unreachable
-  from the fresh-only controller. Cross-object source/target writes are not atomic;
-  source watches, update ownership and live reload checks remain unimplemented.
+  from a fresh snapshot and refuses to create/adopt a target. The fresh controller
+  calls it on every reconcile of a verified completion receipt (see "Live DNS
+  reconcile" above). Cross-object source/target writes are not atomic; there is no
+  watch on the hosts source, the 5-second requeue is the trigger.
 
   `TestDNSUpdateAPICAS` exercises this helper against an isolated Kubernetes 1.31
   API server in `task test-validation` and CI. It checks real resource-version
