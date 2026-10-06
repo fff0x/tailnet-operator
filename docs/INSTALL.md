@@ -393,6 +393,8 @@ to Headscale.
 | --- | --- | --- |
 | every egress/ingress tag | `tagOwners` | `tag: policy.tagOwners` (base entry wins if present) |
 | every egress target with an IP address | `autoApprovers.routes` | `/32: policy.routeApprovers` (merged into an existing list) |
+| every `TailnetGateway` tag of this Tailnet | `tagOwners` | `tag: policy.tagOwners` (base entry wins if present) |
+| every route of a `TailnetGateway` of this Tailnet (LAN, `tailnetLBCIDR`, egress host routes) | `autoApprovers.routes` | `prefix: the gateway's own spec.tags` (merged into an existing list) |
 | every egress, per port | `grants` | `{src: [tag], dst: [/32…], ip: ["tcp:port"]}` |
 | every ingress with `allowFrom` | `grants` | `{src: allowFrom, dst: [tag], ip: ["tcp:port"…]}` — only if every source matches `ingressSourceAllowlist` |
 
@@ -406,6 +408,13 @@ advertised before its approver existed stays "available, not approved". After ev
 inside an `autoApprovers.routes` prefix of the rendered policy naming one of the node's tags —
 exactly what the event would have done, nothing more. Approvals are never removed. Events
 `RoutesApproved` / `RouteApprovalFailed` on the `Tailnet` show what happened.
+
+A fresh `TailnetGateway` is covered by the same replay: its tags and the routes it advertises are
+rendered into the policy, so its node gets them approved without a manual `approve-routes`. The
+gateway's `RoutesInSync` condition reports the result and never writes an approval. Caveat: a
+prefix approved for the gateway's tag is also approvable for any other node carrying that tag.
+Gateways whose routes do not plan are left out and named in the `PolicyRendered` message
+(`gateway/<name>`).
 
 ### 7.2 Enable in DryRun
 
