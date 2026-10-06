@@ -63,7 +63,7 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 	// Images, routes (TS_ROUTES) and LB pool labels follow the spec. The running Pod is never
 	// restarted by the operator (StatefulSet OnDelete): staleness is reported.
 	if observation.Completed {
-		status, wReason, wMessage := r.reconcileWorkload(ctx, g, observation)
+		status, wReason, wMessage := r.reconcileWorkload(ctx, g, tn, observation)
 		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "WorkloadCurrent", Status: status, Reason: wReason, Message: wMessage, ObservedGeneration: g.Generation})
 	} else {
 		meta.RemoveStatusCondition(&g.Status.Conditions, "WorkloadCurrent")
@@ -84,16 +84,16 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
-// reconcileWorkload brings the Service pool labels and the StatefulSet template (images, routes)
-// in line with the spec and reports whether the running Pod already matches.
-func (r *TailnetGatewayReconciler) reconcileWorkload(ctx context.Context, g *tnv1.TailnetGateway, o gateway.FreshObservation) (metav1.ConditionStatus, string, string) {
+// reconcileWorkload brings the Service pool labels and the StatefulSet template (images, routes,
+// env, container ports) in line with the spec and reports whether the running Pod already matches.
+func (r *TailnetGatewayReconciler) reconcileWorkload(ctx context.Context, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, o gateway.FreshObservation) (metav1.ConditionStatus, string, string) {
 	plan, err := gateway.PlanSpecRoutes(ctx, r.RuntimeClient, r.OperatorNamespace, g)
 	if err != nil {
 		return metav1.ConditionFalse, "WorkloadUpdateBlocked", "Spec routes do not plan (invalid prefix, tailnetLBCIDR without loadBalancerIP, or a non-IPv4 route); nothing is written."
 	}
 	// Both writes are attempted independently: a blocked Service never stalls the template.
 	svcErr := gateway.UpdateServiceRevision(ctx, r.RuntimeClient, r.OperatorNamespace, g, o)
-	switch err := gateway.UpdateWorkloadRevision(ctx, r.RuntimeClient, r.OperatorNamespace, g, o, plan.Routes); {
+	switch err := gateway.UpdateWorkloadRevision(ctx, r.RuntimeClient, r.OperatorNamespace, g, tn, o, plan.Routes); {
 	case errors.Is(err, gateway.ErrWorkloadConflict):
 		return metav1.ConditionFalse, "WorkloadUpdateConflict", "Concurrent change on the StatefulSet; a later reconcile will retry."
 	case err != nil:

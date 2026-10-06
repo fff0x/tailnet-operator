@@ -34,7 +34,9 @@ var (
 // Serial must advance for every zone-data change, including hosts-only changes;
 // gateway generation alone is not sufficient. This renderer has no clock or I/O.
 // BindAddresses must be chosen explicitly. CoreDNS's -dns.port flag selects the
-// port (default 53). No management/metrics listener is rendered.
+// port (default 53). The rendered Corefile enables `prometheus :9153` for pod
+// scraping and the `reload` plugin so a new Corefile applies without a Pod
+// restart.
 type DNSInputs struct {
 	Config        tnv1.GatewayDNS
 	ServerIP      string
@@ -57,7 +59,11 @@ type DNSPlan struct {
 // Wildcards use DNS file semantics, not the template plugin. Unknown zones are
 // refused; no system resolver is used. Extra forwarding zones are fail-closed
 // until strict known-name locality can be implemented and tested for them.
-// Image support, Service allocation, ownership and reachability are caller checks.
+// The Corefile exposes Prometheus metrics on :9153 and enables the global reload
+// plugin so a Corefile change (e.g. a new static record targeting CNAME) takes
+// effect on the running Pod without a restart; zone-file changes are picked up
+// by the per-zone file reload. Image support, Service allocation, ownership and
+// reachability are caller checks.
 func RenderDNS(in DNSInputs) (DNSPlan, error) {
 	cfg := in.Config
 	if len(cfg.ExtraZones) != 0 {
@@ -77,16 +83,34 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 	slices.Sort(binds)
 	binds = slices.Compact(binds)
 	records := make(map[string][]netip.Addr)
+	cnames := make(map[string]string)
 	for _, record := range cfg.StaticRecords {
 		if len(validation.IsDNS1123Label(record.Name)) != 0 || len(record.Name)+1+len(cfg.Zone) > 253 {
 			return DNSPlan{}, ErrDNSConfiguration
 		}
 		name := record.Name + "." + string(cfg.Zone)
-		addr, ok := dnsAddress(string(record.Address))
-		if !ok || records[name] != nil {
+		if records[name] != nil || cnames[name] != "" {
 			return DNSPlan{}, ErrDNSConfiguration
 		}
-		records[name] = []netip.Addr{addr}
+		switch {
+		case record.Address != "" && record.Target != "":
+			return DNSPlan{}, ErrDNSConfiguration
+		case record.Address != "":
+			addr, ok := dnsAddress(string(record.Address))
+			if !ok {
+				return DNSPlan{}, ErrDNSConfiguration
+			}
+			records[name] = []netip.Addr{addr}
+		case record.Target != "":
+			target := string(record.Target)
+			if !dnsZone(target) || len(target) > 253 || target == name ||
+				!(target == string(cfg.Zone) || strings.HasSuffix(target, "."+string(cfg.Zone))) {
+				return DNSPlan{}, ErrDNSConfiguration
+			}
+			cnames[name] = target
+		default:
+			return DNSPlan{}, ErrDNSConfiguration
+		}
 	}
 	if cfg.WildcardAddress != "" {
 		addr, ok := dnsAddress(string(cfg.WildcardAddress))
@@ -105,7 +129,10 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 			return DNSPlan{}, ErrDNSConfiguration
 		}
 		if strings.HasSuffix(name, "."+string(cfg.Zone)) {
+			// Dynamic A/AAAA for a name shadows any static CNAME for the same name:
+			// hosts data is authoritative over the configured alias.
 			records[name] = addresses
+			delete(cnames, name)
 		}
 	}
 	records[string(cfg.Zone)] = []netip.Addr{server}
@@ -115,12 +142,20 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 	// a label to a zone already at the DNS wire limit. No mail is sent here.
 	fmt.Fprintf(&zone, "%s. 30 IN SOA %s. hostmaster.invalid. %d 7200 3600 1209600 30\n", cfg.Zone, cfg.Zone, in.Serial)
 	fmt.Fprintf(&zone, "%s. 30 IN NS %s.\n", cfg.Zone, cfg.Zone)
-	names := make([]string, 0, len(records))
+	names := make([]string, 0, len(records)+len(cnames))
 	for name := range records {
 		names = append(names, name)
 	}
+	for name := range cnames {
+		names = append(names, name)
+	}
 	slices.Sort(names)
+	names = slices.Compact(names)
 	for _, name := range names {
+		if target, ok := cnames[name]; ok {
+			fmt.Fprintf(&zone, "%s. 30 IN CNAME %s.\n", name, target)
+			continue
+		}
 		addresses := records[name]
 		slices.SortFunc(addresses, func(a, b netip.Addr) int { return a.Compare(b) })
 		for _, addr := range slices.Compact(addresses) {
@@ -131,7 +166,11 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 			fmt.Fprintf(&zone, "%s. 30 IN %s %s\n", name, rr, addr)
 		}
 	}
-	core := fmt.Sprintf("%s {\n    bind %s\n    errors\n    file %s %s {\n        reload 1s\n    }\n}\n", cfg.Zone, strings.Join(binds, " "), DNSZoneFile, cfg.Zone)
+	// `prometheus :9153` serves CoreDNS metrics on every bound interface; the
+	// global `reload` plugin picks up Corefile changes (e.g. a newly rendered
+	// static record) without restarting the Pod. Per-zone `file` reload stays at
+	// 1s so zone.db changes still land fast.
+	core := fmt.Sprintf("%s {\n    bind %s\n    errors\n    prometheus :9153\n    file %s %s {\n        reload 1s\n    }\n    reload\n}\n", cfg.Zone, strings.Join(binds, " "), DNSZoneFile, cfg.Zone)
 	if len(core)+zone.Len() > maxDNSConfigBytes {
 		return DNSPlan{}, ErrDNSConfiguration
 	}

@@ -93,14 +93,25 @@ type GatewayExtraZone struct {
 	Upstreams []GatewayIP `json:"upstreams"`
 }
 
-// GatewayStaticRecord is an explicit A/AAAA record beneath dns.zone. Empty or
-// wildcard labels are not accepted; wildcard fallback is a separate optional IP.
+// GatewayStaticRecord is an explicit A/AAAA or CNAME record beneath dns.zone.
+// Exactly one of address or target must be set; the wildcard fallback is a
+// separate optional IP (dns.wildcardAddress). CNAME targets are rendered as
+// absolute names and must point inside the same zone, so CoreDNS resolves them
+// from the dynamic hosts without an upstream.
+// +kubebuilder:validation:XValidation:rule="(has(self.address) ? 1 : 0) + (has(self.target) ? 1 : 0) == 1",message="exactly one of address or target must be set"
 type GatewayStaticRecord struct {
 	// Relative single label below dns.zone.
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	Name    string    `json:"name"`
-	Address GatewayIP `json:"address"`
+	Name string `json:"name"`
+	// +optional
+	Address GatewayIP `json:"address,omitempty"`
+	// Target FQDN of a CNAME. Must be equal to dns.zone or end with ".<dns.zone>"
+	// and must differ from this record's own FQDN. Never resolved by the operator;
+	// CoreDNS answers from the authoritative zone (CNAME + target RRset when known,
+	// bare CNAME when the target is not yet in the hosts source).
+	// +optional
+	Target GatewayName `json:"target,omitempty"`
 }
 
 // GatewayServiceName follows Kubernetes 1.31's DNS-1035 Service-name contract.
@@ -114,6 +125,8 @@ type GatewayServiceName string
 // +kubebuilder:validation:XValidation:rule="!has(self.extraZones) || self.extraZones.all(a, self.extraZones.all(b, a.zone == b.zone || (!a.zone.endsWith('.' + b.zone) && !b.zone.endsWith('.' + a.zone))))",message="extraZones must not overlap each other"
 // +kubebuilder:validation:XValidation:rule="!has(self.staticRecords) || self.staticRecords.all(r, r.name.size() + 1 + self.zone.size() <= 253)",message="static record name exceeds the DNS wire limit"
 // +kubebuilder:validation:XValidation:rule="!has(self.wildcardAddress) || self.zone.size() + 2 <= 253",message="wildcard record name exceeds the DNS wire limit"
+// +kubebuilder:validation:XValidation:rule="!has(self.staticRecords) || self.staticRecords.all(r, !has(r.target) || r.target == self.zone || r.target.endsWith('.' + self.zone))",message="static record target must point inside dns.zone"
+// +kubebuilder:validation:XValidation:rule="!has(self.staticRecords) || self.staticRecords.all(r, !has(r.target) || r.target != r.name + '.' + self.zone)",message="static record target must differ from its own FQDN"
 type GatewayDNS struct {
 	Zone GatewayName `json:"zone"`
 	// Explicit name permits adoption of an existing tailnet-dns Service.
