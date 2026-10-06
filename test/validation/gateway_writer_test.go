@@ -583,11 +583,11 @@ func (f *gatewayWriterFixture) assertComplete() {
 	if receipt.StateUID != state.UID || receipt.Auth.UID != auth.UID || receipt.Auth.KeyID != "9" || len(receipt.Objects) != 10 || receipt.Scope["gatewayUID"] != string(f.g.UID) || receipt.Scope["tailnetUID"] != string(f.tn.UID) {
 		f.t.Fatal("completion receipt did not capture original API identities")
 	}
-	// Format 2 pins identity hashes, never generations or full specs.
+	// Format 3 pins identity hashes, never generations or full specs.
 	hex64 := func(v string) bool { b, err := hex.DecodeString(v); return err == nil && len(b) == sha256.Size }
-	if len(receipt.Scope) != 7 || receipt.Scope["format"] != "2" || receipt.Scope["gatewayName"] != f.g.Name || receipt.Scope["tailnetName"] != f.tn.Name ||
+	if len(receipt.Scope) != 7 || receipt.Scope["format"] != "3" || receipt.Scope["gatewayName"] != f.g.Name || receipt.Scope["tailnetName"] != f.tn.Name ||
 		!hex64(receipt.Scope["gatewayIdentitySHA256"]) || !hex64(receipt.Scope["tailnetIdentitySHA256"]) {
-		f.t.Fatal("completion scope is not the identity-only format 2")
+		f.t.Fatal("completion scope is not the identity-only format 3")
 	}
 	seen := map[string]bool{}
 	for _, ref := range receipt.Objects {
@@ -610,8 +610,8 @@ func (f *gatewayWriterFixture) assertComplete() {
 				for _, field := range []string{"apiVersion", "kind", "metadata", "status"} {
 					delete(payload, field)
 				}
-				// Container images follow the spec (UpdateWorkloadRevision); the
-				// receipt binds every other StatefulSet and template field.
+				// Container images and the tailscale TS_ROUTES follow the spec
+				// (UpdateWorkloadRevision); the receipt binds every other field.
 				if ref.Kind == "StatefulSet" {
 					spec, _ := payload["spec"].(map[string]any)
 					template, _ := spec["template"].(map[string]any)
@@ -619,7 +619,16 @@ func (f *gatewayWriterFixture) assertComplete() {
 					for _, key := range []string{"initContainers", "containers"} {
 						list, _ := podSpec[key].([]any)
 						for _, item := range list {
-							delete(item.(map[string]any), "image")
+							c := item.(map[string]any)
+							delete(c, "image")
+							if c["name"] == "tailscale" {
+								env, _ := c["env"].([]any)
+								for _, e := range env {
+									if e := e.(map[string]any); e["name"] == "TS_ROUTES" {
+										delete(e, "value")
+									}
+								}
+							}
 						}
 					}
 				}

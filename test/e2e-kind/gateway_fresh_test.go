@@ -462,6 +462,8 @@ func TestGatewayFreshPod(t *testing.T) {
 
 	var first gateway.GatewayStateBinding
 	var previousUID types.UID
+	// wantRoutes is what a Pod advertises: the receipt's plan, then the spec after the route update.
+	wantRoutes := slices.Clone(receipt.Routes)
 	for _, phase := range []string{"initial", "recreated"} {
 		p := &corev1.Pod{}
 		eventually(t, "distinct StatefulSet-created gateway Pod", func() bool {
@@ -538,7 +540,7 @@ func TestGatewayFreshPod(t *testing.T) {
 				if n.ID == binding.NodeID {
 					routes := slices.Clone(n.AvailableRoutes)
 					slices.Sort(routes)
-					if !slices.Equal(routes, receipt.Routes) {
+					if !slices.Equal(routes, wantRoutes) {
 						return false
 					}
 				}
@@ -594,6 +596,11 @@ func TestGatewayFreshPod(t *testing.T) {
 			}
 		}
 		dataPlane.prove(t, phase, p, binding)
+		if phase == "recreated" {
+			if c := meta.FindStatusCondition(g.Status.Conditions, "WorkloadCurrent"); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "PodCurrent" {
+				t.Fatal("recreated Pod does not match the reconciled template")
+			}
+		}
 		pf.save("gateway-"+phase+"-result.json", map[string]any{"controllerReady": true, "statefulSetOwned": true, "stateBound": true, "stateUIDRetained": binding.StateUID == stateUID, "nodeID": binding.NodeID, "ipv4": binding.IPv4, "podUID": p.UID, "kernelPreflightPassed": true, "imagesBound": true, "routesAdvertised": receipt.Routes, "routesForwarded": true, "knownLocalDNSVerified": true})
 		if phase == "initial" {
 			// RoutesInSync reads the real Headscale approvals of this isolated node: nothing, a
@@ -671,6 +678,38 @@ func TestGatewayFreshPod(t *testing.T) {
 				return f.kube.Get(ctx, client.ObjectKeyFromObject(sts), current) == nil && current.Spec.Template.Spec.Containers[0].Image == string(original) &&
 					fresh != nil && fresh.Status == metav1.ConditionTrue && meta.IsStatusConditionTrue(g.Status.Conditions, "Ready")
 			})
+			// Routes and pool labels follow the spec on a running gateway: the template and the
+			// LB Service change, the Pod keeps serving what it started with until it is deleted.
+			const extraRoute = "192.0.2.0/24"
+			lbService := &corev1.Service{}
+			if f.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: g.Name}, lbService) != nil {
+				t.Fatal("LoadBalancer Service unavailable before route update")
+			}
+			if f.kube.Get(ctx, client.ObjectKeyFromObject(g), g) != nil {
+				t.Fatal("gateway unavailable before route update")
+			}
+			g.Spec.Routes.LAN = append(g.Spec.Routes.LAN, extraRoute)
+			g.Spec.Service.PoolLabels = map[string]tnv1.GatewayLabelValue{"pool": "e2e"}
+			if f.kube.Update(ctx, g) != nil {
+				t.Fatal("gateway route update rejected")
+			}
+			routeSts, routeSvc := &appsv1.StatefulSet{}, &corev1.Service{}
+			eventually(t, "template routes and Service pool labels follow the spec while the Pod keeps running", func() bool {
+				reconcile()
+				stale := meta.FindStatusCondition(g.Status.Conditions, "WorkloadCurrent")
+				if f.kube.Get(ctx, client.ObjectKeyFromObject(sts), routeSts) != nil || f.kube.Get(ctx, client.ObjectKeyFromObject(lbService), routeSvc) != nil {
+					return false
+				}
+				return slices.Contains(strings.Split(templateRoutes(routeSts), ","), extraRoute) && routeSvc.Labels["pool"] == "e2e" && stale != nil && stale.Status == metav1.ConditionFalse && stale.Reason == "PodTemplateStale" &&
+					strings.Contains(stale.Message, extraRoute) && meta.IsStatusConditionTrue(g.Status.Conditions, "Ready")
+			})
+			stillRunning := &corev1.Pod{}
+			if f.kube.Get(ctx, client.ObjectKeyFromObject(p), stillRunning) != nil || stillRunning.UID != p.UID || routeSvc.UID != lbService.UID || routeSts.UID != sts.UID {
+				t.Fatal("route update replaced the Pod, the StatefulSet or the Service")
+			}
+			pf.save("gateway-route-reconcile.json", map[string]any{"templateRoutes": templateRoutes(routeSts), "serviceLabels": routeSvc.Labels, "serviceUID": routeSvc.UID, "podUID": stillRunning.UID, "workloadCurrent": "PodTemplateStale", "ready": true, "restarted": false})
+			wantRoutes = append(wantRoutes, extraRoute)
+			slices.Sort(wantRoutes)
 			if err := f.kube.Delete(ctx, p, client.Preconditions{UID: &p.UID}); err != nil {
 				t.Fatal("remove only owned gateway Pod")
 			}
@@ -745,6 +784,18 @@ func TestGatewayFreshPod(t *testing.T) {
 	}
 	pf.save("gateway-teardown-result.json", map[string]any{"finalizerRecorded": true, "gatewayGone": true, "labelledInventoryEmpty": true, "nodeDeleted": first.NodeID, "keyExpired": keyID})
 	t.Log("gate: production fresh controller Ready, StatefulSet-created kernel Pod/preflight/images, non-ephemeral state binding and identity retained across recreation; real IPv4 /32 TCP forwarding with approval/revocation and distinct native control, known local UDP/TCP DNS via gateway tailnet IP; deletionPolicy=Delete teardown removed every labelled object, the Headscale node and expired the bootstrap key; no IPv6 or adoption proof")
+}
+
+// templateRoutes returns the TS_ROUTES of the tailscale container in the StatefulSet template.
+func templateRoutes(sts *appsv1.StatefulSet) string {
+	for _, c := range sts.Spec.Template.Spec.Containers {
+		for _, e := range c.Env {
+			if c.Name == "tailscale" && e.Name == "TS_ROUTES" {
+				return e.Value
+			}
+		}
+	}
+	return ""
 }
 
 func gatewayProcessesStable(before, actual *corev1.Pod) bool {
