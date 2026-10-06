@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-06
+
 ### Release notes
 
 A `TailnetGateway` static DNS record can now be a CNAME inside the same zone:

@@ -2,13 +2,13 @@
 
 Tsunaro — TailnetEgress, TailnetIngress and experimental kernel TailnetGateway for Headscale.
 
-![Version: 0.10.0](https://img.shields.io/badge/Version-0.10.0-informational?style=flat-square)  ![AppVersion: v0.10.0](https://img.shields.io/badge/AppVersion-v0.10.0-informational?style=flat-square)
+![Version: 0.11.0](https://img.shields.io/badge/Version-0.11.0-informational?style=flat-square)  ![AppVersion: v0.11.0](https://img.shields.io/badge/AppVersion-v0.11.0-informational?style=flat-square)
 
 ## Installation
 
 ```sh
 helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
-  --version 0.10.0 --namespace tailnet-system --create-namespace
+  --version 0.11.0 --namespace tailnet-system --create-namespace
 # or from a source checkout:
 helm install tailnet-operator ./charts/tailnet-operator --namespace tailnet-system --create-namespace
 ```
@@ -111,7 +111,7 @@ See [compatibility](../../docs/COMPATIBILITY.md#http-extension-compatibility-v05
 - `task deploy-gen` — regenerate `deploy/operator.yaml` from the default values.
 - `task rbac-check` / `task rbac-gen` — compare or update [the RBAC reference](../../docs/reference/rbac.md).
 - Chart destination: `OCI_CHART_PATH` in `Taskfile.yaml` plus `Chart.name`. Release tags publish the
-  plain `Chart.version` (`0.10.0`, without `v`); branch builds publish `-dev.g<sha>` pre-releases.
+  plain `Chart.version` (`0.11.0`, without `v`); branch builds publish `-dev.g<sha>` pre-releases.
 
 ## Values
 
@@ -138,7 +138,7 @@ See [compatibility](../../docs/COMPATIBILITY.md#http-extension-compatibility-v05
 | monitoring.dashboard.json | string | `""` | Nonempty JSON replaces the bundled dashboard; custom JSON is not template evaluated. |
 | monitoring.dashboard.kind | string | `"GrafanaDashboard"` | GrafanaDashboard requires Grafana Operator v5 CRDs; ConfigMap supports dashboard sidecars. |
 | monitoring.dashboard.labels | object | `{"grafana_dashboard":"1"}` | Labels for the dashboard resource, including the optional ConfigMap sidecar label. |
-| monitoring.podMonitor.enabled | bool | `false` | Scrape generated agents on health TCP/9080. Requires PodMonitor CRD and site-owned NetworkPolicy access for external scrapers. |
+| monitoring.podMonitor.enabled | bool | `false` | Scrape generated agents on health TCP/9080 and gateways on kernel-health TCP/8080 + metrics-dns TCP/9153. Requires PodMonitor CRD and site-owned NetworkPolicy access for external scrapers. |
 | monitoring.podMonitor.interval | string | `"30s"` | Agent scrape interval. |
 | monitoring.podMonitor.labels | object | `{}` | Additional PodMonitor labels for your Prometheus selector. |
 | monitoring.podMonitor.namespaceSelector | object | `{"any":true}` | Agent namespace selection. Set any: false with matchNames to restrict namespaces; any: false without names selects only the PodMonitor namespace. |
