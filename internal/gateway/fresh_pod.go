@@ -62,6 +62,8 @@ func freshPod(g *tnv1.TailnetGateway, server string, routes RoutePlan, configNam
 			{Name: "TS_EXTRA_ARGS", Value: "--login-server=" + server + " --reset --accept-routes=false"},
 			{Name: "TS_AUTHKEY", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: string(g.Spec.AuthKeySecretRef.Name)}, Key: g.Spec.AuthKeySecretRef.Key}}},
 			{Name: "TS_ENABLE_HEALTH_CHECK", Value: "true"}, {Name: "TS_LOCAL_ADDR_PORT", Value: healthAddr},
+			// containerboot serves /metrics on the same TS_LOCAL_ADDR_PORT when enabled.
+			{Name: "TS_ENABLE_METRICS", Value: "true"},
 		},
 		Ports: []corev1.ContainerPort{{Name: "kernel-health", ContainerPort: 8080, Protocol: corev1.ProtocolTCP}},
 		// containerboot health only establishes a Tailscale address, not routes,
@@ -77,7 +79,7 @@ func freshPod(g *tnv1.TailnetGateway, server string, routes RoutePlan, configNam
 		Name: "coredns", Image: string(g.Spec.DNS.Image), ImagePullPolicy: corev1.PullIfNotPresent,
 		Command: []string{"/coredns"}, Args: []string{"-conf", DNSWorkingDirectory + "/Corefile"}, WorkingDir: DNSWorkingDirectory,
 		SecurityContext: security(65532, "NET_BIND_SERVICE"), Resources: resources("128Mi"),
-		Ports:          []corev1.ContainerPort{{Name: "dns-udp", ContainerPort: 53, Protocol: corev1.ProtocolUDP}, {Name: "dns-tcp", ContainerPort: 53, Protocol: corev1.ProtocolTCP}},
+		Ports:          []corev1.ContainerPort{{Name: "dns-udp", ContainerPort: 53, Protocol: corev1.ProtocolUDP}, {Name: "dns-tcp", ContainerPort: 53, Protocol: corev1.ProtocolTCP}, {Name: "metrics-dns", ContainerPort: 9153, Protocol: corev1.ProtocolTCP}},
 		ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromString("dns-tcp")}}, PeriodSeconds: 10, TimeoutSeconds: 2},
 		VolumeMounts:   []corev1.VolumeMount{{Name: "dns-config", MountPath: DNSWorkingDirectory, ReadOnly: true}},
 	}

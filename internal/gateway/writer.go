@@ -47,9 +47,10 @@ type GatewayHeadscale interface {
 // Ready; it is the signal that the live DNS reconciler may run.
 //
 // PodPresent is true for a Pod with verified provenance (owned by the receipt
-// StatefulSet); PodCurrent additionally means its container images match the live
-// Gateway spec (the caller compares PodRoutes with the planned routes). A stale-but-verified Pod stays Ready: the operator
-// never restarts an identity-bearing Pod itself (OnDelete).
+// StatefulSet); PodCurrent additionally means the Pod carries the StatefulSet's
+// current UpdateRevision, so its template matches what UpdateWorkloadRevision
+// last wrote (images, env, ports, routes). A stale-but-verified Pod stays Ready:
+// the operator never restarts an identity-bearing Pod itself (OnDelete).
 type FreshObservation struct {
 	Ready, Completed       bool
 	PodPresent, PodCurrent bool
@@ -60,6 +61,13 @@ type FreshObservation struct {
 	workload, service freshObjectReceipt
 	stateUID          types.UID
 }
+
+// GatewayTemplateHashAnnotation records the sha256 of the StatefulSet's wanted
+// Pod template (as rendered from the Gateway spec + planned routes). It is a
+// change detector only; integrity is still rooted in the completion receipt UID
+// and the (template-blanked) object digest. The annotation lives on the STS
+// metadata, which the receipt digest already excludes.
+const GatewayTemplateHashAnnotation = "tsunaro.io/template-sha256"
 
 type freshObjectReceipt struct {
 	Kind   string    `json:"kind"`
@@ -335,6 +343,11 @@ func freshIPv4(g *tnv1.TailnetGateway, p FreshPlan, hosts string) bool {
 		ips = append(ips, string(g.Spec.DNS.WildcardAddress))
 	}
 	for _, r := range g.Spec.DNS.StaticRecords {
+		// CNAME-only records carry no address; the target's family is governed by
+		// the record it points to.
+		if r.Address == "" {
+			continue
+		}
 		ips = append(ips, string(r.Address))
 	}
 	for _, s := range ips {
@@ -391,50 +404,28 @@ func objectReceipt(obj client.Object) freshObjectReceipt {
 	for _, k := range []string{"apiVersion", "kind", "metadata", "status"} {
 		delete(data, k)
 	}
-	// Container images and TS_ROUTES follow the Gateway spec via UpdateWorkloadRevision;
-	// the rest of the StatefulSet, including every other template field, stays bound.
+	// The whole Pod template follows the Gateway spec via UpdateWorkloadRevision
+	// (images, env with TS_ROUTES, container ports, etc.); every other field of
+	// the StatefulSet (selector, serviceName, strategy, replicas) stays bound.
 	if _, ok := obj.(*appsv1.StatefulSet); ok {
-		blankTemplateMutable(data)
+		if spec, ok := data["spec"].(map[string]any); ok {
+			delete(spec, "template")
+		}
 	}
-	// The derived DNS zone is reconciled live from the Tailnet hosts source via
-	// UpdateDNSRevision. Its integrity rides on the matching annotations and the
-	// DNSReady condition, not on this immutable fingerprint. Every other key of
-	// the -coredns ConfigMap (notably Corefile) remains digest-bound.
+	// The derived DNS zone AND Corefile are reconciled live from the Tailnet
+	// hosts source and the Gateway spec via UpdateDNSRevision. Their integrity
+	// rides on the matching annotations and the DNSReady condition, not on this
+	// immutable fingerprint. Every other key of the -coredns ConfigMap stays
+	// digest-bound.
 	if cm, ok := obj.(*corev1.ConfigMap); ok && strings.HasSuffix(cm.Name, "-coredns") {
 		if payload, ok := data["data"].(map[string]any); ok {
 			delete(payload, DNSZoneFile)
+			delete(payload, "Corefile")
 		}
 	}
 	b, _ = json.Marshal(data)
 	hash := sha256.Sum256(b)
 	return freshObjectReceipt{Kind: writerObjectKind(obj), Name: obj.GetName(), UID: obj.GetUID(), Digest: hex.EncodeToString(hash[:])}
-}
-
-// blankTemplateMutable removes what UpdateWorkloadRevision rewrites: every container
-// image and the TS_ROUTES value of the tailscale container.
-func blankTemplateMutable(data map[string]any) {
-	spec, _ := data["spec"].(map[string]any)
-	template, _ := spec["template"].(map[string]any)
-	podSpec, _ := template["spec"].(map[string]any)
-	for _, key := range []string{"initContainers", "containers"} {
-		list, _ := podSpec[key].([]any)
-		for _, item := range list {
-			container, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			delete(container, "image")
-			if container["name"] != "tailscale" {
-				continue
-			}
-			env, _ := container["env"].([]any)
-			for _, e := range env {
-				if v, ok := e.(map[string]any); ok && v["name"] == "TS_ROUTES" {
-					delete(v, "value")
-				}
-			}
-		}
-	}
 }
 
 func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, hs GatewayHeadscale, now time.Time, scope map[string]string, record *corev1.ConfigMap) (FreshObservation, error) {
@@ -513,7 +504,10 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 		return result, nil
 	}
 	result.PodPresent = true
-	result.PodCurrent = podImagesCurrent(pod.Spec, freshImages(g))
+	// The StatefulSet controller stamps the current template hash on every pod it
+	// creates. A pod created before our last template write will not carry the
+	// current UpdateRevision; we never restart it ourselves.
+	result.PodCurrent = sts.Status.UpdateRevision != "" && pod.Labels["controller-revision-hash"] == sts.Status.UpdateRevision
 	// The Pod's own TS_ROUTES, not the receipt, is what it advertises; no routes, no Ready.
 	running, ok := podRoutes(pod.Spec)
 	if !ok {

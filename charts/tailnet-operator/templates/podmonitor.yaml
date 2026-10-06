@@ -13,9 +13,18 @@ spec:
     matchExpressions:
       - key: app.kubernetes.io/name
         operator: In
-        values: [tailnet-egress, tailnet-ingress]
+        values: [tailnet-egress, tailnet-ingress, tailnet-gateway]
+  # Agents expose containerboot metrics on port `health` (TCP/9080); gateways on
+  # port `kernel-health` (TCP/8080) plus CoreDNS metrics on `metrics-dns` (9153).
+  # Pods without a given port silently produce no scrape target.
   podMetricsEndpoints:
     - port: health
+      path: /metrics
+      interval: {{ .Values.monitoring.podMonitor.interval }}
+    - port: kernel-health
+      path: /metrics
+      interval: {{ .Values.monitoring.podMonitor.interval }}
+    - port: metrics-dns
       path: /metrics
       interval: {{ .Values.monitoring.podMonitor.interval }}
 {{- end }}
