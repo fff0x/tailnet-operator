@@ -166,3 +166,51 @@ func TestApprovers(t *testing.T) {
 		t.Fatalf("missing block: got %v, %v", got, err)
 	}
 }
+
+func TestRenderGateways(t *testing.T) {
+	in := Inputs{
+		TagOwners: []string{"group:operator"}, RouteApprovers: []string{"tag:fabric"},
+		Gateways: []Gateway{
+			{Tags: []string{"tag:site", "tag:fabric"}, Routes: []string{"10.0.0.0/24", "10.103.0.16/28", "10.0.10.20/32"}},
+			{Tags: []string{"tag:fabric"}, Routes: []string{"10.103.0.16/28"}}, // same prefix, same tag: no change
+		},
+	}
+	out, sum, err := Render([]byte(base), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	owners := doc["tagOwners"].(map[string]any)
+	if got := owners["tag:site"].([]any); len(got) != 1 || got[0] != "group:operator" || owners["tag:fabric"].([]any)[0] != "group:operator" || sum.Tags != 1 {
+		t.Fatalf("gateway tags not declared exactly once without touching base owners: %v (added %d)", owners, sum.Tags)
+	}
+	routes := doc["autoApprovers"].(map[string]any)["routes"].(map[string]any)
+	approvers := func(cidr string) string {
+		var s []string
+		for _, a := range routes[cidr].([]any) {
+			s = append(s, a.(string))
+		}
+		return strings.Join(s, ",")
+	}
+	// base approver kept first, gateway tags merged in; new prefixes get only the gateway tags.
+	if approvers("10.0.0.0/24") != "tag:fabric,tag:site" || approvers("10.103.0.16/28") != "tag:fabric,tag:site" || approvers("10.0.10.20/32") != "tag:other,tag:fabric,tag:site" {
+		t.Fatalf("gateway approvers = %v", routes)
+	}
+	if sum.Routes != 3 {
+		t.Fatalf("routes added = %d", sum.Routes)
+	}
+	again, _, err := Render([]byte(base), in)
+	if err != nil || string(again) != string(out) {
+		t.Fatal("render is not deterministic")
+	}
+	// A gateway must not change what the policy says about other prefixes.
+	plain, _, _ := Render([]byte(base), Inputs{TagOwners: in.TagOwners, RouteApprovers: in.RouteApprovers})
+	var before map[string]any
+	_ = json.Unmarshal(plain, &before)
+	if len(before["autoApprovers"].(map[string]any)["routes"].(map[string]any)) != 2 {
+		t.Fatal("fixture drifted")
+	}
+}

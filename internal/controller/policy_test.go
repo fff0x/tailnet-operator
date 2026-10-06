@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
@@ -44,6 +46,10 @@ func TestPolicyCollect(t *testing.T) {
 			Spec: tnv1.TailnetIngressSpec{TailnetRef: ref, AllowFrom: []string{"group:shop"},
 				Exposes: []tnv1.Expose{{Name: "https", Port: 443}, {Name: "pg", Port: 5432}}}},
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "policy", Namespace: "tailnet-system"}},
+		gatewayFixture("site", "corp", "10.0.0.0/24", "198.51.100.0/24", nil),
+		gatewayFixture("noadv", "corp", "10.1.0.0/24", "198.51.100.0/24", ptr.To(false)),
+		gatewayFixture("foreign", "lab", "10.2.0.0/24", "198.51.100.0/24", nil),
+		gatewayFixture("broken", "corp", "not-a-cidr", "198.51.100.0/24", nil),
 	}
 	r := &TailnetPolicyReconciler{Client: fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(objs...).Build(), Scheme: s, OperatorNamespace: "tailnet-system"}
 
@@ -60,15 +66,34 @@ func TestPolicyCollect(t *testing.T) {
 	if got := in.Egresses[1].Targets; len(got) != 1 || got[0].CIDR != "fd00::1/128" {
 		t.Fatalf("v6 target = %+v", got)
 	}
-	if len(skipped) != 1 || skipped[0] != "billing-dev/by-name" {
+	if len(skipped) != 2 || skipped[0] != "billing-dev/by-name" {
 		t.Fatalf("skipped = %v", skipped)
 	}
 	if len(in.Ingresses) != 1 || in.Ingresses[0].Tag != "tag:ingress-shop" || len(in.Ingresses[0].Ports) != 2 || in.Ingresses[0].AllowFrom[0] != "group:shop" {
 		t.Fatalf("ingresses = %+v", in.Ingresses)
 	}
+	// Gateways: only this Tailnet's, routes exactly as RenderFresh plans them (LAN + LB CIDR + the
+	// egress /32 and /128 targets unless advertiseEgressTargets is off; DNS names are skipped).
+	if len(in.Gateways) != 2 || len(skipped) != 2 || skipped[1] != "gateway/broken" {
+		t.Fatalf("gateways = %+v, skipped = %v", in.Gateways, skipped)
+	}
+	want := []string{"10.0.0.0/24", "10.0.10.20/32", "10.0.10.21/32", "198.51.100.0/24", "fd00::1/128"}
+	if got := in.Gateways[1].Routes; !slices.Equal(got, want) || !slices.Equal(in.Gateways[1].Tags, []string{"tag:site"}) {
+		t.Fatalf("site gateway = %+v", in.Gateways[1])
+	}
+	if got := in.Gateways[0].Routes; !slices.Equal(got, []string{"10.1.0.0/24", "198.51.100.0/24"}) {
+		t.Fatalf("noadv gateway advertised egress targets: %v", got)
+	}
 	if in.TagOwners[0] != "group:operator" || in.RouteApprovers[0] != "tag:fabric" {
 		t.Fatalf("spec passthrough = %+v", in)
 	}
+}
+
+func gatewayFixture(name, tailnet, lan, lb string, advertise *bool) *tnv1.TailnetGateway {
+	return &tnv1.TailnetGateway{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: tnv1.TailnetGatewaySpec{
+		TailnetRef: tnv1.GatewayLocalReference{Name: tnv1.GatewayName(tailnet)}, Tags: []string{"tag:" + name},
+		Routes:  tnv1.GatewayRoutes{LAN: []tnv1.GatewayPrefix{tnv1.GatewayPrefix(lan)}, AdvertiseEgressTargets: advertise},
+		Service: tnv1.GatewayService{TailnetLBCIDR: tnv1.GatewayPrefix(lb)}}}
 }
 
 func TestPolicyOwned(t *testing.T) {

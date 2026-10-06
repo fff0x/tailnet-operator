@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/gateway"
 	"tsunaro.io/tailnet-operator/internal/headscale"
 	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 	"tsunaro.io/tailnet-operator/internal/naming"
@@ -177,7 +179,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		msg += "; denied ingress tags: " + strings.Join(sum.Denied, ", ")
 	}
 	if len(skipped) > 0 {
-		msg += "; name-addressed targets without grant: " + strings.Join(skipped, ", ")
+		msg += "; skipped (name-addressed target without grant, or gateway routes that do not plan): " + strings.Join(skipped, ", ")
 	}
 	renderedCond := func(t *tnv1.Tailnet) {
 		if t.Status.Policy == nil {
@@ -329,6 +331,7 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 		IngressSourceAllowlist: tn.Spec.Policy.IngressSourceAllowlist,
 	}
 	var skipped []string
+	var egressTargets []string // what a gateway of this Tailnet advertises as host routes
 	var egs tnv1.TailnetEgressList
 	if err := r.List(ctx, &egs, client.InNamespace(r.OperatorNamespace)); err != nil {
 		return in, nil, err
@@ -339,6 +342,9 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 		}
 		e := policy.Egress{Tag: egressTag(tn, &eg)}
 		for _, t := range eg.Spec.Targets {
+			if eg.DeletionTimestamp.IsZero() {
+				egressTargets = append(egressTargets, t.Address)
+			}
 			addr, err := netip.ParseAddr(t.Address)
 			if err != nil {
 				skipped = append(skipped, eg.Name+"/"+t.Name)
@@ -361,6 +367,32 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 			i.Ports = append(i.Ports, ex.Port)
 		}
 		in.Ingresses = append(in.Ingresses, i)
+	}
+	// Gateways are cluster-scoped. The routes are exactly what RenderFresh advertises (same planner,
+	// same inputs); a gateway whose routes do not plan is skipped and reported, never half-rendered.
+	var gws tnv1.TailnetGatewayList
+	if err := r.List(ctx, &gws); err != nil {
+		return in, nil, err
+	}
+	sort.Slice(gws.Items, func(a, b int) bool { return gws.Items[a].Name < gws.Items[b].Name }) // merge order must not depend on list order
+	for _, g := range gws.Items {
+		if string(g.Spec.TailnetRef.Name) != tn.Name || !g.DeletionTimestamp.IsZero() {
+			continue
+		}
+		ri := gateway.RouteInputs{LoadBalancerCIDR: string(g.Spec.Service.TailnetLBCIDR),
+			AdvertiseEgressTargets: g.Spec.Routes.AdvertiseEgressTargets == nil || *g.Spec.Routes.AdvertiseEgressTargets}
+		for _, p := range g.Spec.Routes.LAN {
+			ri.LAN = append(ri.LAN, string(p))
+		}
+		if ri.AdvertiseEgressTargets {
+			ri.EgressTargets = egressTargets
+		}
+		plan, err := gateway.PlanRoutes(ri)
+		if err != nil {
+			skipped = append(skipped, "gateway/"+g.Name)
+			continue
+		}
+		in.Gateways = append(in.Gateways, policy.Gateway{Tags: slices.Clone(g.Spec.Tags), Routes: plan.Routes})
 	}
 	sort.Slice(in.Egresses, func(a, b int) bool { return in.Egresses[a].Tag < in.Egresses[b].Tag })
 	sort.Slice(in.Ingresses, func(a, b int) bool { return in.Ingresses[a].Tag < in.Ingresses[b].Tag })
@@ -453,6 +485,8 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			name = cr.Spec.TailnetRef.Name
 		case *tnv1.TailnetIngress:
 			name = cr.Spec.TailnetRef.Name
+		case *tnv1.TailnetGateway:
+			name = string(cr.Spec.TailnetRef.Name)
 		}
 		if name == "" {
 			return nil
@@ -493,6 +527,7 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		})).
 		Watches(&tnv1.TailnetEgress{}, handler.EnqueueRequestsFromMapFunc(byRef), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&tnv1.TailnetIngress{}, handler.EnqueueRequestsFromMapFunc(byRef), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&tnv1.TailnetGateway{}, handler.EnqueueRequestsFromMapFunc(byRef), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(byBase)).
 		Complete(r)
 }
