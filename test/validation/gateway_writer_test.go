@@ -214,10 +214,16 @@ func TestGatewayFreshWriter(t *testing.T) {
 					t.Fatal("Secret replacement did not change identity")
 				}
 			case "child payload drift":
-				cm := &corev1.ConfigMap{}
-				f.get(f.g.Name+"-coredns", cm)
-				cm.Data["Corefile"] += "\n# synthetic drift\n"
-				gatewayWriterMust(t, admin.Update(ctx, cm), "change child payload")
+				// Receipt-bound child field: the Role's rules are fully bound by the
+				// receipt digest (no live reconcile), so a foreign edit here must
+				// block the fresh set. Corefile and spec.template.* drift are now
+				// reconciled live and covered by other tests (see
+				// corefile_tamper_is_caught_by_the_live_DNS_writer and
+				// foreign_template_drift_heals).
+				role := &rbacv1.Role{}
+				f.get(f.g.Name, role)
+				role.Rules = append(role.Rules, rbacv1.PolicyRule{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get"}})
+				gatewayWriterMust(t, admin.Update(ctx, role), "drift receipt-bound child payload as a foreign actor")
 			case "child replacement":
 				cm := &corev1.ConfigMap{}
 				f.get(f.g.Name+"-coredns", cm)
@@ -323,6 +329,19 @@ func TestGatewayFreshWriter(t *testing.T) {
 	gatewayTeardownCases(t, newFixture)
 	gatewayDNSLiveCases(t, newFixture, admin, ctx)
 	gatewayUpdateCases(t, newFixture, admin, ctx)
+}
+
+// syntheticRevisionHash picks a Pod-label-safe (<=63 chars) revision token from
+// the operator-written template-hash annotation. The real StatefulSet controller
+// uses a short fnv hash; this test fixture just truncates the sha256 to 16 hex
+// characters. The operator only compares the strings on sts.Status.UpdateRevision
+// against pod.Labels[controller-revision-hash], so any stable projection works.
+func syntheticRevisionHash(sts *appsv1.StatefulSet) string {
+	hash := sts.Annotations[gateway.GatewayTemplateHashAnnotation]
+	if len(hash) < 16 {
+		return hash
+	}
+	return hash[:16]
 }
 
 func gatewayWriterMust(t *testing.T, err error, message string) {
@@ -454,6 +473,22 @@ func (f *gatewayWriterFixture) reconcile(reason string) {
 	f.t.Helper()
 	_, err := f.r.Reconcile(f.ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.g)})
 	gatewayWriterMust(f.t, err, "reconcile gateway writer")
+	// Simulate the StatefulSet controller: when the operator writes a new Pod
+	// template, UpdateWorkloadRevision stamps the template-hash annotation; a
+	// real controller advances Status.UpdateRevision in lockstep. envtest has
+	// no StatefulSet controller, so we do it here and re-reconcile so the
+	// operator can observe (PodCurrent / PodTemplateStale) in the same call.
+	sts := &appsv1.StatefulSet{}
+	if err := f.c.Get(f.ctx, client.ObjectKey{Namespace: f.ns, Name: f.g.Name}, sts); err == nil {
+		if want := syntheticRevisionHash(sts); want != "" && sts.Status.UpdateRevision != want {
+			sts.Status.ObservedGeneration = sts.Generation
+			sts.Status.UpdateRevision = want
+			sts.Status.CurrentRevision = want
+			gatewayWriterMust(f.t, f.c.Status().Update(f.ctx, sts), "advance synthetic StatefulSet revision")
+			_, err = f.r.Reconcile(f.ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.g)})
+			gatewayWriterMust(f.t, err, "re-reconcile after synthetic revision bump")
+		}
+	}
 	gatewayWriterMust(f.t, f.c.Get(f.ctx, client.ObjectKeyFromObject(f.g), f.g), "read reconciled gateway")
 	ready := meta.FindStatusCondition(f.g.Status.Conditions, "Ready")
 	want := metav1.ConditionFalse
@@ -610,34 +645,22 @@ func (f *gatewayWriterFixture) assertComplete() {
 				for _, field := range []string{"apiVersion", "kind", "metadata", "status"} {
 					delete(payload, field)
 				}
-				// Container images and the tailscale TS_ROUTES follow the spec
-				// (UpdateWorkloadRevision); the receipt binds every other field.
+				// The entire StatefulSet Pod template follows the Gateway spec via
+				// UpdateWorkloadRevision (images, env, container ports, etc.);
+				// the receipt binds every other field of the StatefulSet.
 				if ref.Kind == "StatefulSet" {
-					spec, _ := payload["spec"].(map[string]any)
-					template, _ := spec["template"].(map[string]any)
-					podSpec, _ := template["spec"].(map[string]any)
-					for _, key := range []string{"initContainers", "containers"} {
-						list, _ := podSpec[key].([]any)
-						for _, item := range list {
-							c := item.(map[string]any)
-							delete(c, "image")
-							if c["name"] == "tailscale" {
-								env, _ := c["env"].([]any)
-								for _, e := range env {
-									if e := e.(map[string]any); e["name"] == "TS_ROUTES" {
-										delete(e, "value")
-									}
-								}
-							}
-						}
+					if spec, ok := payload["spec"].(map[string]any); ok {
+						delete(spec, "template")
 					}
 				}
-				// The derived DNS zone is reconciled live from the Tailnet hosts
-				// source, so the completion fingerprint excludes it; the fresh
-				// writer and this re-computation drop the same key.
+				// The derived DNS zone AND the Corefile are reconciled live from
+				// the Tailnet hosts source and the Gateway spec via UpdateDNSRevision
+				// (CoreDNS has a `reload` plugin so Corefile changes land without a
+				// Pod restart). The completion fingerprint drops both.
 				if ref.Kind == "ConfigMap" && strings.HasSuffix(ref.Name, "-coredns") {
 					if data, ok := payload["data"].(map[string]any); ok {
 						delete(data, "zone.db")
+						delete(data, "Corefile")
 					}
 				}
 				encoded, err = json.Marshal(payload)
@@ -676,7 +699,25 @@ func (f *gatewayWriterFixture) createSyntheticReadyPod() {
 	f.t.Helper()
 	sts := &appsv1.StatefulSet{}
 	f.get(f.g.Name, sts)
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: f.g.Name + "-0", Namespace: f.ns, Labels: sts.Spec.Template.Labels, OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(sts, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))}}, Spec: *sts.Spec.Template.Spec.DeepCopy()}
+	// The envtest StatefulSet controller is a no-op, so synthesize what a real
+	// controller would stamp on the live pods: Status.UpdateRevision bumped in
+	// lockstep with the template-hash annotation operator wrote, and a
+	// controller-revision-hash label on the Pod that matches it. The operator
+	// uses that pair to decide PodCurrent (see gateway.observeFresh and
+	// UpdateWorkloadRevision).
+	revisionHash := syntheticRevisionHash(sts)
+	if revisionHash == "" {
+		revisionHash = "synthetic-revision-1"
+	}
+	sts.Status.ObservedGeneration = sts.Generation
+	sts.Status.UpdateRevision = revisionHash
+	sts.Status.CurrentRevision = revisionHash
+	gatewayWriterMust(f.t, f.c.Status().Update(f.ctx, sts), "synthesize StatefulSet revision without controller")
+	labels := map[string]string{"controller-revision-hash": revisionHash}
+	for k, v := range sts.Spec.Template.Labels {
+		labels[k] = v
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: f.g.Name + "-0", Namespace: f.ns, Labels: labels, OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(sts, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))}}, Spec: *sts.Spec.Template.Spec.DeepCopy()}
 	gatewayWriterMust(f.t, f.c.Create(f.ctx, pod), "admit synthetic Pod without kubelet")
 	pod.Status.Phase = corev1.PodRunning
 	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}

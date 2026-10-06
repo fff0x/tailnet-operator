@@ -206,17 +206,23 @@ func TestFreshPayloadFingerprint(t *testing.T) {
 			t.Fatal("replacement object retained provenance")
 		}
 	}
+	// Both Corefile and zone.db are reconciled live from the Gateway spec and the
+	// Tailnet hosts source via UpdateDNSRevision (CoreDNS has a `reload` plugin so
+	// Corefile changes land without a Pod restart). The receipt digest therefore
+	// excludes both; integrity rides on the DNSHash/DNSSerial annotations.
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "router-coredns", UID: "dns-uid"}, Data: map[string]string{"Corefile": "original", DNSZoneFile: "zone1"}}
 	original := objectReceipt(cm)
 	cm.Data["Corefile"] = "changed"
-	if objectReceipt(cm) == original {
-		t.Fatal("in-place Corefile drift not bound")
-	}
-	cm.Data["Corefile"] = "original"
 	cm.Data[DNSZoneFile] = "zone-after-live-reconcile"
 	if objectReceipt(cm) != original {
-		t.Fatal("derived zone drift must be excluded from the fingerprint")
+		t.Fatal("derived zone or Corefile drift must be excluded from the fingerprint")
 	}
+	cm.Data["Corefile"], cm.Data[DNSZoneFile] = "original", "zone1"
+	cm.Data["other"] = "x"
+	if objectReceipt(cm) == original {
+		t.Fatal("foreign key drift in -coredns ConfigMap must stay bound")
+	}
+	delete(cm.Data, "other")
 	// A non-coredns ConfigMap must keep every key digest-bound.
 	other := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "router-fresh", UID: "fresh-uid"}, Data: map[string]string{DNSZoneFile: "retained"}}
 	before := objectReceipt(other)

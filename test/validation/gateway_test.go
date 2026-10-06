@@ -110,6 +110,20 @@ func TestGatewayAdmission(t *testing.T) {
 		unstructured.RemoveNestedField(o.Object, "spec", "authKeySecretRef")
 		check(t, o, true)
 	})
+	t.Run("cname-static-records-admitted", func(t *testing.T) {
+		for name, value := range map[string]any{
+			"bare-label-within-zone": []any{map[string]any{"name": "k8s", "target": "ingress.tail.example"}},
+			"nested-fqdn":            []any{map[string]any{"name": "talos", "target": "ingress-talos.other.tail.example"}},
+			"apex-target":            []any{map[string]any{"name": "root", "target": "tail.example"}},
+			"mixed-with-address":     []any{map[string]any{"name": "a", "address": "10.0.0.1"}, map[string]any{"name": "b", "target": "a.tail.example"}},
+		} {
+			t.Run(name, func(t *testing.T) {
+				o := fresh()
+				set(o, "spec.dns.staticRecords", value)
+				check(t, o, true)
+			})
+		}
+	})
 	t.Run("explicit-activation", func(t *testing.T) {
 		o := fresh()
 		o.SetName("active-gateway")
@@ -218,6 +232,10 @@ func TestGatewayAdmission(t *testing.T) {
 		{"extra-overlap", "dns.extraZones", []any{map[string]any{"zone": "extra.example", "upstreams": []any{"10.0.0.1"}}, map[string]any{"zone": "sub.extra.example", "upstreams": []any{"10.0.0.2"}}}},
 		{"static-duplicates", "dns.staticRecords", []any{map[string]any{"name": "api", "address": "10.0.0.1"}, map[string]any{"name": "api", "address": "10.0.0.2"}}},
 		{"static-shell", "dns.staticRecords", []any{map[string]any{"name": "api;id", "address": "10.0.0.1"}}},
+		{"static-both-address-and-target", "dns.staticRecords", []any{map[string]any{"name": "a", "address": "10.0.0.1", "target": "x.tail.example"}}},
+		{"static-neither-address-nor-target", "dns.staticRecords", []any{map[string]any{"name": "a"}}},
+		{"static-target-out-of-zone", "dns.staticRecords", []any{map[string]any{"name": "a", "target": "x.other.example"}}},
+		{"static-target-self-fqdn", "dns.staticRecords", []any{map[string]any{"name": "api", "target": "api.tail.example"}}},
 		{"wildcard-shell", "dns.wildcardAddress", "10.0.0.1\nexec"}, {"service-collision", "dns.serviceName", "gateway"}, {"headless-collision", "dns.serviceName", "gateway-headless"},
 		{"mutable-router-image", "image", "registry.invalid/router:latest"}, {"mutable-dns-image", "dns.image", "registry.invalid/dns:latest"}, {"mutable-forward-image", "forwardImage", "registry.invalid/forward:latest"},
 		{"same-secret", "authKeySecretRef.name", "router-state"}, {"secret-shell", "stateSecretRef.name", "state;id"}, {"auth-key-shell", "authKeySecretRef.key", "KEY;id"},
