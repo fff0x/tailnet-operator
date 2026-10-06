@@ -630,8 +630,13 @@ processed, not that configuration was applied. Unrelated conditions are preserve
 A nil suspend value is treated as true. With explicit `false`, the minimal writer
 reports `Provisioning`, `FreshBlocked`, `IdentityChanged`, missing dependencies, or `FreshRuntimeReady`.
 `Registered`, `DNSReady` and `Ready` describe verified identity plus Pod/listener
-health, not DNS query results. Route approval, stale-node management and cluster
-DNS forwarding stay `Unknown/ExternallyManaged`. No fresh Service-IP allocation
+health, not DNS query results. `RoutesInSync` is `True/Approved` once Headscale approved every
+route of the completion receipt, `False/NotApproved` (message names the missing prefixes) otherwise,
+and `Unknown` until the gateway is Ready. The gateway controller only reads this: when the Tailnet
+owns its policy (`policy.mode: Apply`), the policy controller renders the gateway tags and routes
+into `tagOwners`/`autoApprovers.routes` and its replay approves them within one policy reconcile
+(≤ 5 min); otherwise approve in Headscale or through your own `autoApprovers`. Stale-node
+management and cluster DNS forwarding stay `Unknown/ExternallyManaged`. No fresh Service-IP allocation
 or debounce acknowledgement is claimed. Active gateways poll uncached children
 every five seconds; unchanged status is not rewritten.
 

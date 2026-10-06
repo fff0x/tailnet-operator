@@ -4,6 +4,21 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- With an operator-owned policy (`policy.baseConfigMap` set; `Apply` writes and replays approvals, `DryRun` only renders), every fresh
+  `TailnetGateway` of the Tailnet contributes its tags to `tagOwners` and its advertised
+  routes (LAN, `tailnetLBCIDR`, egress host routes) to `autoApprovers.routes`, approved for
+  the gateway's own tags. The existing route-approval replay therefore approves gateway
+  routes without a manual `headscale nodes approve-routes`. Gateway create, change and
+  delete trigger a re-render. Base `autoApprovers` entries stay and are merged by union.
+
+### Changed
+
+- `TailnetGateway` `RoutesInSync` now reports `True/Approved` or `False/NotApproved`
+  (missing prefixes named) for a Ready fresh gateway instead of
+  `Unknown/ExternallyManaged`. It is read-only.
+
 ## [0.9.0] - 2026-10-06
 
 ### Release notes
