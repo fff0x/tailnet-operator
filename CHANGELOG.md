@@ -4,6 +4,24 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-06
+
+### Release notes
+
+A running fresh `TailnetGateway` now reconciles its route set and LoadBalancer pool
+labels: changes to `routes.lan`, `routes.advertiseEgressTargets`, `service.tailnetLBCIDR`,
+the targets of the Tailnet's `TailnetEgress` objects and `service.poolLabels` reach the
+StatefulSet template (`TS_ROUTES`) and the Service without reporting `IdentityChanged`.
+The Pod is never restarted (`OnDelete`); `WorkloadCurrent=False/PodTemplateStale` names
+the routes it does not advertise yet, and `Ready` binds to the running Pod's own
+`TS_ROUTES`. With an operator-owned policy, every gateway's tags and advertised routes
+are merged into `tagOwners`/`autoApprovers.routes`, so `RoutesInSync` turns `True/Approved`
+without a manual `headscale nodes approve-routes`. The completion receipt is now format 3;
+gateways with a format-1 or format-2 receipt report `IdentityChanged` and must be deleted
+(`spec.deletionPolicy: Delete`) and recreated. The CRD remains experimental; `spec.suspend`
+still defaults to `true`. No CRD, RBAC or chart contract change (Services and StatefulSets
+already carry `update`).
+
 ### Added
 
 - With an operator-owned policy (`policy.baseConfigMap` set; `Apply` writes and replays approvals, `DryRun` only renders), every fresh
