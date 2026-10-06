@@ -133,7 +133,7 @@ func TeardownFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tail
 			return TeardownProgress{Step: step.name}, err
 		}
 	}
-	for _, name := range []string{g.Name + "-auth-receipt", g.Name + "-fresh"} {
+	for _, name := range []string{g.Name + "-auth-receipt", g.Name + "-fresh", g.Name + "-fresh-next"} {
 		obj, owned, err := teardownOwned(ctx, c, ns, name, g, &corev1.ConfigMap{})
 		if err != nil {
 			return TeardownProgress{Step: "receipts"}, err
