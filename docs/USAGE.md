@@ -260,6 +260,8 @@ curl -sI https://shop-shop-dev.prod-1.tailnet.example.internal | head -1      # 
 | `TLSReady=False/TLSCertificatePending` | cert-manager has not issued yet | `kubectl -n shop-dev describe certificate shop-tls` |
 | `TLSReady=False/TLSCertificateMismatch`, `TLSInvalidDNSName` | leaf does not cover every expose name (the first uncovered name is in the message) | fix the SANs or the ingress name/alias template |
 | `Ready=False/DNSNameConflict` | an older CR of this Tailnet already claims one of these DNS names/aliases | rename, drop the alias, or remove the other CR |
+| `Ready=False/WorkloadMigrating` | the pre-0.12 Deployment named after the CR is being drained before `ingress-<name>` is created (one restart, normally under a minute) | wait |
+| `Ready=False/WorkloadMigrationBlocked` | the legacy Deployment could not be scaled down or deleted | read the message; check RBAC and the Deployment's finalizers |
 | `TLSReady=False/TLSCertificateExpired`, `TLSCertificateNotYetValid` | validity interval | renew |
 | `TLSReady=False/TLSConfigMismatch`, `TLSProbeStale` | agent serves another configuration or has not reported within 30 s | wait one probe interval (≤ 20 s); check the agent pod |
 | `TLSReady=False/TLSCertificateConflict`, `TLSSecretConflict` | a foreign Certificate/Secret owns the target name (a leftover Secret that cert-manager issued for this very Certificate name and nothing owns is taken over automatically) | rename or remove the foreign object |
@@ -553,8 +555,19 @@ the operator) and the CoreDNS Prometheus endpoint on tcp/9153.
 The default Grafana selector is `grafana.internal/instance: grafana`; `kind: ConfigMap` serves
 sidecar setups. Non-empty `rules.groups` or `dashboard.json` replace the bundled content.
 A PodMonitor grants no network access: agent NetworkPolicies allow TCP 9080 from the operator
-namespace only, so a scraper elsewhere needs its own additive policy; with operator isolation on,
-list it in `networkPolicy.metricsPeers`.
+namespace only. Admit your Prometheus with `monitoring.podMonitor.scrapeFrom`, a list of
+NetworkPolicy peers (`namespaceSelector`/`podSelector`/`ipBlock`) that the operator adds to every
+agent NetworkPolicy for TCP 9080; with operator isolation on, list the same scraper in
+`networkPolicy.metricsPeers` for the operator's own metrics:
+
+```yaml
+monitoring:
+  podMonitor:
+    enabled: true
+    scrapeFrom:
+      - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+        podSelector: { matchLabels: { app.kubernetes.io/name: prometheus } }
+```
 
 ### Metric interpretation
 
