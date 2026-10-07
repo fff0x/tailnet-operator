@@ -7,7 +7,18 @@ umask 077
 exec 3>&2
 stage=preflight
 work=
-fail() { printf 'image audit: failed (%s); publication is not accepted\n' "$stage" >&3; exit 1; }
+fail() {
+  printf 'image audit: failed (%s); publication is not accepted\n' "$stage" >&3
+  # Bounded diagnostic on failure: trivy/cosign/jq errors are the only unknown. Keep it
+  # to a few lines so no CVE/package/signer identifiers reach CI; the full private.log
+  # is still discarded on cleanup. No-op on preflight (private.log not yet opened).
+  if [[ -n "${work:-}" && -s "$work/private.log" ]]; then
+    tail -n 20 "$work/private.log" 2>/dev/null \
+      | grep -E 'error|Error|FATAL|FAILED|cannot|refused|timeout|unauthorized|exit (status )?[1-9]' \
+      | head -n 5 >&3 || true
+  fi
+  exit 1
+}
 cleanup() { [[ -z "$work" ]] || rm -rf -- "$work" >/dev/null 2>&1; }
 trap cleanup EXIT
 trap fail ERR
