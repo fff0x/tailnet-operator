@@ -165,8 +165,8 @@ spec:
 
 ```sh
 kubectl -n shop-dev get tailnetingress shop
-# NAME   TAG                HOSTNAME       DNS                                             READY   AGE
-# shop   tag:ingress-shop   ingress-shop   shop-shop-dev.prod-1.tailnet.example.internal   True    2m
+# NAME   TAG                HOSTNAME       HOSTS                                             READY   AGE
+# shop   tag:ingress-shop   ingress-shop   [shop-shop-dev.prod-1.tailnet.example.internal]   True    2m
 ```
 
 From a laptop in `group:shop`: `psql -h shop-shop-dev.prod-1.tailnet.example.internal -p 5432`
@@ -210,7 +210,11 @@ name (`status.dnsName`); with `dnsLabel: grafana` it renders `{name}` in
 The agent terminates TLS on one certificate covering every name, selects the backend by SNI, and
 requires the HTTP `Host` to equal the SNI. The backend receives plain HTTP unless `backend.tls`
 selects verified HTTPS. `Tailnet.spec.dns.ingressNameTemplate` must be set; each resolved name is
-reported in `status.exposes[].dnsName`.
+reported in `status.exposes[].dnsName`. The `HOSTS` column (`status.hosts`) lists every name that is
+actually served, aliases included; `status.dnsName` is the node's identity and the first certificate
+name, which is *not* a route once every HTTP expose carries a `dnsLabel`. A request to that name
+(or any other certificate name without a route) gets the certificate and an HTTP answer instead of a
+TLS alert: `308` to the only served host, or `404` listing the served hosts.
 
 An HTTP expose may also request a shorter alias with `alias: true`, rendered from
 `Tailnet.spec.dns.ingressAliasTemplate` (same effective label). The alias must resolve in the SAME
@@ -258,7 +262,7 @@ curl -sI https://shop-shop-dev.prod-1.tailnet.example.internal | head -1      # 
 | `Ready=False/DNSNameConflict` | an older CR of this Tailnet already claims one of these DNS names/aliases | rename, drop the alias, or remove the other CR |
 | `TLSReady=False/TLSCertificateExpired`, `TLSCertificateNotYetValid` | validity interval | renew |
 | `TLSReady=False/TLSConfigMismatch`, `TLSProbeStale` | agent serves another configuration or has not reported within 30 s | wait one probe interval (≤ 20 s); check the agent pod |
-| `TLSReady=False/TLSCertificateConflict`, `TLSSecretConflict` | a foreign Certificate/Secret owns the target name | rename or remove the foreign object |
+| `TLSReady=False/TLSCertificateConflict`, `TLSSecretConflict` | a foreign Certificate/Secret owns the target name (a leftover Secret that cert-manager issued for this very Certificate name and nothing owns is taken over automatically) | rename or remove the foreign object |
 
 `TLSReady` proves a local in-memory handshake with the frontend certificate.
 `BackendsReachable` requires a TCP connection, or a verified TLS handshake when `backend.tls` is set.

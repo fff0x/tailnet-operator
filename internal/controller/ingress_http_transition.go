@@ -35,7 +35,7 @@ func (r *TailnetIngressReconciler) retireIngressHTTPPredecessor(ctx context.Cont
 // external sources, even if subsequent working-key or Headscale reads fail.
 func (r *TailnetIngressReconciler) retireIngressHTTPConfiguration(ctx context.Context, in *tnv1.TailnetIngress, tn *tnv1.Tailnet) (transition, waiting bool, err error) {
 	var dep appsv1.Deployment
-	if err := r.Get(ctx, client.ObjectKeyFromObject(in), &dep); err != nil {
+	if err := r.Get(ctx, ingressWorkloadKey(in), &dep); err != nil {
 		if apierrors.IsNotFound(err) {
 			// A deleted Deployment can still have terminating/orphaned Pods.
 			// Only a creation with no predecessor may skip retirement.
@@ -116,7 +116,7 @@ func (r *TailnetIngressReconciler) ingressDeploymentDrained(ctx context.Context,
 // still be drained even if another writer installed matching markers meanwhile.
 func (r *TailnetIngressReconciler) ingressHTTPDeploymentSnapshot(ctx context.Context, in *tnv1.TailnetIngress, transition bool) (*appsv1.Deployment, error) {
 	var dep appsv1.Deployment
-	if err := r.Get(ctx, client.ObjectKeyFromObject(in), &dep); err != nil {
+	if err := r.Get(ctx, ingressWorkloadKey(in), &dep); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, nil
 		}

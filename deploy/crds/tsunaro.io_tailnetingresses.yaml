@@ -23,8 +23,8 @@ spec:
     - jsonPath: .status.hostname
       name: Hostname
       type: string
-    - jsonPath: .status.dnsName
-      name: DNS
+    - jsonPath: .status.hosts
+      name: Hosts
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
@@ -477,6 +477,14 @@ spec:
                 type: array
               hostname:
                 type: string
+              hosts:
+                description: |-
+                  Names the agent actually serves: the HTTP exposes' DNS names and their aliases, sorted.
+                  For a CR without HTTP exposes it is the node's DNS name. Unlike dnsName (the node identity and
+                  first certificate name), every entry here answers.
+                items:
+                  type: string
+                type: array
               nodeId:
                 type: string
               observedGeneration:

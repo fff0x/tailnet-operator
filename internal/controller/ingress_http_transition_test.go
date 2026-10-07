@@ -101,7 +101,7 @@ func transitionReconcile(t *testing.T, r *TailnetIngressReconciler, in *tnv1.Tai
 func transitionDeployment(t *testing.T, r *TailnetIngressReconciler, in *tnv1.TailnetIngress) *appsv1.Deployment {
 	t.Helper()
 	var dep appsv1.Deployment
-	if err := r.Get(context.Background(), client.ObjectKeyFromObject(in), &dep); err != nil {
+	if err := r.Get(context.Background(), ingressWorkloadKey(in), &dep); err != nil {
 		t.Fatal(err)
 	}
 	return &dep
@@ -371,7 +371,7 @@ func TestIngressHTTPTransitionReadErrorsAreBounded(t *testing.T) {
 			}
 			r.Client = interceptor.NewClient(r.Client.(client.WithWatch), interceptor.Funcs{
 				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-					if _, ok := obj.(*appsv1.Deployment); ok && operation == "get" {
+					if _, ok := obj.(*appsv1.Deployment); ok && operation == "get" && key.Name == ingressWorkloadName(in.Name) {
 						return apierrors.NewForbidden(schema.GroupResource{Resource: "deployments"}, key.Name, errors.New("secret-sentinel"))
 					}
 					return c.Get(ctx, key, obj, opts...)

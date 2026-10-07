@@ -47,6 +47,7 @@ type certificateSecretReader struct {
 	t      *testing.T
 	calls  int
 	exists bool
+	secret *corev1.Secret
 	err    error
 }
 
@@ -63,6 +64,9 @@ func (r *certificateSecretReader) Get(_ context.Context, key client.ObjectKey, o
 		return r.err
 	}
 	if r.exists {
+		if r.secret != nil {
+			r.secret.DeepCopyInto(obj.(*corev1.Secret))
+		}
 		return nil
 	}
 	return apierrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, key.Name)
@@ -213,6 +217,32 @@ func TestEnsureIngressCertificateCreate(t *testing.T) {
 			checkCertificateActions(t, c, tt.verbs...)
 			if r.calls != tt.reads {
 				t.Fatalf("Secret reads=%d, want %d", r.calls, tt.reads)
+			}
+		})
+	}
+}
+
+func TestEnsureIngressCertificateOrphanedSecret(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		mutate func(*corev1.Secret)
+		reason string
+	}{
+		{"orphan-of-same-certificate", func(*corev1.Secret) {}, "TLSCertificatePending"},
+		{"wrong-certificate", func(s *corev1.Secret) { s.Annotations["cert-manager.io/certificate-name"] = "other" }, "TLSSecretConflict"},
+		{"not-tls", func(s *corev1.Secret) { s.Type = corev1.SecretTypeOpaque }, "TLSSecretConflict"},
+		{"owned", func(s *corev1.Secret) { s.OwnerReferences = []metav1.OwnerReference{{Name: "x", UID: "u"}} }, "TLSSecretConflict"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			in, plan, other := certificateClientFixture()
+			other.SetNamespace("foreign-backend")
+			c := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), other)
+			secret := &corev1.Secret{Type: corev1.SecretTypeTLS,
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"cert-manager.io/certificate-name": desiredIngressCertificate(in, plan).GetName()}}}
+			tt.mutate(secret)
+			r := &certificateSecretReader{t: t, exists: true, secret: secret}
+			if got := ensureIngressCertificate(context.Background(), c, r, in, plan); got != tt.reason {
+				t.Fatalf("reason=%q, want %q", got, tt.reason)
 			}
 		})
 	}

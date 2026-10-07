@@ -180,6 +180,11 @@ type TailnetIngressStatus struct {
 	// hosts ConfigMap. Empty when no template is set.
 	// +optional
 	DNSName string `json:"dnsName,omitempty"`
+	// Names the agent actually serves: the HTTP exposes' DNS names and their aliases, sorted.
+	// For a CR without HTTP exposes it is the node's DNS name. Unlike dnsName (the node identity and
+	// first certificate name), every entry here answers.
+	// +optional
+	Hosts []string `json:"hosts,omitempty"`
 	// Expiry of the reusable pre-auth key currently in the agent's Secret.
 	// +optional
 	AuthKeyExpiresAt *metav1.Time `json:"authKeyExpiresAt,omitempty"`
@@ -203,7 +208,7 @@ type TailnetIngressStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Tag",type=string,JSONPath=`.status.tag`
 // +kubebuilder:printcolumn:name="Hostname",type=string,JSONPath=`.status.hostname`
-// +kubebuilder:printcolumn:name="DNS",type=string,JSONPath=`.status.dnsName`
+// +kubebuilder:printcolumn:name="Hosts",type=string,JSONPath=`.status.hosts`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

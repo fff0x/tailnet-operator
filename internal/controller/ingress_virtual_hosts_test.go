@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math/big"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -286,6 +287,17 @@ func TestIngressVirtualSiblingStatusAndRotations(t *testing.T) {
 				t.Fatal("per-expose DNS status", in.Status.Exposes)
 			}
 		}
+		var hosts []string
+		for _, e := range in.Status.Exposes {
+			if e.DNSName != "" {
+				hosts = append(hosts, e.DNSName)
+			}
+			hosts = append(hosts, e.DNSAliases...)
+		}
+		sort.Strings(hosts)
+		if len(hosts) == 0 || !reflect.DeepEqual(in.Status.Hosts, hosts) || in.Status.Hosts[0] == "" {
+			t.Fatalf("status.hosts=%v, want %v", in.Status.Hosts, hosts)
+		}
 	}
 	check()
 	bad := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "public-ca", Namespace: in.Namespace}, Data: map[string]string{"root.pem": "not PEM"}}
@@ -403,7 +415,7 @@ func TestIngressVirtualFreshAndTransitionBadCASibling(t *testing.T) {
 				t.Fatal(err)
 			}
 			var dep appsv1.Deployment
-			if err := r.Get(ctx, client.ObjectKeyFromObject(in), &dep); err != nil {
+			if err := r.Get(ctx, ingressWorkloadKey(in), &dep); err != nil {
 				t.Fatal(err)
 			}
 			var wire struct{ Targets []agentTarget }

@@ -55,6 +55,17 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	legacy, err := r.retireLegacyIngressWorkload(ctx, &in)
+	if err != nil {
+		return r.fail(ctx, &in, "WorkloadMigrationBlocked", err)
+	}
+	if legacy {
+		invalidateIngressTLSObservation(&in)
+		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, "WorkloadMigrating",
+			"replacing the legacy ingress Deployment with ingress-"+in.Name)
+		_ = updateObservedStatus(ctx, r.Client, r.Metrics, &in)
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
 	transition, waiting, err := r.retireIngressHTTPPredecessor(ctx, &in)
 	if err != nil {
 		return r.fail(ctx, &in, "HTTPTransitionBlocked", err)
@@ -136,6 +147,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	ownerKey := dnsClaimOwnerKey{Kind: dnsIngressKind, Namespace: in.Namespace, Name: in.Name, UID: in.UID}
 	if d, ok := decisions[ownerKey]; ok && d.Blocked && d.Conflict != nil {
 		in.Status.DNSName = ""
+		in.Status.Hosts = nil
 		in.Status.Exposes = nil
 		return r.fail(ctx, &in, "DNSNameConflict", dnsConflictError(d.Conflict))
 	}

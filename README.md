@@ -94,8 +94,8 @@ kubectl get tailnet,tailnetegress,tailnetingress -A
 # NAMESPACE        NAME                                          TAG                      HOSTNAME             READY   AGE
 # tailnet-system   tailnetegress.tsunaro.io/billing-dev   tag:egress-billing-dev   egress-billing-dev   True    2m
 #
-# NAMESPACE   NAME                                    TAG                HOSTNAME       DNS                                             READY   AGE
-# shop-dev    tailnetingress.tsunaro.io/shop   tag:ingress-shop   ingress-shop   shop-shop-dev.prod-1.tailnet.example.internal   True    2m
+# NAMESPACE   NAME                                    TAG                HOSTNAME       HOSTS                                             READY   AGE
+# shop-dev    tailnetingress.tsunaro.io/shop   tag:ingress-shop   ingress-shop   [shop-shop-dev.prod-1.tailnet.example.internal]   True    2m
 ```
 
 A pod in `billing-dev` dials `db-1.tailnet-system.svc:1521` or `https://api.corp.example`; a tailnet

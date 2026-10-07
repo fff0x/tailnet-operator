@@ -940,6 +940,11 @@ func (in *TailnetIngressStatus) DeepCopyInto(out *TailnetIngressStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.Hosts != nil {
+		in, out := &in.Hosts, &out.Hosts
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.AuthKeyExpiresAt != nil {
 		in, out := &in.AuthKeyExpiresAt, &out.AuthKeyExpiresAt
 		*out = (*in).DeepCopy()

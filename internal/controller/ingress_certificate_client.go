@@ -44,10 +44,10 @@ func ensureIngressCertificate(ctx context.Context, certificates dynamic.Interfac
 		// cannot be made transactional with this check.
 		var secret corev1.Secret
 		err = secrets.Get(ctx, client.ObjectKey{Namespace: in.Namespace, Name: plan.secretName}, &secret)
-		if err == nil {
+		if err == nil && !ingressTLSSecretOrphaned(&secret, desired.GetName()) {
 			return "TLSSecretConflict"
 		}
-		if !apierrors.IsNotFound(err) {
+		if err != nil && !apierrors.IsNotFound(err) {
 			return ingressCertificateFailure(err)
 		}
 		_, err = resource.Create(ctx, desired, metav1.CreateOptions{})
@@ -85,6 +85,14 @@ func ensureIngressCertificate(ctx context.Context, certificates dynamic.Interfac
 		return "TLSCertificatePending"
 	}
 	return ingressCertificateReadiness(cert)
+}
+
+// ingressTLSSecretOrphaned recognises the leftover Secret of an earlier incarnation of this very
+// Certificate: cert-manager issued it for the same Certificate name and, since the Certificate is
+// gone, nothing owns it. A fresh Certificate of that name may take it over; anything else is foreign.
+func ingressTLSSecretOrphaned(s *corev1.Secret, certificateName string) bool {
+	return s.Type == corev1.SecretTypeTLS && len(s.OwnerReferences) == 0 &&
+		s.Annotations["cert-manager.io/certificate-name"] == certificateName
 }
 
 // removeIngressCertificate never deletes Secrets or adopts foreign Certificates. Retaining the

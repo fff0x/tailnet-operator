@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -207,11 +208,14 @@ func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress,
 	}
 	r.computeExposeStatus(in, backends, probeErr)
 	backendReason := ""
+	var hosts []string
 	for i, expose := range in.Spec.Exposes {
 		if expose.Mode == "http" {
 			in.Status.Exposes[i].DNSName = state.plan.names.exposeNames[expose.Name]
+			hosts = append(hosts, in.Status.Exposes[i].DNSName)
 			if alias := state.plan.names.aliasNames[expose.Name]; alias != "" {
 				in.Status.Exposes[i].DNSAliases = []string{alias}
+				hosts = append(hosts, alias)
 			}
 		}
 		if reason := backendReasons[expose.Name]; reason != "" {
@@ -221,6 +225,11 @@ func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress,
 			}
 		}
 	}
+	if len(hosts) == 0 && in.Status.DNSName != "" {
+		hosts = []string{in.Status.DNSName}
+	}
+	sort.Strings(hosts)
+	in.Status.Hosts = hosts
 	if backendReason != "" {
 		setCond(&in.Status.Conditions, in.Generation, "BackendsReachable", metav1.ConditionFalse, backendReason,
 			"backend configuration, trust source or verified agent observation is not ready")
