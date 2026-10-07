@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,6 +71,27 @@ func validDNSName(s string) bool {
 	return true
 }
 
+// serveUnroutedHost answers a request for a certificate name that has no virtual host: 308 to the
+// only served host, otherwise 404 naming the served hosts. The names are certificate SANs anyway.
+func serveUnroutedHost(w http.ResponseWriter, r *http.Request, routes map[string]*httpRuntime) {
+	hosts := make([]string, 0, len(routes))
+	primary := make(map[*httpRuntime]bool, len(routes))
+	for name, rt := range routes {
+		hosts = append(hosts, name)
+		primary[rt] = true
+	}
+	sort.Strings(hosts)
+	if len(primary) == 1 {
+		for rt := range primary {
+			http.Redirect(w, r, "https://"+strings.ToLower(rt.t.DNSName)+r.URL.RequestURI(), http.StatusPermanentRedirect)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = io.WriteString(w, "no service at this name; served hosts:\n"+strings.Join(hosts, "\n")+"\n")
+}
+
 func matchesHTTPHost(host, dns string) bool {
 	host = strings.TrimSuffix(host, ":443")
 	return validDNSName(host) && strings.EqualFold(host, dns)
@@ -105,6 +127,9 @@ func (s *certificateSource) load(hello *tls.ClientHelloInfo, fresh bool) (*tls.C
 		known := strings.EqualFold(hello.ServerName, s.t.DNSName)
 		if s.routes != nil {
 			_, known = s.routes[strings.ToLower(hello.ServerName)]
+			// A certificate name without a route (the ingress base name once every expose has a
+			// dnsLabel) still completes the handshake; the HTTP layer then explains it.
+			known = known || s.t.requiresName(hello.ServerName)
 		}
 		if !validDNSName(hello.ServerName) || !known {
 			return nil, errors.New("unrecognized TLS server name")
@@ -407,6 +432,10 @@ func serveHTTPIngressGroup(ctx context.Context, ln net.Listener, targets []targe
 			var runtime *httpRuntime
 			if r.TLS != nil {
 				runtime = routes[strings.ToLower(r.TLS.ServerName)]
+			}
+			if runtime == nil && r.TLS != nil && certs.t.requiresName(r.TLS.ServerName) && matchesHTTPHost(r.Host, r.TLS.ServerName) {
+				serveUnroutedHost(w, r, routes)
+				return
 			}
 			// Host must match the SNI that selected the route (same-origin). With aliases the
 			// SNI may be an alias rather than the target's primary DNSName.

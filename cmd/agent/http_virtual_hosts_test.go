@@ -148,7 +148,7 @@ func TestVirtualHostHTTPRoutingAndMetrics(t *testing.T) {
 			t.Fatal("selected SNI wire traffic not attributed per target")
 		}
 	}
-	for _, sni := range []string{baseDNS, "unknown.example.test", "", "a..example.test"} {
+	for _, sni := range []string{"unknown.example.test", "", "a..example.test"} {
 		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", h.Addr().String(), &tls.Config{ServerName: sni, InsecureSkipVerify: true}) // tests server rejection
 		if err == nil {
 			conn.Close()
@@ -676,5 +676,40 @@ func TestVirtualHostNilMetrics(t *testing.T) {
 	defer h.Close()
 	for _, cfg := range targets {
 		virtualGET(t, virtualClient(t, h, cfg, true), cfg, "/", 200)
+	}
+}
+
+func unroutedGET(t *testing.T, h *httpIngress, cfg target, host string) (*http.Response, string) {
+	t.Helper()
+	client := localHTTPClient(t, h, cfg, false)
+	client.Transport.(*http.Transport).TLSClientConfig.ServerName = baseDNS
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	res, err := client.Get("https://" + host + "/x?q=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	return res, string(body)
+}
+
+// The base name is a certificate SAN but no route once every expose carries a label: it must
+// complete the handshake and explain itself instead of ending in a TLS alert.
+func TestUnroutedCertificateNameAnswersInsteadOfAlert(t *testing.T) {
+	targets := virtualHostTargets(t)
+	_, h, _ := virtualForwarder(t, targets)
+	res, body := unroutedGET(t, h, targets[0], baseDNS)
+	if res.StatusCode != http.StatusNotFound || !strings.Contains(body, testDNS) || !strings.Contains(body, "b.example.test") {
+		t.Fatalf("status=%d body=%q", res.StatusCode, body)
+	}
+	// SNI and Host must agree even for the card.
+	if res, _ := unroutedGET(t, h, targets[0], testDNS); res.StatusCode != http.StatusMisdirectedRequest {
+		t.Fatalf("mismatched Host answered %d", res.StatusCode)
+	}
+
+	_, single, _ := virtualForwarder(t, targets[:1])
+	res, _ = unroutedGET(t, single, targets[0], baseDNS)
+	if res.StatusCode != http.StatusPermanentRedirect || res.Header.Get("Location") != "https://"+testDNS+"/x?q=1" {
+		t.Fatalf("status=%d location=%q", res.StatusCode, res.Header.Get("Location"))
 	}
 }

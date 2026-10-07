@@ -107,6 +107,17 @@ func loadTargets(path string) ([]target, error) {
 	return ts, nil
 }
 
+// requiresName reports whether name (lower case) is one of the certificate names the operator
+// requires, whether or not it is also a route.
+func (t target) requiresName(name string) bool {
+	for _, required := range t.requiredCertificateNames {
+		if required != "" && strings.EqualFold(required, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func validateTargets(ts []target, version int) error {
 	if len(ts) > maxAgentTargets {
 		return errTargetsConfig
