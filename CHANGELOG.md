@@ -4,6 +4,52 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-07
+
+### Release notes
+
+The generated ingress agent is now named `ingress-<CR name>` (Deployment and
+NetworkPolicy), matching its Headscale host. A `TailnetIngress` may therefore share
+its name with a user workload in the same namespace; before, such a CR stopped with
+`HTTPTransitionBlocked`. On upgrade the operator drains and deletes the legacy
+Deployment and NetworkPolicy named like the CR (only if the CR controls them; a
+foreign object of that name is left alone) before the new agent starts, so every
+ingress restarts once (`Ready=False/WorkloadMigrating`, normally under a minute).
+Pod labels, ConfigMap, Secrets and the Headscale node identity are unchanged.
+
+A TLS Secret that cert-manager issued for this CR's own Certificate name and that
+nothing owns any more (the leftover of a deleted CR) is taken over instead of
+blocking the new CR with `TLSSecretConflict`.
+
+The `DNS` printer column of `TailnetIngress` is replaced by `HOSTS`
+(`status.hosts`), the names the agent actually serves: HTTP expose names and
+aliases, or the node name for L4-only ingresses. `status.dnsName` stays the node's
+identity and first certificate name; it is not a route once every HTTP expose has a
+`dnsLabel`. A request to a certificate name without a route now completes the TLS
+handshake instead of ending in an alert and gets `308` to the only served host or
+`404` listing the served hosts (SNI and `Host` must still agree; unknown names are
+still rejected).
+
+`monitoring.podMonitor.scrapeFrom` (NetworkPolicy peers) is passed to the operator as
+`AGENT_SCRAPE_PEERS` and adds one ingress rule on the agents' health/metrics port to
+every generated ingress and egress NetworkPolicy, replacing site-owned,
+CNI-specific policies for Prometheus. Default: none.
+
+### Added
+
+- `TailnetIngress.status.hosts` and the `HOSTS` printer column (replaces `DNS`).
+- `TailnetGateway` condition `ServiceReady` (`True/LoadBalancerAssigned`,
+  `False/LBPending`); `Ready` does not wait for it.
+- Event `GatewayTeardownFinished` when a gateway teardown releases its finalizer.
+- Chart value `monitoring.podMonitor.scrapeFrom`, env `AGENT_SCRAPE_PEERS`.
+
+### Changed
+
+- Ingress agent Deployment and NetworkPolicy are named `ingress-<CR>`; the legacy
+  objects are retired automatically (`WorkloadMigrating`, `WorkloadMigrationBlocked`).
+- Orphaned cert-manager TLS Secrets of the same Certificate name are adopted.
+- The agent answers certificate names without a route with 308/404 instead of a TLS alert.
+
 ## [0.11.0] - 2026-10-06
 
 ### Release notes
