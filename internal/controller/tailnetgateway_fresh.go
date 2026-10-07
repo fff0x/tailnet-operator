@@ -3,10 +3,12 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,6 +69,11 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "WorkloadCurrent", Status: status, Reason: wReason, Message: wMessage, ObservedGeneration: g.Generation})
 	} else {
 		meta.RemoveStatusCondition(&g.Status.Conditions, "WorkloadCurrent")
+	}
+	if observation.Completed {
+		meta.SetStatusCondition(&g.Status.Conditions, serviceReady(g, observation))
+	} else {
+		meta.RemoveStatusCondition(&g.Status.Conditions, "ServiceReady")
 	}
 	meta.SetStatusCondition(&g.Status.Conditions, routesInSync(g, observation, tn, reason))
 	for _, name := range []string{"StaleNodes", "ClusterDNSForward"} {
@@ -220,6 +227,9 @@ func (r *TailnetGatewayReconciler) reconcileTeardown(ctx context.Context, req ct
 		}
 		// Bounded fields only; the receipt inventory and Headscale IDs stay out of logs.
 		log.FromContext(ctx).Info("gateway teardown finished; finalizer released", "gateway", g.Name, "outcome", reason)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(g, corev1.EventTypeNormal, "GatewayTeardownFinished", "teardown finished (%s); finalizer released", reason)
+		}
 		return ctrl.Result{}, nil
 	}
 	before := g.DeepCopy()
@@ -229,6 +239,7 @@ func (r *TailnetGatewayReconciler) reconcileTeardown(ctx context.Context, req ct
 		message = "Teardown blocked at step " + progress.Step + "; nothing further is deleted. Set deletionPolicy=Retain to release the finalizer and keep all resources."
 	}
 	meta.RemoveStatusCondition(&g.Status.Conditions, "WorkloadCurrent")
+	meta.RemoveStatusCondition(&g.Status.Conditions, "ServiceReady")
 	for _, name := range []string{"Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "Ready"} {
 		status := metav1.ConditionUnknown
 		if name == "Ready" {
@@ -242,4 +253,18 @@ func (r *TailnetGatewayReconciler) reconcileTeardown(ctx context.Context, req ct
 		}
 	}
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+}
+
+// serviceReady reports the platform's LoadBalancer allocation, which Ready deliberately ignores:
+// a gateway can be registered and serving routes while its Service address is still being assigned.
+func serviceReady(g *tnv1.TailnetGateway, o gateway.FreshObservation) metav1.Condition {
+	c := metav1.Condition{Type: "ServiceReady", ObservedGeneration: g.Generation}
+	if len(o.LoadBalancerIPs) == 0 {
+		c.Status, c.Reason, c.Message = metav1.ConditionFalse, "LBPending",
+			"the LoadBalancer Service has no assigned address yet; check the load balancer controller and its address pool"
+		return c
+	}
+	c.Status, c.Reason, c.Message = metav1.ConditionTrue, "LoadBalancerAssigned",
+		fmt.Sprintf("the LoadBalancer Service is assigned %s", strings.Join(o.LoadBalancerIPs, ", "))
+	return c
 }

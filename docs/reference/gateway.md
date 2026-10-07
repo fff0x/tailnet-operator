@@ -535,6 +535,11 @@ The StatefulSet digest in the receipt covers everything except container images 
 selector, `serviceName`, `updateStrategy`, `replicas` and every other template field
 (command, env, volumes, security context, labels) still trip `FreshBlocked` on drift.
 
+**LoadBalancer.** `ServiceReady` reports the platform's address allocation, which `Ready` does not
+wait for: `True / LoadBalancerAssigned` lists the assigned addresses, `False / LBPending` means the
+Service has none yet (check the load balancer controller and its pool). Like `WorkloadCurrent` it is
+absent while suspended, terminating or before a completion receipt.
+
 Ready no longer requires the Pod to match the current template (it may legitimately
 predate an image change); it requires StatefulSet ownership by UID, the gateway and
 state-UID labels, the service account, running and Ready containers, a verified state

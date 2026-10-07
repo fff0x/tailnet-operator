@@ -57,7 +57,9 @@ type FreshObservation struct {
 	Binding                GatewayStateBinding
 	Routes, Approved       []string
 	// PodRoutes are the routes the running Pod was started with (its TS_ROUTES), in plan order.
-	PodRoutes         []string
+	PodRoutes []string
+	// LoadBalancerIPs are the addresses the platform assigned to the gateway's LoadBalancer Service.
+	LoadBalancerIPs   []string
 	workload, service freshObjectReceipt
 	stateUID          types.UID
 }
@@ -629,6 +631,7 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 	}
 	var sts *appsv1.StatefulSet
 	var workload, lbService freshObjectReceipt
+	var lbIPs []string
 	// migrated carries the current-rule digests. It stays identical to the stored
 	// receipt unless a v0.10.0 receipt is recognised, in which case the verified
 	// live objects are re-fingerprinted and the receipt is rewritten in place.
@@ -659,6 +662,11 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 		}
 		if v, ok := obj.(*corev1.Service); ok && v.Name == g.Name {
 			lbService = cur
+			for _, ingress := range v.Status.LoadBalancer.Ingress {
+				if ingress.IP != "" {
+					lbIPs = append(lbIPs, ingress.IP)
+				}
+			}
 		}
 	}
 	if len(wanted) != 0 || sts == nil {
@@ -676,7 +684,7 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 	if c.Get(ctx, client.ObjectKey{Namespace: ns, Name: string(g.Spec.StateSecretRef.Name)}, state) != nil || state.UID != receipt.StateUID || state.DeletionTimestamp != nil {
 		return bad()
 	}
-	result := FreshObservation{Completed: true, Routes: slices.Clone(receipt.Routes), workload: workload, service: lbService}
+	result := FreshObservation{Completed: true, Routes: slices.Clone(receipt.Routes), LoadBalancerIPs: lbIPs, workload: workload, service: lbService}
 	pod := &corev1.Pod{}
 	err = c.Get(ctx, client.ObjectKey{Namespace: ns, Name: g.Name + "-0"}, pod)
 	if apierrors.IsNotFound(err) {

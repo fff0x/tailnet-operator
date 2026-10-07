@@ -3,8 +3,10 @@
 package validation
 
 import (
+	"k8s.io/client-go/tools/record"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -70,6 +72,14 @@ func gatewayTeardownCases(t *testing.T, newFixture func(*testing.T, bool) *gatew
 		f.assertNoRuntime()
 		f.assertHeadscale([]string{node.ID}, []string{"9"})
 		f.assertMints(1)
+		select {
+		case event := <-f.r.Recorder.(*record.FakeRecorder).Events:
+			if !strings.Contains(event, "GatewayTeardownFinished") {
+				t.Fatalf("unexpected event %q", event)
+			}
+		default:
+			t.Fatal("no teardown event recorded")
+		}
 	})
 
 	t.Run("delete also removes a leftover migration stage", func(t *testing.T) {

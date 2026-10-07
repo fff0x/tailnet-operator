@@ -6,6 +6,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -21,6 +22,7 @@ type TailnetGatewayReconciler struct {
 	// RuntimeClient bypasses the cache for all provenance and exclusivity checks.
 	RuntimeClient     client.Client
 	OperatorNamespace string
+	Recorder          record.EventRecorder
 }
 
 // gatewayAPIError retains classification without exposing API response bodies,
@@ -75,6 +77,7 @@ func (r *TailnetGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	gw.Status.ObservedGeneration = gw.Generation
 	meta.RemoveStatusCondition(&gw.Status.Conditions, "WorkloadCurrent")
+	meta.RemoveStatusCondition(&gw.Status.Conditions, "ServiceReady")
 	for _, condition := range []string{"Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "Ready"} {
 		status := metav1.ConditionUnknown
 		if condition == "Ready" {

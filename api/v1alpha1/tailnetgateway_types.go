@@ -298,7 +298,7 @@ type TailnetGatewayStatus struct {
 	// +optional
 	RoutePlan GatewayRouteStatus `json:"routePlan,omitempty"`
 	// Registered, RoutesInSync, DNSReady, StaleNodes, ClusterDNSForward and Ready;
-	// fresh gateways with a verified completion receipt also report WorkloadCurrent.
+	// fresh gateways with a verified completion receipt also report WorkloadCurrent and ServiceReady.
 	// +optional
 	// +listType=map
 	// +listMapKey=type

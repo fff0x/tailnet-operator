@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -106,7 +107,7 @@ func TestGatewayFreshWriter(t *testing.T) {
 		f.g.Spec.Adoption = nil
 		gatewayWriterMust(t, admin.Create(ctx, f.g), "admit writer gateway")
 		f.writes = &gatewayWriterClient{Client: admin}
-		f.r = &controller.TailnetGatewayReconciler{Client: f.writes, RuntimeClient: f.writes, OperatorNamespace: name}
+		f.r = &controller.TailnetGatewayReconciler{Client: f.writes, RuntimeClient: f.writes, OperatorNamespace: name, Recorder: record.NewFakeRecorder(16)}
 		return f
 	}
 
@@ -318,7 +319,7 @@ func TestGatewayFreshWriter(t *testing.T) {
 			before, writes := f.snapshot(), f.writes.writes
 			// A new reconciler has no process-local recovery information. Retained
 			// ambiguity must block rather than recover the Create UID from a Get.
-			f.r = &controller.TailnetGatewayReconciler{Client: f.writes, RuntimeClient: f.writes, OperatorNamespace: f.ns}
+			f.r = &controller.TailnetGatewayReconciler{Client: f.writes, RuntimeClient: f.writes, OperatorNamespace: f.ns, Recorder: record.NewFakeRecorder(16)}
 			f.reconcile("FreshBlocked")
 			f.reconcile("FreshBlocked")
 			f.assertUnchanged(before, writes)
