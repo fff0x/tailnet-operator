@@ -31,6 +31,11 @@ import (
 // TestIngressHTTP uses the actual chart, ServiceAccounts, reconcilers and
 // cert-manager issuance. Fixture-only mounts trust the private control server;
 // every Headscale/tsnet Pod still requires its actual pre-start network proof.
+// ingressAgentKey is the generated agent Deployment: named ingress-<CR>, not like the CR.
+func ingressAgentKey(in *tnv1.TailnetIngress) client.ObjectKey {
+	return client.ObjectKey{Namespace: in.Namespace, Name: "ingress-" + in.Name}
+}
+
 func TestIngressHTTP(t *testing.T) {
 	if os.Getenv("E2E_KIND_HTTP_NETWORK_GATE") == "" {
 		t.Skip("requires owned isolated HTTP runner")
@@ -162,11 +167,22 @@ func TestIngressHTTP(t *testing.T) {
 			{Name: "tcp", Mode: "l4", Port: 8443, Backend: tnv1.Backend{Service: "fixture-backend", Port: 8081}},
 		},
 	}}
+	// A user workload may share the CR's name: the generated agent is ingress-<CR> and must neither
+	// collide with it nor touch it.
+	zero := int32(0)
+	userApp := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: ingress.Name, Namespace: namespace}, Spec: appsv1.DeploymentSpec{
+		Replicas: &zero, Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "user-app"}},
+		Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "user-app"}},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "registry.invalid/user-app"}}}},
+	}}
+	if f.kube.Create(t.Context(), userApp) != nil {
+		t.Fatal("user Deployment named like the ingress failed")
+	}
 	x.create(ingress)
 	var agent corev1.Pod
 	var deployment appsv1.Deployment
 	eventually(t, "controller-created agent blocked in admitted init", func() bool {
-		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), ingress) != nil || f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), &deployment) != nil {
+		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), ingress) != nil || f.kube.Get(t.Context(), ingressAgentKey(ingress), &deployment) != nil {
 			return false
 		}
 		owner := metav1.GetControllerOf(&deployment)
@@ -380,7 +396,7 @@ func testIngressBackendTLS(t *testing.T, x *httpPeerFixture, ingress *tnv1.Tailn
 	oldUID := agent.UID
 	var dep appsv1.Deployment
 	eventually(t, "v2 protocol recreates the agent under its real startup gate", func() bool {
-		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), &dep) != nil || dep.Spec.Template.Annotations["tsunaro.io/agent-config-protocol"] != "http-v2" {
+		if f.kube.Get(t.Context(), ingressAgentKey(ingress), &dep) != nil || dep.Spec.Template.Annotations["tsunaro.io/agent-config-protocol"] != "http-v2" {
 			return false
 		}
 		var pods corev1.PodList

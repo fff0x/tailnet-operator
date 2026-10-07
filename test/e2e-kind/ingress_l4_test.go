@@ -234,7 +234,7 @@ func TestIngressL4(t *testing.T) {
 	var agent corev1.Pod
 	var deployment appsv1.Deployment
 	eventually(t, "L4 generated agent held at real startup gate", func() bool {
-		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), &deployment) != nil {
+		if f.kube.Get(t.Context(), ingressAgentKey(ingress), &deployment) != nil {
 			return false
 		}
 		owner := metav1.GetControllerOf(&deployment)

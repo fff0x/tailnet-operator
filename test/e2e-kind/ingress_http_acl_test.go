@@ -128,7 +128,7 @@ func requireHTTPACLDenials(probe func() (httpACLObservation, error)) error {
 func testIngressHTTPACL(t *testing.T, x *httpPeerFixture, tn *tnv1.Tailnet, ingress *tnv1.TailnetIngress, agent *corev1.Pod) {
 	f := x.f
 	var deployment appsv1.Deployment
-	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), &deployment) != nil || !metav1.IsControlledBy(&deployment, ingress) || deployment.Spec.Template.Annotations["tsunaro.io/agent-config-protocol"] != "http-v3" {
+	if f.kube.Get(t.Context(), ingressAgentKey(ingress), &deployment) != nil || !metav1.IsControlledBy(&deployment, ingress) || deployment.Spec.Template.Annotations["tsunaro.io/agent-config-protocol"] != "http-v3" {
 		t.Fatal("HTTP ACL v3 agent missing")
 	}
 	initialDeployment := deployment.DeepCopy()

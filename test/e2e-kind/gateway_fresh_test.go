@@ -882,7 +882,7 @@ func gatewayFixtureAssertTemplateSurface(t *testing.T, sts *appsv1.StatefulSet) 
 // gatewayFixtureAssertAnnotationUpgrade drops the template-hash annotation and
 // re-reconciles: the operator must restore it without recreating the
 // StatefulSet or rolling the Pod.
-func gatewayFixtureAssertAnnotationUpgrade(t *testing.T, ctx context.Context, f *peerFixture, sts *appsv1.StatefulSet, reconcile func()) {
+func gatewayFixtureAssertAnnotationUpgrade(t *testing.T, ctx context.Context, f *fixture, sts *appsv1.StatefulSet, reconcile func()) {
 	t.Helper()
 	original := sts.UID
 	live := &appsv1.StatefulSet{}

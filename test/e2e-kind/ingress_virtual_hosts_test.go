@@ -41,7 +41,7 @@ func testIngressVirtualHosts(t *testing.T, x *httpPeerFixture, ingress *tnv1.Tai
 	slices.Sort(wantNames)
 	oldPod := agent.DeepCopy()
 	var dep appsv1.Deployment
-	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), &dep) != nil || !metav1.IsControlledBy(&dep, ingress) || dep.Spec.Template.Annotations["tsunaro.io/agent-config-protocol"] != "http-v2" || dep.Status.ReadyReplicas != 1 {
+	if f.kube.Get(t.Context(), ingressAgentKey(ingress), &dep) != nil || !metav1.IsControlledBy(&dep, ingress) || dep.Spec.Template.Annotations["tsunaro.io/agent-config-protocol"] != "http-v2" || dep.Status.ReadyReplicas != 1 {
 		t.Fatal("ready v2 predecessor missing")
 	}
 	deploymentUID, ingressUID := dep.UID, ingress.UID

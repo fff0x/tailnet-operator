@@ -129,6 +129,8 @@ func TestNoSecretsInOutput(t *testing.T) {
 					for _, child := range []client.Object{
 						&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: obj.GetName(), Namespace: namespace}},
 						&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: obj.GetName(), Namespace: namespace}},
+						&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "ingress-" + obj.GetName(), Namespace: namespace}},
+						&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "ingress-" + obj.GetName(), Namespace: namespace}},
 						&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: obj.GetName() + "-authkey", Namespace: namespace}},
 						&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: obj.GetName() + "-targets", Namespace: namespace}},
 					} {

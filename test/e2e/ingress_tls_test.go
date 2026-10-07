@@ -75,6 +75,7 @@ func TestIngressTLSExternalSecretAndMissingManager(t *testing.T) {
 				},
 			}
 			key := client.ObjectKeyFromObject(in)
+			workloadKey := client.ObjectKey{Namespace: key.Namespace, Name: "ingress-" + key.Name}
 			secretKey := types.NamespacedName{Name: name + "-external", Namespace: namespace}
 			t.Cleanup(func() {
 				cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -84,8 +85,8 @@ func TestIngressTLSExternalSecretAndMissingManager(t *testing.T) {
 					&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name + "-authkey", Namespace: namespace}},
 					&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretKey.Name, Namespace: namespace}},
 					&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name + "-targets", Namespace: namespace}},
-					&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}},
-					&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}},
+					&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "ingress-" + name, Namespace: namespace}},
+					&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "ingress-" + name, Namespace: namespace}},
 				} {
 					if err := client.IgnoreNotFound(kube.Delete(cleanup, obj)); err != nil {
 						t.Error("delete isolated ingress fixture object")
@@ -100,7 +101,7 @@ func TestIngressTLSExternalSecretAndMissingManager(t *testing.T) {
 			// observation (never Pods, never a non-zero replica count) so the barrier can clear.
 			observeScaleDown := func(ctx context.Context) {
 				var dep appsv1.Deployment
-				if kube.Get(ctx, key, &dep) != nil || dep.Spec.Replicas == nil || *dep.Spec.Replicas != 0 ||
+				if kube.Get(ctx, workloadKey, &dep) != nil || dep.Spec.Replicas == nil || *dep.Spec.Replicas != 0 ||
 					(dep.Status.ObservedGeneration == dep.Generation && dep.Status.Replicas == 0) {
 					return
 				}
@@ -152,7 +153,7 @@ func TestIngressTLSExternalSecretAndMissingManager(t *testing.T) {
 			waitTLS("TLSProbeFailed", &expiry, 15*time.Second) // no agent Pod exists in envtest
 			var beforeCM corev1.ConfigMap
 			var beforeDep appsv1.Deployment
-			if kube.Get(ctx, types.NamespacedName{Name: name + "-targets", Namespace: namespace}, &beforeCM) != nil || kube.Get(ctx, key, &beforeDep) != nil {
+			if kube.Get(ctx, types.NamespacedName{Name: name + "-targets", Namespace: namespace}, &beforeCM) != nil || kube.Get(ctx, workloadKey, &beforeDep) != nil {
 				t.Fatal("read external TLS workloads")
 			}
 			if json.Unmarshal([]byte(beforeCM.Data["targets.json"]), &envelope) != nil || len(envelope.Targets) != 1 {
@@ -181,7 +182,7 @@ func TestIngressTLSExternalSecretAndMissingManager(t *testing.T) {
 			waitTLS("TLSProbeFailed", &nextExpiry, 8*time.Second)
 			var afterCM corev1.ConfigMap
 			var afterDep appsv1.Deployment
-			if kube.Get(ctx, types.NamespacedName{Name: name + "-targets", Namespace: namespace}, &afterCM) != nil || kube.Get(ctx, key, &afterDep) != nil {
+			if kube.Get(ctx, types.NamespacedName{Name: name + "-targets", Namespace: namespace}, &afterCM) != nil || kube.Get(ctx, workloadKey, &afterDep) != nil {
 				t.Fatal("read rotated TLS workloads")
 			}
 			if !reflect.DeepEqual(beforeCM.Data, afterCM.Data) || !reflect.DeepEqual(beforeDep.Spec.Template, afterDep.Spec.Template) || beforeDep.Generation != afterDep.Generation {
