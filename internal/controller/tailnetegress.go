@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -39,6 +40,8 @@ type TailnetEgressReconciler struct {
 	OperatorImage         string
 	AgentImagePullSecrets []string
 	AgentResources        corev1.ResourceRequirements
+	// AgentScrapePeers may reach the agent health/metrics port besides the operator.
+	AgentScrapePeers []networkingv1.NetworkPolicyPeer
 }
 
 func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -273,7 +276,7 @@ func (r *TailnetEgressReconciler) applyChildren(ctx context.Context, eg *tnv1.Ta
 		return err
 	}
 	dep := agentDeployment(eg, tn, ns, image, r.AgentImagePullSecrets, r.AgentResources)
-	np := egressNetworkPolicy(eg, ns, r.OperatorNamespace)
+	np := egressNetworkPolicy(eg, ns, r.OperatorNamespace, r.AgentScrapePeers)
 	for _, obj := range []client.Object{cm, dep, np} {
 		if err := controllerutil.SetControllerReference(eg, obj, r.Scheme); err != nil {
 			return err

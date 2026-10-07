@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -116,7 +117,7 @@ func targetService(eg *tnv1.TailnetEgress, ns string, t tnv1.Target, listenPort 
 // CR status — without that second rule the operator's own probe is blocked and every target shows a
 // false NoGrant/unreachable even when the data plane works. Egress stays open, because the pod must
 // reach DERP and its peers to work at all.
-func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns, operatorNS string) *networkingv1.NetworkPolicy {
+func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns, operatorNS string, scrape []networkingv1.NetworkPolicyPeer) *networkingv1.NetworkPolicy {
 	peers := make([]networkingv1.NetworkPolicyPeer, 0, len(eg.Spec.ConsumerNamespaces))
 	for _, cns := range eg.Spec.ConsumerNamespaces {
 		peers = append(peers, networkingv1.NetworkPolicyPeer{
@@ -126,7 +127,7 @@ func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns, operatorNS string) *network
 		})
 	}
 	health := intstr.FromInt32(agentHealthPort)
-	return &networkingv1.NetworkPolicy{
+	np := &networkingv1.NetworkPolicy{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
 		ObjectMeta: metav1.ObjectMeta{Name: eg.Name, Namespace: ns, Labels: objLabels(eg.Name)},
 		Spec: networkingv1.NetworkPolicySpec{
@@ -147,6 +148,12 @@ func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns, operatorNS string) *network
 			},
 		},
 	}
+	if len(scrape) > 0 {
+		np.Spec.Ingress = append(np.Spec.Ingress, networkingv1.NetworkPolicyIngressRule{
+			From: slices.Clone(scrape), Ports: []networkingv1.NetworkPolicyPort{{Port: &health}},
+		})
+	}
+	return np
 }
 
 // nonRoot is the pod/container security context. Userspace tsnet needs no privileges and no device,

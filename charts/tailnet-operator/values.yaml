@@ -69,10 +69,12 @@ monitoring:
     # -- Scrape interval.
     interval: 30s
   podMonitor:
-    # -- Scrape generated agents on health TCP/9080 and gateways on kernel-health TCP/8080 + metrics-dns TCP/9153. Requires PodMonitor CRD and site-owned NetworkPolicy access for external scrapers.
+    # -- Scrape generated agents on health TCP/9080 and gateways on kernel-health TCP/8080 + metrics-dns TCP/9153. Requires PodMonitor CRD; allow your Prometheus through scrapeFrom.
     enabled: false
     # -- Additional PodMonitor labels for your Prometheus selector.
     labels: {}
+    # -- NetworkPolicy peers (namespaceSelector / podSelector / ipBlock) that may scrape the generated agents on TCP/9080, rendered into every agent NetworkPolicy next to the operator. Empty adds none. Gateways carry no policy.
+    scrapeFrom: []
     # -- Agent namespace selection. Set any: false with matchNames to restrict namespaces; any: false without names selects only the PodMonitor namespace.
     namespaceSelector:
       any: true

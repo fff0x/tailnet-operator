@@ -44,6 +44,8 @@ type TailnetIngressReconciler struct {
 	OperatorImage         string
 	AgentImagePullSecrets []string
 	AgentResources        corev1.ResourceRequirements
+	// AgentScrapePeers may reach the agent health/metrics port besides the operator.
+	AgentScrapePeers []networkingv1.NetworkPolicyPeer
 }
 
 func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -335,7 +337,7 @@ func (r *TailnetIngressReconciler) applyChildren(ctx context.Context, in *tnv1.T
 		return err
 	}
 	dep := ingressAgentDeploymentTLS(in, tn, ns, image, r.AgentImagePullSecrets, r.AgentResources, tlsState.plan)
-	np := ingressNetworkPolicy(in, ns, r.OperatorNamespace)
+	np := ingressNetworkPolicy(in, ns, r.OperatorNamespace, r.AgentScrapePeers)
 	for _, obj := range []client.Object{cm, dep, np} {
 		if err := controllerutil.SetControllerReference(in, obj, r.Scheme); err != nil {
 			return err

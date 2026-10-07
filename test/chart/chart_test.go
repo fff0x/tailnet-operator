@@ -309,6 +309,9 @@ func TestDefaultRender(t *testing.T) {
 	equal(t, "default inherited agent image", envVar(t, c, "OPERATOR_IMAGE").Value, c.Image)
 	equal(t, "default agent pull secrets", envVar(t, c, "AGENT_IMAGE_PULL_SECRETS").Value, "[]")
 	equal(t, "default agent resources", envVar(t, c, "AGENT_RESOURCES").Value, `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}`)
+	equal(t, "default scrape peers", envVar(t, c, "AGENT_SCRAPE_PEERS").Value, "[]")
+	_, c = operator(t, render(t, "monitoring: {podMonitor: {scrapeFrom: [{podSelector: {matchLabels: {app: prometheus}}}]}}"))
+	equal(t, "scrape peers", envVar(t, c, "AGENT_SCRAPE_PEERS").Value, `[{"podSelector":{"matchLabels":{"app":"prometheus"}}}]`)
 }
 
 // Pin the reviewed permission set, not merely a list of expected grants. This
@@ -739,6 +742,7 @@ func TestInvalidValues(t *testing.T) {
 		{"agent quantity bool", "agent: {resources: {limits: {memory: false}}}", "memory"},
 		{"agent quantity negative number", "agent: {resources: {requests: {cpu: -1}}}", "cpu"},
 		{"dashboard invalid kind", "monitoring: {dashboard: {enabled: true, kind: Secret}}", "kind"},
+		{"podMonitor empty scrape peer", "monitoring: {podMonitor: {scrapeFrom: [{}]}}", "scrapeFrom"},
 		{"podMonitor invalid interval", "monitoring: {podMonitor: {enabled: true, interval: invalid}}", "interval"},
 		{"podMonitor invalid selector", "monitoring: {podMonitor: {namespaceSelector: {matchLabels: {team: ops}}}}", "namespaceSelector"},
 		{"dashboard invalid JSON", "monitoring: {dashboard: {enabled: true, json: 'not JSON'}}", ""},

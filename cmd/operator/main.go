@@ -38,8 +38,14 @@ func main() {
 		l.Error(err, "invalid AGENT_RESOURCES")
 		os.Exit(1)
 	}
+	scrapePeers, err := parseAgentScrapePeers(os.Getenv("AGENT_SCRAPE_PEERS"))
+	if err != nil {
+		l.Error(err, "invalid AGENT_SCRAPE_PEERS")
+		os.Exit(1)
+	}
 	mgr, err := manager.New(ctrl.GetConfigOrDie(), manager.Options{
 		Namespace: ns, Image: image, AgentImagePullSecrets: imagePullSecrets, AgentResources: agentResources,
+		AgentScrapePeers:   scrapePeers,
 		LeaderElection:     *leaderElection,
 		MetricsBindAddress: ":8080", HealthProbeBindAddress: ":8081",
 	})

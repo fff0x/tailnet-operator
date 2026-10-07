@@ -250,6 +250,8 @@ spec:
               value: "[]"
             - name: AGENT_RESOURCES
               value: "{\"limits\":{\"memory\":\"128Mi\"},\"requests\":{\"cpu\":\"10m\",\"memory\":\"32Mi\"}}"
+            - name: AGENT_SCRAPE_PEERS
+              value: "[]"
           ports:
             - {name: metrics, containerPort: 8080}
             - {name: health, containerPort: 8081}

@@ -42,8 +42,9 @@
     "env": {"type": "object", "additionalProperties": false, "required": ["extra"], "properties": {"extra": {"type": "array", "items": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "minLength": 1}}}}}},
     "monitoring": {"type": "object", "additionalProperties": false, "required": ["serviceMonitor", "podMonitor", "rules", "dashboard"], "properties": {
       "serviceMonitor": {"type": "object", "additionalProperties": false, "required": ["enabled", "labels", "interval"], "properties": {"enabled": {"type": "boolean"}, "labels": {"$ref": "#/definitions/labels"}, "interval": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$"}}},
-      "podMonitor": {"type": "object", "additionalProperties": false, "required": ["enabled", "labels", "namespaceSelector", "interval"], "properties": {
+      "podMonitor": {"type": "object", "additionalProperties": false, "required": ["enabled", "labels", "namespaceSelector", "interval", "scrapeFrom"], "properties": {
         "enabled": {"type": "boolean"}, "labels": {"$ref": "#/definitions/labels"},
+        "scrapeFrom": {"type": "array", "items": {"type": "object", "minProperties": 1, "additionalProperties": false, "properties": {"namespaceSelector": {"type": "object"}, "podSelector": {"type": "object"}, "ipBlock": {"type": "object"}}}},
         "namespaceSelector": {"type": "object", "additionalProperties": false, "properties": {"any": {"type": "boolean"}, "matchNames": {"type": "array", "items": {"type": "string", "minLength": 1}}}},
         "interval": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$"}
       }},

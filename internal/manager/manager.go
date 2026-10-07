@@ -4,6 +4,7 @@ package manager
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -31,11 +32,13 @@ const LeaderElectionID = "tailnet-operator.tsunaro.io"
 // Options contains runtime inputs, not environment lookups. Use "0" to disable test listeners.
 // The zero value disables election so isolated integration tests must opt in explicitly.
 type Options struct {
-	Namespace              string
-	LeaderElection         bool
-	Image                  string
-	AgentImagePullSecrets  []string
-	AgentResources         corev1.ResourceRequirements
+	Namespace             string
+	LeaderElection        bool
+	Image                 string
+	AgentImagePullSecrets []string
+	AgentResources        corev1.ResourceRequirements
+	// AgentScrapePeers may reach the agents' health/metrics port in addition to the operator.
+	AgentScrapePeers       []networkingv1.NetworkPolicyPeer
 	MetricsBindAddress     string
 	HealthProbeBindAddress string
 }
@@ -85,13 +88,13 @@ func New(cfg *rest.Config, opts Options) (ctrl.Manager, error) {
 			Metrics: metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
 		}).SetupWithManager},
 		{"TailnetEgress", (&controller.TailnetEgressReconciler{
-			AgentResources: *opts.AgentResources.DeepCopy(),
-			Metrics:        metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
+			AgentResources: *opts.AgentResources.DeepCopy(), AgentScrapePeers: slices.Clone(opts.AgentScrapePeers),
+			Metrics: metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
 			OperatorImage: opts.Image, AgentImagePullSecrets: append([]string(nil), opts.AgentImagePullSecrets...),
 		}).SetupWithManager},
 		{"TailnetIngress", (&controller.TailnetIngressReconciler{
-			AgentResources: *opts.AgentResources.DeepCopy(),
-			Metrics:        metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
+			AgentResources: *opts.AgentResources.DeepCopy(), AgentScrapePeers: slices.Clone(opts.AgentScrapePeers),
+			Metrics: metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
 			Certificates: certificateClient, SecretReader: mgr.GetAPIReader(),
 			OperatorImage: opts.Image, AgentImagePullSecrets: append([]string(nil), opts.AgentImagePullSecrets...),
 		}).SetupWithManager},

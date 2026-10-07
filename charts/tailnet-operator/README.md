@@ -138,10 +138,11 @@ See [compatibility](../../docs/COMPATIBILITY.md#http-extension-compatibility-v05
 | monitoring.dashboard.json | string | `""` | Nonempty JSON replaces the bundled dashboard; custom JSON is not template evaluated. |
 | monitoring.dashboard.kind | string | `"GrafanaDashboard"` | GrafanaDashboard requires Grafana Operator v5 CRDs; ConfigMap supports dashboard sidecars. |
 | monitoring.dashboard.labels | object | `{"grafana_dashboard":"1"}` | Labels for the dashboard resource, including the optional ConfigMap sidecar label. |
-| monitoring.podMonitor.enabled | bool | `false` | Scrape generated agents on health TCP/9080 and gateways on kernel-health TCP/8080 + metrics-dns TCP/9153. Requires PodMonitor CRD and site-owned NetworkPolicy access for external scrapers. |
+| monitoring.podMonitor.enabled | bool | `false` | Scrape generated agents on health TCP/9080 and gateways on kernel-health TCP/8080 + metrics-dns TCP/9153. Requires PodMonitor CRD; allow your Prometheus through scrapeFrom. |
 | monitoring.podMonitor.interval | string | `"30s"` | Agent scrape interval. |
 | monitoring.podMonitor.labels | object | `{}` | Additional PodMonitor labels for your Prometheus selector. |
 | monitoring.podMonitor.namespaceSelector | object | `{"any":true}` | Agent namespace selection. Set any: false with matchNames to restrict namespaces; any: false without names selects only the PodMonitor namespace. |
+| monitoring.podMonitor.scrapeFrom | list | `[]` | NetworkPolicy peers (namespaceSelector / podSelector / ipBlock) that may scrape the generated agents on TCP/9080, rendered into every agent NetworkPolicy next to the operator. Empty adds none. Gateways carry no policy. |
 | monitoring.rules.apiKeyExpiryWarningSeconds | int | `604800` | API-key expiry warning threshold in seconds (7 days). For shorter key lifetimes, set below half-life to avoid warning before normal rotation. |
 | monitoring.rules.authKeyExpiryWarningSeconds | int | `86400` | Egress/ingress auth-key expiry warning threshold in seconds (1 day). For shorter key lifetimes, set below half-life to avoid warning before normal rotation. |
 | monitoring.rules.enabled | bool | `false` | Render a PrometheusRule. Requires Prometheus Operator CRDs. |

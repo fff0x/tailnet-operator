@@ -59,6 +59,8 @@ spec:
               value: {{ .Values.agent.imagePullSecrets | toJson | quote }}
             - name: AGENT_RESOURCES
               value: {{ .Values.agent.resources | default dict | toJson | quote }}
+            - name: AGENT_SCRAPE_PEERS
+              value: {{ .Values.monitoring.podMonitor.scrapeFrom | default list | toJson | quote }}
             {{- with .Values.env.extra }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

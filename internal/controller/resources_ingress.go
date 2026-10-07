@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -145,9 +146,9 @@ func ingressAuthKeySecret(in *tnv1.TailnetIngress, ns, key, expiresAt string) *c
 // ingressNetworkPolicy lets only the operator reach the agent's health port. Consumers are tailnet
 // peers, not in-cluster pods, so there is no consumer ingress rule; egress stays open because the
 // pod must reach DERP, the control server and its in-cluster backends to work at all.
-func ingressNetworkPolicy(in *tnv1.TailnetIngress, ns, operatorNS string) *networkingv1.NetworkPolicy {
+func ingressNetworkPolicy(in *tnv1.TailnetIngress, ns, operatorNS string, scrape []networkingv1.NetworkPolicyPeer) *networkingv1.NetworkPolicy {
 	health := intstr.FromInt32(agentHealthPort)
-	return &networkingv1.NetworkPolicy{
+	np := &networkingv1.NetworkPolicy{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
 		ObjectMeta: metav1.ObjectMeta{Name: ingressWorkloadName(in.Name), Namespace: ns, Labels: ingressObjLabels(in.Name)},
 		Spec: networkingv1.NetworkPolicySpec{
@@ -165,6 +166,12 @@ func ingressNetworkPolicy(in *tnv1.TailnetIngress, ns, operatorNS string) *netwo
 			},
 		},
 	}
+	if len(scrape) > 0 {
+		np.Spec.Ingress = append(np.Spec.Ingress, networkingv1.NetworkPolicyIngressRule{
+			From: slices.Clone(scrape), Ports: []networkingv1.NetworkPolicyPort{{Port: &health}},
+		})
+	}
+	return np
 }
 
 // ingressAgentDeployment runs one ingress agent pod (AGENT_MODE=ingress). Same security posture,
