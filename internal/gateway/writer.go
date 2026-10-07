@@ -613,7 +613,9 @@ func observeFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tailn
 	if c.Get(ctx, client.ObjectKey{Namespace: ns, Name: g.Name + "-auth"}, auth) != nil {
 		return bad()
 	}
-	checked, err := ReadGatewayAuthReceipt(auth, g, tn, ns, receipt.Auth.UID, now)
+	// The completion receipt proves the key already registered this node; an
+	// expired key must not block a running gateway (or its live DNS updates).
+	checked, err := readRetainedGatewayAuthReceipt(auth, g, tn, ns, receipt.Auth.UID, now)
 	if err != nil || checked != receipt.Auth {
 		return bad()
 	}

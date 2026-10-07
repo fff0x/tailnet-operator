@@ -43,7 +43,10 @@ IPv6, extra DNS zones and TCP forwards remain unsupported by this writer.
 The completion record (format 3) binds Gateway/Tailnet UIDs and hashes of the
 [identity fields](#spec-updates), not generations or full specs. It permits later
 metadata/status-only CR revision changes and the mutable spec changes listed below.
-Replaced state/resources, payload drift, expired auth or a changed identity field block observation.
+Replaced state/resources, payload drift or a changed identity field block observation.
+The auth key's expiry is a bootstrap condition only: once the completion record
+exists the key is spent, and its recorded (possibly past) expiry is bound as a
+value but no longer compared against the clock.
 A suspend/resume cycle no longer invalidates completion evidence.
 No keys are renewed and no resources are adopted, compensated or deleted
 outside the explicit [Deletion](#deletion) consent. The only workload write is
@@ -204,7 +207,8 @@ fields, expiry or changed scope block recovery. **Even metadata/status-only CR
 updates or Secret metadata updates block reuse**, because revisions must match.
 This strict reader is used during bootstrap. Completed-set observation uses the
 separate `<gateway>-fresh` record to tolerate status/metadata-only CR changes;
-Secret metadata changes and auth expiry still block it.
+Secret metadata changes still block it; auth expiry does not (the key is spent
+once the record exists), while the recorded expiry value must still match.
 The ConfigMap is the durable trust anchor: its create/update/delete permissions
 must be restricted as strictly as the Secret's. Immutability does not prevent
 an authorized actor from deleting and forging both objects. Recording the

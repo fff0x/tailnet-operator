@@ -36,6 +36,19 @@ type GatewayAuthReceipt struct {
 // expectedUID must be independently captured at Create and durably retained
 // before recovery. Passing secret.UID as the expectation proves nothing.
 func ReadGatewayAuthReceipt(secret *corev1.Secret, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, namespace string, expectedUID types.UID, now time.Time) (GatewayAuthReceipt, error) {
+	return readGatewayAuthReceipt(secret, g, tn, namespace, expectedUID, now, true)
+}
+
+// readRetainedGatewayAuthReceipt is ReadGatewayAuthReceipt for a set that already
+// carries a completion receipt. The key has registered its node by then and is
+// spent; whether its recorded expiry lies in the past no longer matters. Every
+// other binding (Secret name, UID, resourceVersion, key ID, recorded expiry
+// value) is still enforced, so a replaced Secret still blocks observation.
+func readRetainedGatewayAuthReceipt(secret *corev1.Secret, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, namespace string, expectedUID types.UID, now time.Time) (GatewayAuthReceipt, error) {
+	return readGatewayAuthReceipt(secret, g, tn, namespace, expectedUID, now, false)
+}
+
+func readGatewayAuthReceipt(secret *corev1.Secret, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, namespace string, expectedUID types.UID, now time.Time, requireUnexpired bool) (GatewayAuthReceipt, error) {
 	bad := func() (GatewayAuthReceipt, error) { return GatewayAuthReceipt{}, ErrGatewayAuthReceipt }
 	if secret == nil || g == nil || tn == nil || g.UID == "" || tn.UID == "" || now.IsZero() ||
 		g.Spec.AuthKeySecretRef != nil || g.Spec.Adoption != nil || string(g.Spec.TailnetRef.Name) != tn.Name ||
@@ -56,7 +69,7 @@ func ReadGatewayAuthReceipt(secret *corev1.Secret, g *tnv1.TailnetGateway, tn *t
 		return bad()
 	}
 	exp, err := time.Parse(time.RFC3339, secret.Annotations["tsunaro.io/auth-key-expires"])
-	if err != nil || !exp.After(now) || exp.After(now.Add(gatewayKeyLifetime+time.Second)) {
+	if err != nil || (requireUnexpired && !exp.After(now)) || exp.After(now.Add(gatewayKeyLifetime+time.Second)) {
 		return bad()
 	}
 	return GatewayAuthReceipt{SecretName: secret.Name, UID: secret.UID, Version: secret.ResourceVersion,

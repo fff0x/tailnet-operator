@@ -66,6 +66,13 @@ func TestGatewayAuthReceiptRejectsRebinding(t *testing.T) {
 	if got, err := ReadGatewayAuthReceipt(secret, g, tn, "operator", createdUID, minted.Add(25*time.Hour)); !errors.Is(err, ErrGatewayAuthReceipt) || got != (GatewayAuthReceipt{}) {
 		t.Fatal("expired key accepted")
 	}
+	// A completed set still observes with a spent key: same receipt, 25h later.
+	if got, err := readRetainedGatewayAuthReceipt(secret, g, tn, "operator", createdUID, minted.Add(25*time.Hour)); err != nil || got != receipt {
+		t.Fatal("retained reader rejected a spent key or altered the receipt")
+	}
+	if got, err := readRetainedGatewayAuthReceipt(secret, g, tn, "operator", "other-uid", minted.Add(25*time.Hour)); !errors.Is(err, ErrGatewayAuthReceipt) || got != (GatewayAuthReceipt{}) {
+		t.Fatal("retained reader accepted a replaced Secret")
+	}
 	if got, err := ReadGatewayAuthReceipt(secret, g, tn, "operator", "", now); !errors.Is(err, ErrGatewayAuthReceipt) || got != (GatewayAuthReceipt{}) {
 		t.Fatal("missing independent UID expectation accepted")
 	}
