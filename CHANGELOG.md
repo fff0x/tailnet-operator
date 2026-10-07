@@ -4,6 +4,20 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-07
+
+### Fixed
+
+- A fresh `TailnetGateway` fell into permanent `Ready=False/FreshBlocked` exactly
+  24 hours after creation: completed-set observation re-validated the minted
+  pre-auth key's expiry (`gatewayKeyLifetime`) and rejected the spent key. While
+  blocked, the live DNS reconciler (`UpdateDNSRevision`) did not run, so the
+  gateway's zone kept stale agent addresses after ingress restarts. Expiry is now
+  enforced only on the bootstrap paths (mint, record write, record recovery);
+  observation of a set with a completion receipt still binds Secret name, UID,
+  resourceVersion, key ID and the recorded expiry value, but no longer compares
+  that value against the clock. No re-mint, no Headscale write, no CRD change.
+
 ## [0.12.0] - 2026-10-07
 
 ### Release notes
