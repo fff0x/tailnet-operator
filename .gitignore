@@ -1,5 +1,8 @@
 /bin
 /dist
+# Local `go build` without -o drops the binary next to main.go
+/cmd/agent/agent
+/cmd/operator/operator
 result
 result-*
 *.pem
