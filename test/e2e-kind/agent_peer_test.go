@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,10 @@ func fixtureTLSVolume(name, secret string) corev1.Volume {
 
 const httpFixtureUser = "fixture"
 
+// A scope keeps one test's evidence files from colliding with another's; save() opens them O_EXCL.
+// The list stays explicit so an unreviewed caller cannot write outside its own directory.
+var peerEvidenceScopes = []string{"ingress-l4", "gateway-fresh", "restart-no-flap", "magicdns-rename", "egress-reach"}
+
 type httpPeerFixture struct {
 	f                       *fixture
 	ns                      *corev1.Namespace
@@ -100,7 +105,7 @@ func newHTTPPeerFixtureWithServingCA(t *testing.T, servingCA []byte) *httpPeerFi
 
 func newPeerFixture(t *testing.T, servingCA []byte, evidenceScope string) *httpPeerFixture {
 	t.Helper()
-	if evidenceScope != "" && ((evidenceScope != "ingress-l4" && evidenceScope != "gateway-fresh") || servingCA != nil) {
+	if evidenceScope != "" && (!slices.Contains(peerEvidenceScopes, evidenceScope) || servingCA != nil) {
 		t.Fatal("unsupported peer evidence scope")
 	}
 	if os.Getenv("E2E_KIND_HTTP_NETWORK_GATE") == "" {

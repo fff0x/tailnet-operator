@@ -20,6 +20,11 @@ if [[ $# == 1 && $1 == --http-only ]]; then
 elif [[ $# == 1 && $1 == --l4-only ]]; then
     test_pattern='^TestIngressL4$'
     test_timeout=10m
+elif [[ $# == 1 && $1 == --rest-only ]]; then
+    # The three remaining P1.4 gates share one bootstrap; each builds its own namespace, control
+    # plane and peer, so the budget is the sum of three fixtures, not of three clusters.
+    test_pattern='^Test(EgressReach|RestartNoFlap|MagicDNSRename)$'
+    test_timeout=20m
 elif [[ $# == 1 && $1 == --gateway-preflight-only ]]; then
     test_pattern='^TestGatewayKernelPrerequisites$'
     test_timeout=10m
