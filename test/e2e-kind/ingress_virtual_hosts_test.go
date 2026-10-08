@@ -243,8 +243,95 @@ watchTransition:
 	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(agent), agent) != nil || agent.UID != started.UID || len(agent.Status.ContainerStatuses) != 1 || agent.Status.ContainerStatuses[0].ContainerID != started.Status.ContainerStatuses[0].ContainerID || agent.Status.ContainerStatuses[0].RestartCount != 0 {
 		t.Fatal("v3 agent restarted during routing checks")
 	}
+	// Label the last unlabelled HTTP expose so nothing serves the base name any more. The base
+	// name stays the leading certificate SAN regardless, so the agent still terminates TLS for it
+	// and has to answer the request itself. Two HTTP exposes remain, which is what makes the
+	// answer a 404 naming the served hosts instead of a redirect to a single one.
+	unrouted := ingress.DeepCopy()
+	ingress.Spec.Exposes[0].DNSLabel = "app"
+	if f.kube.Patch(t.Context(), ingress, client.MergeFromWithOptions(unrouted, client.MergeFromWithOptimisticLock{})) != nil {
+		t.Fatal("labelling the base-name expose rejected")
+	}
+	wantNames = append(wantNames, "app.fixture.test")
+	slices.Sort(wantNames)
+	// Changing the expose set rolls the Deployment, and the fixture holds every new agent in the
+	// network gate until the test releases it — the same handshake the v2 to v3 retirement above
+	// goes through. Without it nothing reconverges and the certificate is never reissued.
+	retired := agent.DeepCopy()
+	eventually(t, "relabelled agent waits alone in the unchanged startup gate", func() bool {
+		var pods corev1.PodList
+		if f.kube.List(t.Context(), &pods, client.InNamespace(namespace), client.MatchingLabels{"app.kubernetes.io/name": "tailnet-ingress", "app.kubernetes.io/instance": ingress.Name}) != nil || len(pods.Items) != 1 {
+			return false
+		}
+		p := pods.Items[0]
+		if p.UID == retired.UID || p.DeletionTimestamp != nil || len(p.Status.InitContainerStatuses) != 1 || p.Status.InitContainerStatuses[0].State.Running == nil {
+			return false
+		}
+		*agent = p
+		return true
+	})
+	releaseFixturePod(t, f, agent)
+	started = agent.DeepCopy()
+	eventually(t, "base name remains a SAN after it stops being routed", func() bool {
+		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(ingress), ingress) != nil || ingress.Status.ObservedGeneration != ingress.Generation {
+			return false
+		}
+		for _, name := range []string{"TLSReady", "Ready"} {
+			c := meta.FindStatusCondition(ingress.Status.Conditions, name)
+			if c == nil || c.Status != metav1.ConditionTrue || c.ObservedGeneration != ingress.Generation {
+				return false
+			}
+		}
+		var reissued corev1.Secret
+		if f.kube.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: ingress.Status.TLSSecretName}, &reissued) != nil {
+			return false
+		}
+		pair, err := certificates.ParseServingPair(reissued.Data["tls.crt"], reissued.Data["tls.key"], primary)
+		if err != nil {
+			return false
+		}
+		names := slices.Clone(pair.Leaf.DNSNames)
+		slices.Sort(names)
+		sum := sha256.Sum256(pair.Leaf.Raw)
+		if !slices.Equal(names, wantNames) || hex.EncodeToString(sum[:]) == leaf {
+			return false
+		}
+		// check() compares against this leaf; the added SAN reissued it.
+		leaf, sans = hex.EncodeToString(sum[:]), names
+		return true
+	})
+	// The replacement agent is a new tailnet node, so the address captured before the roll is
+	// stale and every probe against it would simply time out.
+	target = ""
+	for _, value := range ingress.Status.TailnetIPs {
+		ip, err := netip.ParseAddr(value)
+		if err == nil && ip.Is4() && netip.MustParsePrefix("100.64.0.0/10").Contains(ip) {
+			target = value
+		}
+	}
+	if target == "" {
+		t.Fatal("relabelled agent has no tailnet IPv4")
+	}
+	// Not check(): it folds every mismatch into one timeout. Converge on the agent answering under
+	// the reissued leaf, then assert the status separately so a wrong answer names itself.
+	for _, h2 := range []bool{false, true} {
+		var got observation
+		eventually(t, "unrouted base name answered under the reissued leaf", func() bool {
+			got = observation{SNI: primary, Host: primary, HTTP2: h2}
+			raw, _ := json.Marshal(map[string]any{"target": target, "http2": h2, "sni": primary, "host": primary})
+			b, err := x.proxy(x.peer.Name, 9081, "probe", string(raw))
+			return err == nil && len(b) <= 4096 && json.Unmarshal(b, &got) == nil && got.Status != 0 && got.Leaf == leaf
+		})
+		results = append(results, got)
+		if got.Status != 404 || got.Backend || got.OK {
+			t.Fatalf("unrouted base name: status %d backend %v ok %v; want the agent's own 404", got.Status, got.Backend, got.OK)
+		}
+	}
+	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(agent), agent) != nil || agent.UID != started.UID || len(agent.Status.ContainerStatuses) != 1 || agent.Status.ContainerStatuses[0].RestartCount != 0 {
+		t.Fatal("relabelled agent restarted while serving the unrouted base name")
+	}
 	x.save("virtual-host-ingress.json", ingress)
 	x.save("virtual-host-agent-final.json", agent)
-	x.save("virtual-host-result.json", map[string]any{"realV2ScaleZeroObserved": drained, "oldPodAbsentBeforeV3GateRelease": true, "singleOwnedCertificate": true, "issuedSANs": sans, "http1AndHTTP2": true, "distinctBackends": true, "aliasRouted": true, "hostSNIMismatchRejected": true, "l4CoexistenceTested": true, "webSocketsTested": true})
-	t.Log("gate: observed real v2 scale-zero retirement, gated v3 replacement, two SNI backends + alias, HTTP1/HTTP2 Host!=SNI rejection, one owned Certificate and issued SAN union")
+	x.save("virtual-host-result.json", map[string]any{"realV2ScaleZeroObserved": drained, "oldPodAbsentBeforeV3GateRelease": true, "singleOwnedCertificate": true, "issuedSANs": sans, "http1AndHTTP2": true, "distinctBackends": true, "aliasRouted": true, "hostSNIMismatchRejected": true, "l4CoexistenceTested": true, "webSocketsTested": true, "unroutedBaseNameServed404": true})
+	t.Log("gate: observed real v2 scale-zero retirement, gated v3 replacement, two SNI backends + alias, HTTP1/HTTP2 Host!=SNI rejection, one owned Certificate and issued SAN union, unrouted base name answered 404 under the reissued leaf")
 }

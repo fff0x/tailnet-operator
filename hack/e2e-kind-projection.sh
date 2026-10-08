@@ -14,7 +14,9 @@ kernel_only=false
 gateway_only=false
 if [[ $# == 1 && $1 == --http-only ]]; then
     test_pattern='^TestIngressHTTP$'
-    test_timeout=18m
+    # 22m, not 18m: the virtual-host phase now also relabels the base-name expose, which rolls the
+    # agent through the fixture gate a third time and reissues the certificate.
+    test_timeout=22m
 elif [[ $# == 1 && $1 == --l4-only ]]; then
     test_pattern='^TestIngressL4$'
     test_timeout=10m
