@@ -28,7 +28,7 @@ func PublicCAConfigMap(ns *corev1.Namespace, name string, ca []byte, now time.Ti
 	return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns.Name, Labels: map[string]string{OwnerLabel: string(ns.UID)}}, Immutable: &yes, Data: map[string]string{controlCAKey: string(ca)}}, nil
 }
 
-// AgentCAWebhook applies only to matching ingress Pods in the one owned
+// AgentCAWebhook applies only to matching ingress or egress agent Pods in the one owned
 // namespace. This is test wiring, not an authorization boundary against writers
 // who can change namespace or Pod labels. The caller waits for the HTTPS server
 // before installing it, and removes it before deleting that server.
@@ -43,9 +43,12 @@ func AgentCAWebhook(ns *corev1.Namespace, name string, ca []byte, now time.Time)
 	return &admissionregv1.MutatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{OwnerLabel: string(ns.UID)}}, Webhooks: []admissionregv1.MutatingWebhook{{
 		Name: "agent-ca.fixture.tsunaro.io", AdmissionReviewVersions: []string{"v1"}, FailurePolicy: &fail, MatchPolicy: &exact, SideEffects: &none, ReinvocationPolicy: &never, TimeoutSeconds: &seconds,
 		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns.Name, OwnerLabel: string(ns.UID)}},
-		ObjectSelector:    &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "tailnet-ingress", "app.kubernetes.io/managed-by": "tailnet-operator"}},
-		Rules:             []admissionregv1.RuleWithOperations{{Operations: []admissionregv1.OperationType{admissionregv1.Create}, Rule: admissionregv1.Rule{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"pods"}, Scope: &scope}}},
-		ClientConfig:      admissionregv1.WebhookClientConfig{CABundle: append([]byte(nil), ca...), Service: &admissionregv1.ServiceReference{Namespace: ns.Name, Name: "fixture-admission", Path: &path, Port: &port}},
+		ObjectSelector: &metav1.LabelSelector{
+			MatchLabels:      map[string]string{"app.kubernetes.io/managed-by": "tailnet-operator"},
+			MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "app.kubernetes.io/name", Operator: metav1.LabelSelectorOpIn, Values: []string{"tailnet-ingress", "tailnet-egress"}}},
+		},
+		Rules:        []admissionregv1.RuleWithOperations{{Operations: []admissionregv1.OperationType{admissionregv1.Create}, Rule: admissionregv1.Rule{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"pods"}, Scope: &scope}}},
+		ClientConfig: admissionregv1.WebhookClientConfig{CABundle: append([]byte(nil), ca...), Service: &admissionregv1.ServiceReference{Namespace: ns.Name, Name: "fixture-admission", Path: &path, Port: &port}},
 	}}}, nil
 }
 

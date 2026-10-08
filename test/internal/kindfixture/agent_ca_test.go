@@ -37,6 +37,66 @@ func agentFixture(t *testing.T) (*admissionv1.AdmissionRequest, AgentCAConfig, c
 		Object: runtime.RawExtension{Raw: raw}}, cfg, pod
 }
 
+// asEgress rewrites the fixture into the other admitted agent class. Both must pass; the gate and
+// the control CA are what make either Pod safe to start, and neither depends on the mode.
+// declared=false mirrors the real egress Deployment, which omits AGENT_MODE and relies on the
+// agent binary's default.
+func asEgress(p *corev1.Pod, declared bool) {
+	p.Labels["app.kubernetes.io/name"] = "tailnet-egress"
+	env := p.Spec.Containers[0].Env
+	for i := range env {
+		if env[i].Name != "AGENT_MODE" {
+			continue
+		}
+		if declared {
+			env[i].Value = "egress"
+			return
+		}
+		p.Spec.Containers[0].Env = append(env[:i:i], env[i+1:]...)
+		return
+	}
+}
+
+func TestAgentCAPatchAcceptsBothAgentClasses(t *testing.T) {
+	for _, gate := range []string{"", ownedGateImage} {
+		for _, declared := range []bool{true, false} {
+			req, cfg, _ := agentFixture(t)
+			cfg.NetworkGateImage = gate
+			pod := hardenedFixturePod(t)
+			asEgress(&pod, declared)
+			req.Object.Raw, _ = json.Marshal(pod)
+			if !agentCAGatesEgress(t, req, cfg, gate != "") {
+				return
+			}
+		}
+	}
+}
+
+func agentCAGatesEgress(t *testing.T, req *admissionv1.AdmissionRequest, cfg AgentCAConfig, wantGate bool) bool {
+	t.Helper()
+	patch, err := AgentCAPatch(req, cfg)
+	if err != nil {
+		t.Error("egress agent rejected")
+		return false
+	}
+	var ops []patchOperation
+	if json.Unmarshal(patch, &ops) != nil {
+		t.Error("egress patch is not a JSON patch")
+		return false
+	}
+	// An egress agent must receive the same startup gate an ingress agent gets, otherwise widening
+	// admission would have let a tsnet Pod start without the network proof.
+	var gated bool
+	for _, op := range ops {
+		gated = gated || op.Path == "/spec/initContainers"
+	}
+	if gated != wantGate {
+		t.Error("egress agent did not receive the same startup gate as an ingress agent")
+		return false
+	}
+	return true
+}
+
 func TestAgentCAPatchPreservesProductionPod(t *testing.T) {
 	for _, existing := range []bool{true, false} {
 		req, cfg, original := agentFixture(t)
@@ -104,6 +164,19 @@ func TestAgentCAPatchRejectsUnexpectedPod(t *testing.T) {
 		"env indirect":     func(p *corev1.Pod) { p.Spec.Containers[0].Env[0].ValueFrom = &corev1.EnvVarSource{} },
 		"volume collision": func(p *corev1.Pod) { p.Spec.Volumes[0].Name = controlCAVolume },
 		"mount collision":  func(p *corev1.Pod) { p.Spec.Containers[0].VolumeMounts[0].MountPath = controlCAPath },
+		// Label and mode are admitted as a pair: a Pod claiming one role while running the other
+		// stays out, and a third workload class is not admitted at all. Only egress may omit the
+		// variable, so an ingress Pod without it is rejected rather than defaulted.
+		"egress mode under ingress label": func(p *corev1.Pod) { p.Spec.Containers[0].Env[1].Value = "egress" },
+		"ingress mode under egress label": func(p *corev1.Pod) { p.Labels["app.kubernetes.io/name"] = "tailnet-egress" },
+		"unknown workload":                func(p *corev1.Pod) { p.Labels["app.kubernetes.io/name"] = "tailnet-gateway" },
+		"missing mode under ingress label": func(p *corev1.Pod) {
+			p.Spec.Containers[0].Env = p.Spec.Containers[0].Env[:1]
+		},
+		"empty mode": func(p *corev1.Pod) {
+			asEgress(p, true)
+			p.Spec.Containers[0].Env[1].Value = ""
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			req, cfg, pod := agentFixture(t)

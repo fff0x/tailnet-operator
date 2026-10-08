@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"slices"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -58,7 +59,8 @@ func AgentCAPatch(req *admissionv1.AdmissionRequest, cfg AgentCAConfig) ([]byte,
 		return nil, ErrAgentCA
 	}
 	var extra any
-	if d.Decode(&extra) != io.EOF || pod.Labels["app.kubernetes.io/name"] != "tailnet-ingress" ||
+	wantMode, known := agentMode(pod.Labels)
+	if d.Decode(&extra) != io.EOF || !known ||
 		pod.Labels["app.kubernetes.io/managed-by"] != "tailnet-operator" || len(pod.Spec.Containers) != 1 ||
 		pod.Spec.HostNetwork || pod.Spec.HostPID || pod.Spec.HostIPC ||
 		pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
@@ -66,7 +68,7 @@ func AgentCAPatch(req *admissionv1.AdmissionRequest, cfg AgentCAConfig) ([]byte,
 	}
 	c := pod.Spec.Containers[0]
 	if c.Name != "agent" || c.Image != cfg.Image || len(c.Command) != 1 || c.Command[0] != "/tailnet-agent" || len(c.Args) != 0 ||
-		!literalEnv(c.Env, "SSL_CERT_FILE", controlCAPath) || !literalEnv(c.Env, "AGENT_MODE", "ingress") {
+		!literalEnv(c.Env, "SSL_CERT_FILE", controlCAPath) || !declaresMode(c.Env, wantMode) {
 		return nil, ErrAgentCA
 	}
 	for _, v := range pod.Spec.Volumes {
@@ -152,6 +154,29 @@ func AgentCAHandler(cfg AgentCAConfig) http.Handler {
 			TypeMeta: metav1.TypeMeta{APIVersion: "admission.k8s.io/v1", Kind: "AdmissionReview"}, Response: response,
 		})
 	})
+}
+
+// agentMode maps the workload label to the mode that Pod must declare. Returning the pair instead
+// of checking each value on its own keeps out a Pod that claims one role and runs the other, which
+// is what a plain "either label, either mode" widening would have allowed.
+func agentMode(labels map[string]string) (string, bool) {
+	switch labels["app.kubernetes.io/name"] {
+	case "tailnet-ingress":
+		return "ingress", true
+	case "tailnet-egress":
+		return "egress", true
+	}
+	return "", false
+}
+
+// declaresMode accepts the mode the Pod's workload label implies. An egress agent may leave
+// AGENT_MODE unset, because egress is the agent binary's default and the egress Deployment relies
+// on it. An ingress agent never gets that benefit: it has to say so, and its Deployment does.
+func declaresMode(vars []corev1.EnvVar, want string) bool {
+	if literalEnv(vars, "AGENT_MODE", want) {
+		return true
+	}
+	return want == "egress" && !slices.ContainsFunc(vars, func(v corev1.EnvVar) bool { return v.Name == "AGENT_MODE" })
 }
 
 func literalEnv(vars []corev1.EnvVar, name, value string) bool {
