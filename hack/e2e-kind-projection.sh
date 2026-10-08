@@ -150,7 +150,7 @@ absent() { local rc=0; p "$@" || rc=$?; [[ $rc == 1 ]]; }
 source_manifest() {
     (cd "$src"; sha256sum go.mod go.sum hack/e2e-kind-projection.sh test/e2e-kind/kind-http.yaml \
         test/e2e-kind/network-gate.py test/e2e-kind/Dockerfile.fixture test/e2e-kind/netprobe-pod.json test/e2e-kind/headscale-http.json \
-        test/e2e-kind/cmd/{netprobe,fixture,projection,proofverify,hold,netgate,controlprobe,httppeer,kernelcheck,gatewayprobe}/*.go \
+        test/e2e-kind/cmd/{netprobe,fixture,projection,proofverify,hold,netgate,controlprobe,httppeer,kernelcheck,gatewayprobe,egressprobe}/*.go \
         test/internal/{netproof,kindfixture,kernelcheck,gatewayprobe}/*.go test/e2e-kind/*.go test/e2e-kind/Dockerfile \
         test/e2e-kind/cert-manager-images.json test/e2e-kind/cert-manager-assets*.py \
         test/e2e-kind/gateway-images.json test/e2e-kind/gateway-assets*.py;
@@ -241,7 +241,7 @@ stage=build-source-offline
 source_manifest > "$out/source-before.sha256"
 source_recorded=true
 # Dependency caches must already be populated. No module/auth/network fallback.
-for binary in netprobe fixture projection hold proofverify netgate controlprobe httppeer kernelcheck gatewayprobe; do
+for binary in netprobe fixture projection hold proofverify netgate controlprobe httppeer kernelcheck gatewayprobe egressprobe; do
     target=$work/context/$binary
     [[ $binary != proofverify ]] || target=$work/proofverify
     (cd "$src"; run "${bins[go]}" build -trimpath -o "$target" "./test/e2e-kind/cmd/$binary") > "$out/$binary-build.log" 2>&1
@@ -256,11 +256,11 @@ printf '%s  headscale-linux-%s\n' "$hs_sha" "$hs_arch" > "$out/headscale-provena
 (cd "$src"; run "${bins[go]}" test -c -tags=e2e_kind -o "$work/projection.test" ./test/e2e-kind) > "$out/projection-build.log" 2>&1
 chmod 0755 "$work/projection.test"
 run "${bins[file]}" "$work/projection.test" >> "$out/static-binaries.txt"
-run "${bins[python3]}" -B -I -c 'import pathlib,sys; s=pathlib.Path(sys.argv[1]).read_text(); sys.exit(0 if len(s.splitlines())==12 and s.count("statically linked")==12 else 2)' "$out/static-binaries.txt"
+run "${bins[python3]}" -B -I -c 'import pathlib,sys; s=pathlib.Path(sys.argv[1]).read_text(); sys.exit(0 if len(s.splitlines())==13 and s.count("statically linked")==13 else 2)' "$out/static-binaries.txt"
 cp -- "$fixture/Dockerfile.fixture" "$work/context/Dockerfile"
 py render "$fixture/netprobe-pod.json" "$work/pod.json" "$cluster"
 # Keep private provenance hashes, not a second copy of source or tool state.
-sha256sum "$work/context/"{netprobe,fixture,projection,hold,netgate,controlprobe,headscale,httppeer,kernelcheck,gatewayprobe} "$work/proofverify" "$work/projection.test" > "$out/binaries.sha256"
+sha256sum "$work/context/"{netprobe,fixture,projection,hold,netgate,controlprobe,headscale,httppeer,kernelcheck,gatewayprobe,egressprobe} "$work/proofverify" "$work/projection.test" > "$out/binaries.sha256"
 
 mkdir -m 700 "$work/agent-image"
 for program in operator agent; do
