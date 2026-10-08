@@ -300,11 +300,11 @@ func TestGatewayFreshRunnerSelection(t *testing.T) {
 		`cmp "$out/gateway-cache.json" "$out/gateway-assets.json"`,
 		`"$fixture/gateway-assets.py" --check-import`,
 		`crictl inspecti "$ref" > "$out/gateway-$component-cri-image.json"`,
-		"httppeer,kernelcheck,gatewayprobe}/*.go",
+		"httppeer,kernelcheck,gatewayprobe,egressprobe}/*.go",
 		"kindfixture,kernelcheck,gatewayprobe}/*.go",
-		"httppeer kernelcheck gatewayprobe; do",
-		"httppeer,kernelcheck,gatewayprobe}",
-		`len(s.splitlines())==12 and s.count("statically linked")==12`,
+		"httppeer kernelcheck gatewayprobe egressprobe; do",
+		"httppeer,kernelcheck,gatewayprobe,egressprobe}",
+		`len(s.splitlines())==13 and s.count("statically linked")==13`,
 	} {
 		if !strings.Contains(string(b), required) {
 			t.Fatal("gateway runner bound selection/provenance missing")

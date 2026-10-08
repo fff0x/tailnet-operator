@@ -6,7 +6,8 @@ created. Neither touches an existing kube-context, Docker socket or host configu
 | Runner | Tests | Typical duration |
 | --- | --- | --- |
 | `hack/e2e-kind.sh` | `TestInstall`, `TestLeaderFailover` | 3–4 min |
-| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP`, `TestIngressL4`; opt-in gateway gates below | About 17 min for `--http-only`; full test-process budget 26 min, HTTP-only 18 min, L4-only 10 min (setup/cleanup additional) |
+| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP`, `TestIngressL4`; opt-in gateway gates below | About 17 min for `--http-only`; full test-process budget 26 min, HTTP-only 22 min, L4-only 10 min (setup/cleanup additional) |
+| `hack/e2e-kind-projection.sh --rest-only` | `TestEgressReach`, `TestRestartNoFlap`, `TestMagicDNSRename` | 20-minute test-process budget, about 7.5 min used; setup/cleanup additional |
 | `hack/e2e-kind-projection.sh --gateway-fresh-only` | `TestGatewayFreshPod` | 10-minute test-process budget; setup/cleanup additional |
 
 ```sh
