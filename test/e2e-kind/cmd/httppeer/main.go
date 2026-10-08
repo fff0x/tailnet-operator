@@ -33,9 +33,13 @@ import (
 )
 
 const (
-	publicDNS       = "http-agent.fixture.test"
-	virtualDNS      = "admin.fixture.test"
-	virtualAlias    = "admin-tailnet-system.fixture.test"
+	publicDNS    = "http-agent.fixture.test"
+	virtualDNS   = "admin.fixture.test"
+	virtualAlias = "admin-tailnet-system.fixture.test"
+	// MagicDNS of a node renamed to "renamed-agent": the fixture control plane serves
+	// <givenName>.fixture.test. Dialable like publicDNS, but never a valid SNI or Host — the rename
+	// gate probes L4, so widening allowedHTTPName would buy nothing.
+	renamedDNS      = "renamed-agent.fixture.test"
 	controlURL      = "https://fixture-headscale.tailnet-system.svc:8443"
 	rootPath        = "/control-ca/ca.pem"
 	servingRootPath = "/serving-ca/ca.pem"
@@ -191,6 +195,13 @@ func startFixture(key string, roots *x509.CertPool, denied bool) error {
 		return errRejected
 	}
 	defer l4Listener.Close()
+	// An egress agent dials this peer over the tailnet, which the Pod-network listener above cannot
+	// serve: tsnet hands inbound TCP only to listeners registered on its own stack.
+	tailnetL4Listener, err := peer.Listen("tcp", l4BackendAddr)
+	if err != nil {
+		return errRejected
+	}
+	defer tailnetL4Listener.Close()
 	backendMux := http.NewServeMux()
 	backendMux.Handle("/socket", webSocketBackendHandler(ip))
 	backendMux.Handle("/", backendHandler(ip))
@@ -206,16 +217,12 @@ func startFixture(key string, roots *x509.CertPool, denied bool) error {
 	}, func(ctx context.Context, input probeInput) httpACLProbeResult {
 		return probeHTTPACL(ctx, input, roots, peer.Dial)
 	}))
-	errs := make(chan error, 3)
+	errs := make(chan error, 4)
 	go func() { errs <- backend.Serve(backendListener) }()
 	go func() { errs <- control.Serve(controlListener) }()
 	l4Ctx, cancelL4 := context.WithCancel(ctx)
 	defer cancelL4()
-	l4Done := make(chan struct{})
-	go func() {
-		defer close(l4Done)
-		errs <- serveL4Backend(l4Ctx, l4Listener)
-	}()
+	l4Done := serveL4Listeners(l4Ctx, errs, l4Listener, tailnetL4Listener)
 	var result error
 	select {
 	case <-ctx.Done():
@@ -225,7 +232,7 @@ func startFixture(key string, roots *x509.CertPool, denied bool) error {
 		}
 	}
 	cancelL4()
-	<-l4Done // Includes closure of every active TCP backend connection.
+	l4Done() // Includes closure of every active TCP backend connection.
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	// Close also terminates connections remaining after the graceful deadline.
@@ -278,7 +285,7 @@ func tailnetIPv4(ip netip.Addr) bool {
 }
 
 func allowedTarget(target string) bool {
-	if target == publicDNS {
+	if target == publicDNS || target == renamedDNS {
 		return true
 	}
 	ip, err := netip.ParseAddr(target)

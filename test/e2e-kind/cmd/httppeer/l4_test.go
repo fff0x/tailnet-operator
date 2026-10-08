@@ -411,6 +411,37 @@ func loopbackL4Backend(t *testing.T) (*l4ObservedListener, context.CancelFunc, <
 	return observed, cancel, done
 }
 
+// The peer serves the exchange on two listeners at once: the Pod-network one and the tsnet one the
+// egress gate dials. Both must answer, and cancelling must stop both and report both outcomes.
+func TestL4ServesEveryListener(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	errs := make(chan error, 2)
+	var listeners []net.Listener
+	for range 2 {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		listeners = append(listeners, listener)
+	}
+	wait := serveL4Listeners(ctx, errs, listeners...)
+	for _, listener := range listeners {
+		got := probeL4(context.Background(), l4ProbeInput{Target: "100.64.0.9"}, func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", listener.Addr().String())
+		})
+		if got != (l4ProbeResult{OK: true, Connected: true}) {
+			t.Fatalf("listener %s did not complete the exchange: %+v", listener.Addr(), got)
+		}
+	}
+	cancel()
+	wait()
+	for range listeners {
+		if err := <-errs; err != nil {
+			t.Fatal("cancelled listener reported an error")
+		}
+	}
+}
+
 func TestL4LoopbackBackend(t *testing.T) {
 	if l4BackendAddr != ":8081" || l4ProbePort != "8443" || l4BackendSlots != 4 || l4NonceBytes != 32 || l4RequestPrefix == l4ResponsePrefix {
 		t.Fatal("fixed protocol changed")

@@ -338,12 +338,15 @@ func TestStrictProbeInput(t *testing.T) {
 }
 
 func TestTargetAllowlist(t *testing.T) {
-	for _, target := range []string{publicDNS, "100.64.0.0", "100.127.255.255", "100.99.1.2"} {
+	for _, target := range []string{publicDNS, renamedDNS, "100.64.0.0", "100.127.255.255", "100.99.1.2"} {
 		if !allowedTarget(target) {
 			t.Fatalf("rejected %s", target)
 		}
 	}
-	for _, target := range []string{"", "100.63.255.255", "100.128.0.0", "127.0.0.1", "192.168.1.1", "::ffff:100.64.0.1", "100.064.0.1", "100.64.0.1:443", "100.64.0.1%zone", "https://" + publicDNS, publicDNS + ":443", publicDNS + ".", "HTTP-AGENT.fixture.test", " " + publicDNS, "elsewhere.fixture.test", "100.64.0.1/path"} {
+	if allowedHTTPName(renamedDNS) {
+		t.Fatal("renamed MagicDNS name widened the SNI/Host allowlist")
+	}
+	for _, target := range []string{"", "100.63.255.255", "100.128.0.0", "127.0.0.1", "192.168.1.1", "::ffff:100.64.0.1", "100.064.0.1", "100.64.0.1:443", "100.64.0.1%zone", "https://" + publicDNS, publicDNS + ":443", publicDNS + ".", "HTTP-AGENT.fixture.test", " " + publicDNS, "elsewhere.fixture.test", "100.64.0.1/path", renamedDNS + ":443", renamedDNS + ".", " " + renamedDNS, "RENAMED-AGENT.fixture.test"} {
 		if allowedTarget(target) {
 			t.Fatalf("accepted %q", target)
 		}

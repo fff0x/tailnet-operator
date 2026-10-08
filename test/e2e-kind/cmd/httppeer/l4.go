@@ -153,6 +153,22 @@ func serveL4Conn(ctx context.Context, conn net.Conn) {
 	_ = writeL4Frame(conn, append([]byte(l4ResponsePrefix), digest[:]...))
 }
 
+// serveL4Listeners runs the same bounded exchange on every listener and returns a function that
+// waits for all of them. The peer needs two: the Pod-network one the ingress path reaches through
+// a Service, and a tsnet one, because an egress agent dials this peer over the tailnet and tsnet
+// delivers inbound TCP only to listeners registered on its own stack.
+func serveL4Listeners(ctx context.Context, errs chan<- error, listeners ...net.Listener) func() {
+	var done sync.WaitGroup
+	for _, listener := range listeners {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			errs <- serveL4Backend(ctx, listener)
+		}()
+	}
+	return done.Wait
+}
+
 // The caller supplies only the fixed :8081 Pod listener in production. Owning
 // the listener here permits loopback-only tests without any runtime overrides.
 // Cancellation or an accept failure closes every connection before returning.
