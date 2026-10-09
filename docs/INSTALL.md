@@ -537,7 +537,7 @@ listed in the [CHANGELOG](../CHANGELOG.md).
 | Situation | Action |
 | --- | --- |
 | A render is wrong but not yet applied (`DryRun`) | fix the base or the CR; nothing reached Headscale |
-| Headscale rejected the render (`PolicyApplied=False/PolicyRejected`) | the previous policy is still active; read the message, fix — the write is retried with backoff (15 s doubling to 5 min), a base/CR change retries at once |
+| Headscale rejected the render (`PolicyApplied=False/PolicyRejected`) | the previous policy is still active; read the message, fix — the write is retried with backoff (15 s doubling to 1 min; transport failures to 5 min), a base/CR change retries at once |
 | The operator must stop writing | `policy.mode: DryRun` — the operator only renders from now on |
 | Restore the Git policy on the server | `kubectl -n tailnet-system exec deploy/headscale -- headscale policy set -f /acl/policy` (mode DryRun first, or it is overwritten within 5 min) |
 | Leave database mode | `HEADSCALE_POLICY_MODE=file`, restart; the mounted file is authoritative again |

@@ -72,7 +72,7 @@ func TestPolicyFileModeGuard(t *testing.T) {
 			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: workingSecretName(tn.Name), Namespace: "operator"}, Data: map[string][]byte{apiKeyData: []byte("key")}}
 			c := fake.NewClientBuilder().WithScheme(s).WithObjects(tn, cm, secret).WithStatusSubresource(tn).Build()
 			r := TailnetPolicyReconciler{Client: c, Scheme: s, OperatorNamespace: "operator"}
-			r.retryAfter(tn.Name)
+			r.retryAfter(tn.Name, policyRequeue)
 			result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: tn.Name}})
 			if err != nil {
 				t.Fatal(err)

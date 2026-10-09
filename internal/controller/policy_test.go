@@ -111,21 +111,28 @@ func TestPolicyOwned(t *testing.T) {
 	}
 }
 
-// A rejected write is retried at 15s doubling to the regular 5-min cadence; success resets the
-// backoff and each Tailnet counts on its own.
+// A failed write is retried at 15s doubling up to the caller's limit: 1 min for a rejected policy
+// (the blocker clears on the Headscale side without a Kubernetes event), the regular 5-min cadence
+// for transport failures. Success resets the backoff and each Tailnet counts on its own.
 func TestPolicyRetryBackoff(t *testing.T) {
 	r := &TailnetPolicyReconciler{}
 	want := []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, policyRequeue, policyRequeue}
 	for i, w := range want {
-		if got := r.retryAfter("a"); got != w {
+		if got := r.retryAfter("a", policyRequeue); got != w {
 			t.Fatalf("attempt %d: got %s, want %s", i, got, w)
 		}
 	}
-	if got := r.retryAfter("b"); got != policyRetry {
+	if got := r.retryAfter("b", policyRequeue); got != policyRetry {
 		t.Fatalf("other tailnet: got %s, want %s", got, policyRetry)
 	}
 	r.clearRetry("a")
-	if got := r.retryAfter("a"); got != policyRetry {
+	if got := r.retryAfter("a", policyRequeue); got != policyRetry {
 		t.Fatalf("after clear: got %s, want %s", got, policyRetry)
+	}
+	r.clearRetry("a")
+	for i, w := range []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, time.Minute, time.Minute} {
+		if got := r.retryAfter("a", policyRejectedMax); got != w {
+			t.Fatalf("rejected attempt %d: got %s, want %s", i, got, w)
+		}
 	}
 }

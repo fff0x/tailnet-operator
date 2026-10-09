@@ -48,9 +48,11 @@ const (
 
 	policyRequeue = 5 * time.Minute
 	// policyRetry is the wait after the first rejected/failed write; it doubles per consecutive
-	// failure up to policyRequeue. A rejection caused by a node re-registering (test src "resolved
-	// to no IP addresses") clears within seconds; a broken base ends up at the regular 5-min cadence.
-	policyRetry = 15 * time.Second
+	// failure. A rejection caused by a node re-registering (test src "resolved to no IP addresses")
+	// or by a Headscale-side blocker (duplicate users) clears without any Kubernetes event, so
+	// rejected writes stay at policyRejectedMax; transport failures back off to policyRequeue.
+	policyRetry       = 15 * time.Second
+	policyRejectedMax = time.Minute
 )
 
 // TailnetPolicyReconciler owns the control server's policy for a Tailnet: it renders the base
@@ -69,8 +71,9 @@ type TailnetPolicyReconciler struct {
 	failures map[string]int // consecutive rejected/failed writes per Tailnet
 }
 
-// retryAfter records one more failed write for the Tailnet and returns the backoff before the next try.
-func (r *TailnetPolicyReconciler) retryAfter(name string) time.Duration {
+// retryAfter records one more failed write for the Tailnet and returns the backoff before the next
+// try, capped at limit.
+func (r *TailnetPolicyReconciler) retryAfter(name string, limit time.Duration) time.Duration {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.failures == nil {
@@ -78,7 +81,7 @@ func (r *TailnetPolicyReconciler) retryAfter(name string) time.Duration {
 	}
 	n := r.failures[name]
 	r.failures[name] = n + 1
-	return min(policyRetry<<min(n, 10), policyRequeue)
+	return min(policyRetry<<min(n, 10), limit)
 }
 
 func (r *TailnetPolicyReconciler) clearRetry(name string) {
@@ -278,7 +281,13 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if len(emsg) > 1024 {
 			emsg = emsg[:1024] + "…"
 		}
-		retryIn := r.retryAfter(tn.Name)
+		// A rejection is usually cleared on the Headscale side (users, tags) without any Kubernetes
+		// event, so only the retry cadence decides how fast the write recovers.
+		limit := policyRejectedMax
+		if reason == "ApplyFailed" {
+			limit = policyRequeue
+		}
+		retryIn := r.retryAfter(tn.Name, limit)
 		if reason == "ApplyFailed" {
 			// Transport error (Headscale restarting, NetworkPolicy): transient, retried with backoff.
 			l.Info("policy write failed; previous policy stays active, retrying", "reason", reason, "retryIn", retryIn, "error", err.Error())
