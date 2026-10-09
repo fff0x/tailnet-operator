@@ -201,8 +201,13 @@ type TailnetStatus struct {
 	// Expiry of the current working API key, drives the ApiKeyValid condition and its metric.
 	// +optional
 	APIKeyExpiresAt *metav1.Time `json:"apiKeyExpiresAt,omitempty"`
+	// Headscale user names that more than one user carries. Such a collision makes Headscale
+	// reject every policy write ("multiple users found"); condition UsersUnique reports it. Only
+	// the count is published, never a name.
+	// +optional
+	UserConflicts int32 `json:"userConflicts,omitempty"`
 	// Conditions: ApiReachable, ApiKeyValid, HeadscaleCompatible, PolicyMode, SplitDNS,
-	// PolicyRendered, PolicyApplied.
+	// UsersUnique, PolicyRendered, PolicyApplied.
 	// +optional
 	// +listType=map
 	// +listMapKey=type

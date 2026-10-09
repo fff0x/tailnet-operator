@@ -265,6 +265,12 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		r.Metrics.PolicyError(tn.Name, true)
 		reason := "PolicyRejected"
 		emsg := err.Error()
+		if meta.IsStatusConditionFalse(tn.Status.Conditions, "UsersUnique") {
+			// Headscale answers "multiple users found" (with the colliding e-mail addresses) to every
+			// policy write while two users share a name; the client never reads error bodies, so name
+			// the known cause from the UsersUnique verdict instead of a bare HTTP status.
+			emsg = "policy rejected: duplicate Headscale user names; see condition UsersUnique"
+		}
 		if liveErr != nil {
 			reason = "ApplyFailed"
 			emsg = fmt.Sprintf("read: %v; write: %v", liveErr, err)

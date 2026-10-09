@@ -31,7 +31,7 @@ type Metrics struct {
 	collectors                                                             []prometheus.Collector
 	ready, condition, target, expose, generated                            *prometheus.GaugeVec
 	apiExpiry, authExpiry, routesMissing, ingressExpiry, backends, applied *prometheus.GaugeVec
-	pending                                                                *prometheus.GaugeVec
+	pending, userConflicts                                                 *prometheus.GaugeVec
 	nodeOnline, nodeLastSeen                                               *prometheus.GaugeVec
 	policyApplyErrors                                                      *prometheus.CounterVec
 	approvals, requests                                                    *prometheus.CounterVec
@@ -62,6 +62,7 @@ func New() *Metrics {
 	m.target = gauge("tailnet_egress_target_state", "Current-generation target route reason; Present represents an empty successful route reason.", "namespace", "name", "target", "reason")
 	m.expose = gauge("tailnet_ingress_expose_reachable", "Current-generation expose backend reachability.", "namespace", "name", "expose")
 	m.generated = gauge("tailnet_policy_generated", "Generated entries in persisted policy status.", "tailnet", "kind")
+	m.userConflicts = gauge("tailnet_headscale_user_conflicts", "Number of Headscale user names carried by more than one user (status.userConflicts); such a collision makes Headscale reject every policy write. Absent without a current UsersUnique verdict.", "tailnet")
 	m.pending = gauge("tailnet_policy_pending", "One when Apply mode has a nonempty persisted rendered hash different from the applied hash; zero otherwise. Absent without policy status.", "tailnet")
 	m.writeDuration = histogram("tailnet_policy_write_duration_seconds", "SetPolicy operation latency including failures.", "tailnet")
 	m.approvals = counter("tailnet_route_approvals_replayed_total", "New routes successfully approved by replay, counted per route, not per request.", "tailnet")
@@ -161,13 +162,14 @@ func (m *Metrics) delete(id identity) {
 		m.apiExpiry.DeleteLabelValues(id.name)
 		m.applied.DeleteLabelValues(id.name)
 		m.pending.DeleteLabelValues(id.name)
+		m.userConflicts.DeleteLabelValues(id.name)
 	}
 	delete(m.objects, id)
 }
 
 func conditionType(s string) string {
 	switch s {
-	case "Ready", "ApiKeyValid", "ApiReachable", "PolicyMode", "HeadscaleCompatible", "SplitDNS", "PolicyRendered", "PolicyApplied", "TagKnown", "Registered", "ServiceConflict", "RoutesGranted", "TargetsReachable", "BackendsReachable", "PolicyGranted", "TLSReady", "TLSCleanup":
+	case "Ready", "ApiKeyValid", "ApiReachable", "PolicyMode", "HeadscaleCompatible", "SplitDNS", "UsersUnique", "PolicyRendered", "PolicyApplied", "TagKnown", "Registered", "ServiceConflict", "RoutesGranted", "TargetsReachable", "BackendsReachable", "PolicyGranted", "TLSReady", "TLSCleanup":
 		return s
 	default:
 		return "Other"
@@ -175,7 +177,7 @@ func conditionType(s string) string {
 }
 func reason(s string) string {
 	switch s {
-	case "Error", "Unreachable", "Unhealthy", "Reachable", "Rejected", "Valid", "CannotVerify", "Database", "File", "ProbeFailed", "Incompatible", "Compatible", "NoTailnet", "NoAPIKey", "InvalidTag", "InvalidHostname", "InvalidDNSName", "PolicyUnreadable", "Unknown", "PolicyPending", "TagUnknown", "Known", "AuthKey", "Apply", "ListNodes", "Conflict", "NotRegistered", "Registered", "AllGranted", "RoutesMissing", "AllReachable", "NotReady", "Ready", "PolicyDenied", "Granted", "BaseMissing", "BaseInvalid", "PolicyEmpty", "Rendered", "DryRun", "PolicyModeFile", "InSync", "PolicyRejected", "ApplyFailed", "Applied", "Present", "NotAdvertised", "NotApproved", "NoGrant",
+	case "Error", "Unreachable", "Unhealthy", "Reachable", "Rejected", "Valid", "CannotVerify", "Database", "File", "ProbeFailed", "Unique", "Duplicate", "Incompatible", "Compatible", "NoTailnet", "NoAPIKey", "InvalidTag", "InvalidHostname", "InvalidDNSName", "PolicyUnreadable", "Unknown", "PolicyPending", "TagUnknown", "Known", "AuthKey", "Apply", "ListNodes", "Conflict", "NotRegistered", "Registered", "AllGranted", "RoutesMissing", "AllReachable", "NotReady", "Ready", "PolicyDenied", "Granted", "BaseMissing", "BaseInvalid", "PolicyEmpty", "Rendered", "DryRun", "PolicyModeFile", "InSync", "PolicyRejected", "ApplyFailed", "Applied", "Present", "NotAdvertised", "NotApproved", "NoGrant",
 		"TLSReady", "TLSConfigurationMissing", "TLSConfigurationInvalid", "TLSInvalidDNSName",
 		"TLSSecretMissing", "TLSSecretInvalid", "TLSSecretConflict", "TLSSecretForbidden", "TLSSecretUnavailable",
 		"TLSCertificateInvalid", "TLSCertificateNotYetValid", "TLSCertificateExpired", "TLSCertificatePending",
@@ -267,6 +269,12 @@ func (m *Metrics) Observe(obj metav1.Object) {
 		m.generated.DeletePartialMatch(prometheus.Labels{"tailnet": o.Name})
 		m.applied.DeleteLabelValues(o.Name)
 		m.pending.DeleteLabelValues(o.Name)
+		m.userConflicts.DeleteLabelValues(o.Name)
+		for _, c := range conditions {
+			if c.Type == "UsersUnique" && c.ObservedGeneration == o.Generation && c.Status != metav1.ConditionUnknown {
+				m.userConflicts.WithLabelValues(o.Name).Set(float64(o.Status.UserConflicts))
+			}
+		}
 		if o.Status.Policy != nil {
 			p := o.Status.Policy
 			// AppliedAt deliberately stays fixed for unchanged InSync policies. Alert on

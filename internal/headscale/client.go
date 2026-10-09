@@ -136,7 +136,7 @@ func safeLabels(method, path string) (string, string) {
 	route := "unknown endpoint"
 	switch path {
 	case "/health", "/api/v1/health", "/api/v1/policy/check", "/api/v1/node", "/api/v1/preauthkey", "/api/v1/preauthkey/expire",
-		"/api/v1/apikey", "/api/v1/apikey/expire", "/api/v1/policy":
+		"/api/v1/apikey", "/api/v1/apikey/expire", "/api/v1/policy", "/api/v1/user":
 		route = path
 	default:
 		parts := strings.Split(path, "/")
@@ -203,6 +203,26 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 	}
 	return nil
+}
+
+// User is a Headscale user as listed by the API. Only identity fields are decoded; the operator
+// never copies Name, DisplayName or Email into a CR status (they are personal data).
+type User struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// ListUsers returns all users. Headscale rejects every policy write while two users share a
+// name ("multiple users found"), so the operator lists them to report the collision itself.
+func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
+	var out struct {
+		Users []User `json:"users"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/v1/user", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Users, nil
 }
 
 // ListNodes returns all nodes.

@@ -380,7 +380,7 @@ spec:
               conditions:
                 description: |-
                   Conditions: ApiReachable, ApiKeyValid, HeadscaleCompatible, PolicyMode, SplitDNS,
-                  PolicyRendered, PolicyApplied.
+                  UsersUnique, PolicyRendered, PolicyApplied.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -472,6 +472,13 @@ spec:
                     description: sha256 of the canonical rendered policy.
                     type: string
                 type: object
+              userConflicts:
+                description: |-
+                  Headscale user names that more than one user carries. Such a collision makes Headscale
+                  reject every policy write ("multiple users found"); condition UsersUnique reports it. Only
+                  the count is published, never a name.
+                format: int32
+                type: integer
               version:
                 description: Reported control-server version, for the operator log
                   and the printcolumn.

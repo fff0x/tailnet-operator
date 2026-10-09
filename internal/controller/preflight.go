@@ -3,6 +3,9 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -65,4 +68,53 @@ func setSplitDNSCondition(tn *tnv1.Tailnet) {
 	}
 	setCond(&tn.Status.Conditions, tn.Generation, "SplitDNS", metav1.ConditionUnknown, "CannotVerify",
 		fmt.Sprintf("Headscale has no DNS API; expected dns.nameservers.split.%s to point to your gateway DNS Service IP", zone))
+}
+
+// userConditions lists Headscale users and reports names shared by more than one user as
+// UsersUnique=False/Duplicate. Headscale refuses every policy write while such a collision exists
+// ("multiple users found"), so without this check the operator only notices at the next policy
+// change. The message carries counts and user IDs, never a name: user names are e-mail addresses.
+func userConditions(ctx context.Context, hs *headscale.Client, tn *tnv1.Tailnet) {
+	users, err := hs.ListUsers(ctx)
+	if err != nil {
+		tn.Status.UserConflicts = 0
+		setCond(&tn.Status.Conditions, tn.Generation, "UsersUnique", metav1.ConditionUnknown, "CannotVerify",
+			"could not list Headscale users; check API reachability, key validity and Headscale logs")
+		return
+	}
+	names, ids := duplicateUsers(users)
+	tn.Status.UserConflicts = int32(len(names))
+	if len(names) == 0 {
+		setCond(&tn.Status.Conditions, tn.Generation, "UsersUnique", metav1.ConditionTrue, "Unique",
+			fmt.Sprintf("%d Headscale user(s), no shared names", len(users)))
+		return
+	}
+	setCond(&tn.Status.Conditions, tn.Generation, "UsersUnique", metav1.ConditionFalse, "Duplicate",
+		fmt.Sprintf("%d user name(s) shared by Headscale user IDs %s; policy writes are rejected until the duplicates are removed (headscale users destroy)",
+			len(names), strings.Join(ids, ",")))
+}
+
+// duplicateUsers returns the shared names (count only matters to callers) and the sorted IDs of
+// every user involved in a collision. Comparison is exact: Headscale matches tokens literally.
+func duplicateUsers(users []headscale.User) (names []string, ids []string) {
+	byName := map[string][]string{}
+	for _, u := range users {
+		byName[u.Name] = append(byName[u.Name], u.ID)
+	}
+	for name, list := range byName {
+		if len(list) > 1 {
+			names = append(names, name)
+			ids = append(ids, list...)
+		}
+	}
+	sort.Strings(names)
+	sort.Slice(ids, func(i, j int) bool {
+		a, errA := strconv.Atoi(ids[i])
+		b, errB := strconv.Atoi(ids[j])
+		if errA != nil || errB != nil {
+			return ids[i] < ids[j]
+		}
+		return a < b
+	})
+	return names, ids
 }

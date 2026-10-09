@@ -104,6 +104,8 @@ func TestTailnetReconcilePreflight(t *testing.T) {
 					_, _ = w.Write([]byte(`{}`))
 				case "/api/v1/health":
 					_, _ = w.Write([]byte(`{"databaseConnectivity":` + tc.dbHealth + `}`))
+				case "/api/v1/user":
+					_, _ = w.Write([]byte(`{"users":[{"id":"1","name":"ops@example.test"}]}`))
 				default:
 					t.Errorf("unexpected endpoint %s", req.URL.Path)
 					http.NotFound(w, req)
@@ -128,7 +130,7 @@ func TestTailnetReconcilePreflight(t *testing.T) {
 				t.Fatal(err)
 			}
 			for typ, want := range map[string]string{"PolicyMode": tc.modeReason, "HeadscaleCompatible": tc.compatibility,
-				"ApiKeyValid": "Valid", "ApiReachable": tc.reachable, "SplitDNS": "CannotVerify"} {
+				"ApiKeyValid": "Valid", "ApiReachable": tc.reachable, "SplitDNS": "CannotVerify", "UsersUnique": "Unique"} {
 				if got := condReason(tn.Status.Conditions, typ); got != want {
 					t.Errorf("%s=%s, want %s", typ, got, want)
 				}
@@ -138,8 +140,8 @@ func TestTailnetReconcilePreflight(t *testing.T) {
 					t.Errorf("%s called %d times", path, n)
 				}
 			}
-			if len(calls) != 5 {
-				t.Fatalf("expected health + key validity + three probes; got %v", calls)
+			if len(calls) != 6 {
+				t.Fatalf("expected health + key validity + three probes + user list; got %v", calls)
 			}
 		})
 	}

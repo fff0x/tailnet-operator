@@ -205,6 +205,27 @@ func TestTailnetPolicyNoInventedReady(t *testing.T) {
 	}
 }
 
+// The conflict gauge mirrors status.userConflicts only while a current UsersUnique verdict exists.
+func TestUserConflicts(t *testing.T) {
+	m, reg := isolated(t)
+	tn := &tnv1.Tailnet{ObjectMeta: metav1.ObjectMeta{Name: "tn", Generation: 1}}
+	tn.Status.UserConflicts = 2
+	tn.Status.Conditions = []metav1.Condition{cond("UsersUnique", "Duplicate", metav1.ConditionFalse, 1)}
+	m.Observe(tn)
+	value(t, reg, "tailnet_headscale_user_conflicts", map[string]string{"tailnet": "tn"}, 2)
+	tn.Status.Conditions = []metav1.Condition{cond("UsersUnique", "CannotVerify", metav1.ConditionUnknown, 1)}
+	m.Observe(tn)
+	if len(samples(t, reg, "tailnet_headscale_user_conflicts")) != 0 {
+		t.Fatal("CannotVerify must not report a count")
+	}
+	tn.Status.Conditions = []metav1.Condition{cond("UsersUnique", "Duplicate", metav1.ConditionFalse, 1)}
+	m.Observe(tn)
+	m.Delete("Tailnet", "", "tn")
+	if len(samples(t, reg, "tailnet_headscale_user_conflicts")) != 0 {
+		t.Fatal("deleted Tailnet retains conflicts")
+	}
+}
+
 // Pending is a persisted desired/applied comparison, not an age-of-last-write alarm.
 func TestPolicyPending(t *testing.T) {
 	m, reg := isolated(t)
