@@ -37,6 +37,8 @@ func TestAgentDeploymentSecurity(t *testing.T) {
 				t.Fatal("container privilege restrictions changed")
 			}
 			stateMount, targetsMount, stateVolume, stateEnv, homeEnv, keyRef := false, false, false, false, false, false
+			// The agent has no default direction: every Deployment must say which one it runs.
+			var modeEnv string
 			for _, mount := range c.VolumeMounts {
 				if mount.Name == "state" {
 					stateMount = mount.MountPath == "/state" && !mount.ReadOnly
@@ -58,10 +60,15 @@ func TestAgentDeploymentSecurity(t *testing.T) {
 					homeEnv = env.Value == "/state"
 				case "TS_AUTHKEY":
 					keyRef = env.Value == "" && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil
+				case "AGENT_MODE":
+					modeEnv = env.Value
 				}
 			}
 			if !stateMount || !targetsMount || !stateVolume || !stateEnv || !homeEnv || !keyRef {
 				t.Fatal("writable state emptyDir, read-only config, or Secret reference changed")
+			}
+			if modeEnv != name {
+				t.Fatalf("agent direction not declared: AGENT_MODE=%q, want %q", modeEnv, name)
 			}
 		})
 	}

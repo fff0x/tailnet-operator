@@ -238,6 +238,8 @@ func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string,
 						SecurityContext: cSec,
 						Resources:       res,
 						Env: []corev1.EnvVar{
+							// Explicit, like the ingress Deployment: the agent has no default direction.
+							{Name: "AGENT_MODE", Value: "egress"},
 							{Name: "CONTROL_URL", Value: tn.Spec.Server},
 							{Name: "TS_HOSTNAME", Value: eg.Status.Hostname},
 							{Name: "TS_DEBUG_MTU", Value: fmt.Sprintf("%d", mtu)},

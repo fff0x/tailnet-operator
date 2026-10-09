@@ -1,10 +1,11 @@
 // Command tailnet-agent is the data plane: one per TailnetEgress or TailnetIngress CR. It joins the
 // tailnet as a userspace tsnet node (no NET_ADMIN, no /dev/net/tun) and forwards a fixed set of
-// connections. Direction is set by AGENT_MODE:
+// connections. Direction is set by AGENT_MODE, which has no default: the operator sets it on
+// every agent Deployment, and an agent that does not know its direction must not guess one.
 //
-//	egress  (default) — listen on a local port, Dial the far address over the tailnet
-//	                    (needs --accept-routes so netstack emits toward subnet-routed hosts)
-//	ingress           — Listen on the tailnet, Dial an in-cluster backend with the normal netns
+//	egress  — listen on a local port, Dial the far address over the tailnet
+//	          (needs --accept-routes so netstack emits toward subnet-routed hosts)
+//	ingress — Listen on the tailnet, Dial an in-cluster backend with the normal netns
 //
 // No SOCKS5, no second container: one tsnet stack plus the process's own netns is the whole hop.
 package main
@@ -34,11 +35,22 @@ func env(key, def string) string {
 	return def
 }
 
+// parseMode accepts exactly the two directions, spelled exactly. An unset variable is an error
+// rather than a default: an ingress Deployment that lost the variable would otherwise come up as
+// an egress and start dialling out instead of failing loudly.
+func parseMode(raw string) (string, error) {
+	switch raw {
+	case "egress", "ingress":
+		return raw, nil
+	}
+	return "", fmt.Errorf("AGENT_MODE must be set to egress or ingress, got %q", raw)
+}
+
 func main() {
 	authKey := os.Getenv("TS_AUTHKEY")
 	controlURL := os.Getenv("CONTROL_URL")
 	hostname := os.Getenv("TS_HOSTNAME")
-	mode := env("AGENT_MODE", "egress")
+	mode, modeErr := parseMode(os.Getenv("AGENT_MODE"))
 	targetsFile := env("TARGETS_FILE", "/config/targets.json")
 	healthAddr := env("HEALTH_ADDR", ":9080")
 	probeInterval, _ := time.ParseDuration(env("PROBE_INTERVAL", "5m"))
@@ -46,8 +58,8 @@ func main() {
 	if authKey == "" || controlURL == "" || hostname == "" {
 		log.Fatal("TS_AUTHKEY, CONTROL_URL and TS_HOSTNAME are required")
 	}
-	if mode != "egress" && mode != "ingress" {
-		log.Fatalf("AGENT_MODE must be egress or ingress, got %q", mode)
+	if modeErr != nil {
+		log.Fatal(modeErr)
 	}
 	// Never phone home; the operator carries the status the netmap already knows.
 	os.Setenv("TS_NO_LOGS_NO_SUPPORT", "1")

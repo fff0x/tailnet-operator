@@ -214,7 +214,8 @@ restart to add or remove a target:
   (including the base's `tests`) before storing, so a rejected render never becomes active. After a
   successful write it replays missed `autoApprovers` approvals (a route advertised before its
   approver existed) on the routers, so `NotApproved` heals without `headscale nodes approve-routes`.
-- **Data plane** — one agent pod per CR is a userspace tsnet node. `AGENT_MODE` sets the direction:
+- **Data plane** — one agent pod per CR is a userspace tsnet node. `AGENT_MODE` sets the direction
+  and has no default (the operator sets it on every agent Deployment; an unset value is a startup error):
   egress takes `--accept-routes` and `Dial`s the off-cluster address over the tailnet; ingress listens
   on the tailnet and `Dial`s an in-cluster backend; an `http` expose terminates TLS on that listener
   (SNI and Host bound to the ingress DNS name, certificate reloaded from the projected Secret) and

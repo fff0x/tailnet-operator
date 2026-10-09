@@ -4,6 +4,16 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Changed
+
+- The agent no longer defaults `AGENT_MODE` to `egress`. An unset or unknown
+  value is a startup error, and the egress Deployment now sets `AGENT_MODE=egress`
+  explicitly, as the ingress Deployment always did. An ingress agent that lost the
+  variable used to come up silently as an egress; it now fails loudly. Upgrade
+  the operator before or together with the agent image: an older operator renders
+  egress Deployments without the variable, and this agent refuses to start from
+  them. The chart ships both at matching versions.
+
 ## [0.12.1] - 2026-10-07
 
 ### Fixed
