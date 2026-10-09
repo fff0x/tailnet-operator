@@ -43,11 +43,12 @@ func probeL4Gone(t *testing.T, x *httpPeerFixture, label, address string) l4Obse
 // CoreDNS). associateNode matches candidates by GivenName, so the old node is never found again —
 // the agent rolls and re-registers as a new node with a new address and a new MagicDNS name.
 //
-// The gate therefore pins a divergence, not an invariant: status.dnsName and status.hosts are
-// rendered from the CR name, so after the rename they keep advertising a name MagicDNS no longer
-// serves while the CR reports Ready=True. That is a tracked finding (§F2.1, same family as the
-// unrouted base name), not something this test may quietly repair. If a later change makes the
-// status follow the hostname, this gate fails on purpose and has to be rewritten with that fix.
+// The gate pins the status contract: status.dnsName and status.hosts are the gateway-zone names
+// rendered from the CR name (served by the gateway's CoreDNS, not by MagicDNS) and therefore do not
+// move with spec.hostname; status.hostname is the MagicDNS identity and follows the rename. The
+// fixture zone fixture.test doubles as the MagicDNS base_domain because kind has no other resolver,
+// which is exactly the configuration the docs forbid — so here the unchanged dnsName is a name
+// MagicDNS no longer serves. That is a property of the fixture, not of the operator.
 func TestMagicDNSRename(t *testing.T) {
 	x := newPeerFixture(t, nil, "magicdns-rename")
 	f := x.f
@@ -127,8 +128,8 @@ func TestMagicDNSRename(t *testing.T) {
 		"agentPodReplaced":       agent.UID != retired.UID,
 		"onlineNodesWithNewName": onlineNew, "onlineNodesWithOldName": onlineOld,
 		"statusDNSName": current.Status.DNSName, "statusHosts": current.Status.Hosts,
-		"statusAdvertisesRetiredName": current.Status.DNSName == oldName,
-		"exchangeBeforeByOldName":     beforeByName, "exchangeAfterByNewName": afterByName,
+		"statusDNSNameHostnameIndependent": current.Status.DNSName == oldName,
+		"exchangeBeforeByOldName":          beforeByName, "exchangeAfterByNewName": afterByName,
 		"exchangeAfterByNewIPv4": afterByIP, "oldNameObservation": goneByName,
 		"recordTemplateRenameTested": false, "operatorOwnedZoneTested": false,
 	})
@@ -137,6 +138,9 @@ func TestMagicDNSRename(t *testing.T) {
 	}
 	if len(current.Status.Exposes) != 1 || !current.Status.Exposes[0].Reachable {
 		t.Fatal("renamed ingress does not report its L4 expose as reachable")
+	}
+	if current.Status.DNSName != oldName || current.Status.Hostname != "renamed-agent" {
+		t.Fatalf("status.dnsName must stay the zone name rendered from the CR name and status.hostname must follow the rename: dnsName=%q hostname=%q", current.Status.DNSName, current.Status.Hostname)
 	}
 	// Pinned divergence, see the doc comment: a fix has to replace this expectation.
 	if current.Status.DNSName != oldName || len(current.Status.Hosts) != 1 || current.Status.Hosts[0] != oldName {
