@@ -336,9 +336,11 @@ func TestDashboardLint(t *testing.T) {
 	for _, expr := range []string{
 		`min by (kind, namespace, name) (tailnet_node_online{namespace=~"$namespace",kind=~"$kind"})`,
 		`time() - min by (kind, namespace, name) (tailnet_node_last_seen_seconds{namespace=~"$namespace",kind=~"$kind"})`,
+		`sum by (reason) (tailnet_resource_condition{namespace=~"$namespace",kind=~"$kind",type="Ready"} == 1)`,
+		`sum by (namespace, name) (tailnet_egress_target_state{namespace=~"$namespace",reason="NotApproved"} == 1)`,
 	} {
 		if !queries[expr] {
-			t.Errorf("missing node observation query: %s", expr)
+			t.Errorf("missing dashboard query: %s", expr)
 		}
 	}
 	if !gatewayPlaceholder {
