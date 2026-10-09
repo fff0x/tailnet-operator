@@ -27,7 +27,7 @@ trap 'stage=interrupted; fail' HUP INT TERM
 # No command output, reference, credential or scanner diagnostic reaches CI logs.
 # All external operations, including local key derivation, have a hard deadline.
 run() { timeout --kill-after=10s 12m "$@"; }
-for tool in bash jq git crane syft trivy cosign timeout mktemp mkdir cp mv rm stat realpath; do
+for tool in bash jq git crane syft trivy cosign-legacy timeout mktemp mkdir cp mv rm stat realpath; do
   command -v "$tool" >/dev/null 2>&1 || fail
 done
 if ! work=$(mktemp -d "${TMPDIR:-/tmp}/audit-image.XXXXXXXX" 2>/dev/null); then fail; fi
@@ -69,15 +69,17 @@ printf '{}\n' >"$work/trivy.yaml"
 
 run syft version -o json >"$work/syft-version.json"
 run trivy version --format json >"$work/trivy-version.json"
-run cosign version --json >"$work/cosign-version.json"
+# The broker ships cosign v3 (OCI referrers bundles) beside cosign-legacy v2.5.0 and dual-signs
+# with both; zot and Kyverno read only the legacy tag form, so this audit stays on that binary.
+run cosign-legacy version --json >"$work/cosign-version.json"
 run crane version >"$work/crane-version"
-jq -e '.version == "1.52.0"' "$work/syft-version.json" >/dev/null
-jq -e '.Version == "0.74.0"' "$work/trivy-version.json" >/dev/null
+jq -e '.version == "1.54.1"' "$work/syft-version.json" >/dev/null
+jq -e '.Version == "0.75.0"' "$work/trivy-version.json" >/dev/null
 jq -e '.gitVersion == "v2.5.0"' "$work/cosign-version.json" >/dev/null
 crane_version=$(<"$work/crane-version")
 [[ $crane_version =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail
 # Local, fixed key only. No ambient keyless identity or trust-on-first-use.
-run cosign public-key --key "$COSIGN_KEY" >"$work/broker.pub"
+run cosign-legacy public-key --key "$COSIGN_KEY" >"$work/broker.pub"
 [[ -s "$work/broker.pub" ]] || fail
 if [[ $mode == check ]]; then
   printf 'image audit: tools and configuration checked (no registry operations)\n' >&3
@@ -141,7 +143,7 @@ jq -e -s '
 stage=signature
 # The publisher signs the index; its descriptors bind both child digests. Fixed-key
 # verification intentionally does not claim public Rekor transparency-log evidence.
-run cosign verify --key "$work/broker.pub" --insecure-ignore-tlog=true "$ref" >signature.json
+run cosign-legacy verify --key "$work/broker.pub" --insecure-ignore-tlog=true "$ref" >signature.json
 jq -e -s --arg digest "$index" --arg repo "$expected" '
   [ .[] | if type == "array" then .[] else . end ] |
   any(.[]; .critical.image["docker-manifest-digest"] == $digest and
@@ -254,7 +256,7 @@ fi
 
 verify_attestation() {
   local target=$1 digest=$2 kind=$3 predicate=$4 uri=$5
-  run cosign verify-attestation --key "$work/broker.pub" --insecure-ignore-tlog=true \
+  run cosign-legacy verify-attestation --key "$work/broker.pub" --insecure-ignore-tlog=true \
     --type "$kind" "$target" >verified.json
   # Exit zero alone is insufficient: require a verified DSSE envelope containing
   # this exact predicate and subject, not an older attestation of the same type.
@@ -275,7 +277,7 @@ verify_attestation() {
 for arch in amd64 arm64; do
   stage=sbom-attestation
   child=$(jq -r --arg arch "$arch" '.[] | select(.platform == ("linux/" + $arch)) | .digest' summaries.json)
-  run cosign attest --yes --key "$COSIGN_KEY" --tlog-upload=false --type spdxjson \
+  run cosign-legacy attest --yes --key "$COSIGN_KEY" --tlog-upload=false --type spdxjson \
     --predicate "$work/$arch-spdx.json" "$expected@$child"
   verify_attestation "$expected@$child" "$child" spdxjson "$work/$arch-spdx.json" https://spdx.dev/Document
 done
@@ -291,7 +293,7 @@ jq -n --arg source rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX --arg commit "$commit" --ar
   },
   runDetails: {
     metadata: {},
-    builder: {id:("oci://" + $builder),version:{syft:"1.52.0",trivy:"0.74.0",cosign:"2.5.0",crane:$crane}},
+    builder: {id:("oci://" + $builder),version:{syft:"1.54.1",trivy:"0.75.0",cosign:"2.5.0",crane:$crane}},
     byproducts: [{name:"post-publication-audit",mediaType:"application/json",content:({
       platforms:$scans[0],scanners:["vuln"],severities:["HIGH","CRITICAL"],
       databasePolicy:"fresh per-run cache; updates enabled",
@@ -300,7 +302,7 @@ jq -n --arg source rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX --arg commit "$commit" --ar
     } | tojson | @base64)}]
   }
 }' >provenance.json
-run cosign attest --yes --key "$COSIGN_KEY" --tlog-upload=false --type slsaprovenance1 \
+run cosign-legacy attest --yes --key "$COSIGN_KEY" --tlog-upload=false --type slsaprovenance1 \
   --predicate "$work/provenance.json" "$ref"
 verify_attestation "$ref" "$index" slsaprovenance1 "$work/provenance.json" https://slsa.dev/provenance/v1
 printf 'image audit: accepted (both platforms; verified SBOM and provenance attestations)\n' >&3

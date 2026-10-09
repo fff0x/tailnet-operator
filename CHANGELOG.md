@@ -13,6 +13,14 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   the operator before or together with the agent image: an older operator renders
   egress Deployments without the variable, and this agent refuses to start from
   them. The chart ships both at matching versions.
+- The post-publication image audit (`hack/audit-image.sh`) pins the tools the CI
+  broker v1.4.1 ships: syft 1.54.1, trivy 0.75.0, and `cosign-legacy` v2.5.0 for
+  every signature and attestation operation. The broker now dual-signs with
+  cosign v3 (OCI referrers bundles) and the legacy tag form; the audit stays on
+  the legacy binary because that is the form the registry's trust extension and
+  Kyverno verify. Every `main` build since 2026-10-08 had failed at the audit's
+  tool preflight after the broker upgrade; those commits were published without
+  SBOM or provenance attestations.
 
 ## [0.12.1] - 2026-10-07
 

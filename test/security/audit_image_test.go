@@ -65,7 +65,7 @@ func newAuditFixture(t *testing.T, scenario string) *auditFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"git", "crane", "syft", "trivy", "cosign"} {
+	for _, name := range []string{"git", "crane", "syft", "trivy", "cosign-legacy"} {
 		writeAuditFile(t, filepath.Join(bin, name), []byte("#!/usr/bin/env bash\nexec \"$AUDIT_TEST_BINARY\" '-test.run=^TestAuditToolProcess$' -- \"$0\" \"$@\"\n"), 0700)
 	}
 	key := filepath.Join(f.root, "synthetic.key")
@@ -262,7 +262,7 @@ func TestAuditTwoPlatforms(t *testing.T) {
 			}
 			deps := predicate.BuildDefinition.ResolvedDependencies
 			if len(deps) != 1 || deps[0].URI != auditRID || deps[0].Digest["gitCommit"] != auditCommit ||
-				predicate.RunDetails.Builder.ID != "oci://"+auditBuilder || predicate.RunDetails.Builder.Version["trivy"] != "0.74.0" ||
+				predicate.RunDetails.Builder.ID != "oci://"+auditBuilder || predicate.RunDetails.Builder.Version["trivy"] != "0.75.0" ||
 				!strings.Contains(predicate.BuildDefinition.BuildType, "radicle-bundle") {
 				t.Fatalf("untruthful/incomplete provenance: %s", b)
 			}
@@ -483,7 +483,7 @@ func TestAuditToolProcess(t *testing.T) {
 	}
 	for i, arg := range os.Args {
 		if arg == "--" {
-			os.Exit(auditMockTool(filepath.Base(os.Args[i+1]), os.Args[i+2:]))
+			os.Exit(auditMockTool(strings.TrimSuffix(filepath.Base(os.Args[i+1]), "-legacy"), os.Args[i+2:]))
 		}
 	}
 	os.Exit(99)
@@ -561,13 +561,13 @@ func auditMockTool(tool string, args []string) int {
 	if args[0] == "version" {
 		switch tool {
 		case "syft":
-			version := "1.52.0"
+			version := "1.54.1"
 			if scenario == "wrong-syft-version" {
 				version = "1.1.0"
 			}
 			return auditEmit(map[string]string{"version": version})
 		case "trivy":
-			version := "0.74.0"
+			version := "0.75.0"
 			if scenario == "wrong-trivy-version" {
 				version = "0.1.0"
 			}
@@ -662,7 +662,7 @@ func auditMockTool(tool string, args []string) int {
 			return 0
 		}
 		sbom := map[string]any{"spdxVersion": "SPDX-2.3", "SPDXID": "SPDXRef-DOCUMENT", "dataLicense": "CC0-1.0", "name": "test image " + source,
-			"documentNamespace": "https://example.invalid/sbom/123", "creationInfo": map[string]any{"created": "2026-01-01T00:00:00Z", "creators": []string{"Tool: syft-1.52.0"}},
+			"documentNamespace": "https://example.invalid/sbom/123", "creationInfo": map[string]any{"created": "2026-01-01T00:00:00Z", "creators": []string{"Tool: syft-1.54.1"}},
 			"packages": []any{map[string]string{"SPDXID": "SPDXRef-tailnet-agent", "name": "tailnet-agent"}}}
 		if scenario == "empty-spdx" {
 			sbom["packages"] = []any{}
