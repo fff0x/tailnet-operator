@@ -76,9 +76,8 @@ func (r *TailnetGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		message = "Gateway runtime is not available; no resources have been changed."
 	}
 	gw.Status.ObservedGeneration = gw.Generation
-	meta.RemoveStatusCondition(&gw.Status.Conditions, "WorkloadCurrent")
 	meta.RemoveStatusCondition(&gw.Status.Conditions, "ServiceReady")
-	for _, condition := range []string{"Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "Ready"} {
+	for _, condition := range []string{"Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "WorkloadCurrent", "Ready"} {
 		status := metav1.ConditionUnknown
 		if condition == "Ready" {
 			status = metav1.ConditionFalse

@@ -68,7 +68,8 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 		status, wReason, wMessage := r.reconcileWorkload(ctx, g, tn, observation)
 		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "WorkloadCurrent", Status: status, Reason: wReason, Message: wMessage, ObservedGeneration: g.Generation})
 	} else {
-		meta.RemoveStatusCondition(&g.Status.Conditions, "WorkloadCurrent")
+		// Not observed, not removed: an absent condition is indistinguishable from a never-reconciled CR.
+		meta.SetStatusCondition(&g.Status.Conditions, metav1.Condition{Type: "WorkloadCurrent", Status: metav1.ConditionUnknown, Reason: reason, Message: message, ObservedGeneration: g.Generation})
 	}
 	if observation.Completed {
 		meta.SetStatusCondition(&g.Status.Conditions, serviceReady(g, observation))
@@ -238,9 +239,8 @@ func (r *TailnetGatewayReconciler) reconcileTeardown(ctx context.Context, req ct
 	if reason == "TeardownBlocked" {
 		message = "Teardown blocked at step " + progress.Step + "; nothing further is deleted. Set deletionPolicy=Retain to release the finalizer and keep all resources."
 	}
-	meta.RemoveStatusCondition(&g.Status.Conditions, "WorkloadCurrent")
 	meta.RemoveStatusCondition(&g.Status.Conditions, "ServiceReady")
-	for _, name := range []string{"Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "Ready"} {
+	for _, name := range []string{"Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "WorkloadCurrent", "Ready"} {
 		status := metav1.ConditionUnknown
 		if name == "Ready" {
 			status = metav1.ConditionFalse

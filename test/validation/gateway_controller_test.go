@@ -218,10 +218,10 @@ func TestGatewaySuspendedController(t *testing.T) {
 	}
 	settled := func() bool {
 		obj := current()
-		if obj.Status.ObservedGeneration != obj.Generation || len(obj.Status.Conditions) != 6 {
+		if obj.Status.ObservedGeneration != obj.Generation || len(obj.Status.Conditions) != 7 {
 			return false
 		}
-		for _, typ := range []string{"Ready", "Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward"} {
+		for _, typ := range []string{"Ready", "Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "WorkloadCurrent"} {
 			c := meta.FindStatusCondition(obj.Status.Conditions, typ)
 			want := metav1.ConditionUnknown
 			if typ == "Ready" {

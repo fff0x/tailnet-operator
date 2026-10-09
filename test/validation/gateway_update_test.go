@@ -78,8 +78,8 @@ func gatewayUpdateCases(t *testing.T, newFixture func(*testing.T, bool) *gateway
 		f, _ := ready(t)
 		update(t, f, func(g *tnv1.TailnetGateway) { g.Spec.Suspend = ptr.To(true) })
 		f.reconcile("Suspended")
-		if meta.FindStatusCondition(f.g.Status.Conditions, "WorkloadCurrent") != nil {
-			t.Fatal("suspended gateway kept a stale WorkloadCurrent")
+		if c := meta.FindStatusCondition(f.g.Status.Conditions, "WorkloadCurrent"); c == nil || c.Status != metav1.ConditionUnknown || c.Reason != "Suspended" {
+			t.Fatalf("suspended gateway must report WorkloadCurrent=Unknown/Suspended, got %+v", c)
 		}
 		update(t, f, func(g *tnv1.TailnetGateway) { g.Spec.Suspend = ptr.To(false) })
 		f.reconcile("FreshRuntimeReady")

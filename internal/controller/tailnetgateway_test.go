@@ -25,7 +25,7 @@ import (
 
 const gatewayTestCanary = "synthetic-gateway-credential-do-not-emit"
 
-var gatewayTestConditionTypes = []string{"Ready", "Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward"}
+var gatewayTestConditionTypes = []string{"Ready", "Registered", "RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "WorkloadCurrent"}
 
 // Only Get(gateway) and Status().Patch(gateway) are available to the reconciler.
 // The deliberately nil embedded interfaces make any other client operation fail
