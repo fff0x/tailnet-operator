@@ -59,6 +59,17 @@ func ingressConfigVersion(in *tnv1.TailnetIngress) int {
 	return 0
 }
 
+// ingressPodAnnotations are the protocol markers plus the tag binding: the tag lives only in the
+// authkey, so a tag change must re-register the node and therefore rolls the pod.
+func ingressPodAnnotations(in *tnv1.TailnetIngress, tn *tnv1.Tailnet) map[string]string {
+	ann := ingressProtocolAnnotations(in)
+	if ann == nil {
+		ann = map[string]string{}
+	}
+	ann[annTag] = ingressTag(tn, in)
+	return ann
+}
+
 func ingressProtocolAnnotations(in *tnv1.TailnetIngress) map[string]string {
 	if version := ingressConfigVersion(in); version >= 2 {
 		return map[string]string{

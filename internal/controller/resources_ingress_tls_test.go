@@ -74,8 +74,8 @@ func TestIngressTLSResources(t *testing.T) {
 	}
 	plain := in.DeepCopy()
 	plain.Spec.Exposes[0].Mode = "l4"
-	if ingressAgentDeployment(plain, tn, plain.Namespace, "operator:test", nil, corev1.ResourceRequirements{}).Spec.Template.Annotations != nil {
-		t.Fatal("L4-only configuration must retain its legacy Pod template")
+	if ann := ingressAgentDeployment(plain, tn, plain.Namespace, "operator:test", nil, corev1.ResourceRequirements{}).Spec.Template.Annotations; ann[ingressProtocolAnnotation] != "" || len(ann) != 1 {
+		t.Fatal("L4-only configuration must carry no protocol marker, only the tag binding")
 	}
 	if dep.Namespace != in.Namespace || pod.SecurityContext.FSGroup == nil || *pod.SecurityContext.FSGroup != 65532 {
 		t.Fatal("TLS Secret must remain in the ingress namespace and readable by the nonroot agent")

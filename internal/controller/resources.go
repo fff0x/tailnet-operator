@@ -3,7 +3,9 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -12,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	"tsunaro.io/tailnet-operator/internal/keys"
 )
 
 const (
@@ -23,7 +26,43 @@ const (
 	targetsFile     = "targets.json"
 	// authKeySecretKey is the data key holding the pre-auth key in a CR's authkey Secret.
 	authKeySecretKey = "TS_AUTHKEY"
+	// Identity an authkey was minted for. Server and tag decide reuse; the Tailnet UID is
+	// recorded only (a re-created Tailnet CR against the same server keeps the key valid).
+	annServer     = "tsunaro.io/server"
+	annTag        = "tsunaro.io/tag"
+	annTailnetUID = "tsunaro.io/tailnet-uid"
 )
+
+// authKeyBinding is the identity an authkey Secret is bound to.
+func authKeyBinding(tn *tnv1.Tailnet, tag string) map[string]string {
+	return map[string]string{annServer: tn.Spec.Server, annTag: tag, annTailnetUID: string(tn.UID)}
+}
+
+// authKeyReuse decides whether the current authkey Secret still serves want. A key is reused while
+// it is neither expired nor due at half-life and its server and tag match; a Secret without binding
+// (legacy or transferred) counts as matching. relabel reports that the stored binding differs from
+// want and must be (re)written — without minting a new key.
+func authKeyReuse(cur *corev1.Secret, want map[string]string, lifetime time.Duration, now time.Time) (reuse, relabel bool) {
+	var exp time.Time
+	if s := cur.Annotations[annExpiresAt]; s != "" {
+		exp, _ = time.Parse(time.RFC3339, s)
+	}
+	if keys.Evaluate(exp, lifetime, now) != keys.OK {
+		return false, false
+	}
+	_, hasServer := cur.Annotations[annServer]
+	_, hasTag := cur.Annotations[annTag]
+	bound := hasServer || hasTag
+	if bound && (cur.Annotations[annServer] != want[annServer] || cur.Annotations[annTag] != want[annTag]) {
+		return false, false
+	}
+	for k, v := range want {
+		if cur.Annotations[k] != v {
+			relabel = true
+		}
+	}
+	return true, relabel
+}
 
 // selectorLabels identify one CR's pods and objects. Instance is the CR name, so two egress
 // identities in the same namespace never share a selector.
@@ -78,16 +117,18 @@ func targetsConfigMap(eg *tnv1.TailnetEgress, ns string, listen map[string]int32
 	}, nil
 }
 
-// authKeySecret carries the reusable ephemeral pre-auth key. expiresAt is annotated so the reconciler
-// can judge rotation without re-parsing the key.
-func authKeySecret(eg *tnv1.TailnetEgress, ns, key, expiresAt string) *corev1.Secret {
+// authKeySecret carries the reusable ephemeral pre-auth key. expiresAt and the binding are annotated
+// so the reconciler can judge rotation without re-parsing the key.
+func authKeySecret(eg *tnv1.TailnetEgress, ns, key, expiresAt string, binding map[string]string) *corev1.Secret {
+	ann := maps.Clone(binding)
+	ann[annExpiresAt] = expiresAt
 	return &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        authKeySecretName(eg.Name),
 			Namespace:   ns,
 			Labels:      objLabels(eg.Name),
-			Annotations: map[string]string{"tsunaro.io/expires-at": expiresAt},
+			Annotations: ann,
 		},
 		Type:       corev1.SecretTypeOpaque,
 		StringData: map[string]string{authKeySecretKey: key},
@@ -225,7 +266,8 @@ func agentDeployment(eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string,
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			Selector: &metav1.LabelSelector{MatchLabels: selectorLabels(eg.Name)},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: objLabels(eg.Name)},
+				// The tag lives only in the authkey: a tag change must re-register the node, so it rolls the pod.
+				ObjectMeta: metav1.ObjectMeta{Labels: objLabels(eg.Name), Annotations: map[string]string{annTag: egressTag(tn, eg)}},
 				Spec: corev1.PodSpec{
 					SecurityContext:              podSec,
 					AutomountServiceAccountToken: &automount,

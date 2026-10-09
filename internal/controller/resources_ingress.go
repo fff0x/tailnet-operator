@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -129,14 +130,16 @@ func ingressExposesConfigMap(in *tnv1.TailnetIngress, ns string, plan ingressTLS
 
 // ingressAuthKeySecret carries the reusable ephemeral pre-auth key for an ingress node. Same shape
 // as the egress one; kept separate because it labels and owner-references the TailnetIngress.
-func ingressAuthKeySecret(in *tnv1.TailnetIngress, ns, key, expiresAt string) *corev1.Secret {
+func ingressAuthKeySecret(in *tnv1.TailnetIngress, ns, key, expiresAt string, binding map[string]string) *corev1.Secret {
+	ann := maps.Clone(binding)
+	ann[annExpiresAt] = expiresAt
 	return &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        authKeySecretName(in.Name),
 			Namespace:   ns,
 			Labels:      ingressObjLabels(in.Name),
-			Annotations: map[string]string{annExpiresAt: expiresAt},
+			Annotations: ann,
 		},
 		Type:       corev1.SecretTypeOpaque,
 		StringData: map[string]string{authKeySecretKey: key},
@@ -198,7 +201,7 @@ func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			Selector: &metav1.LabelSelector{MatchLabels: ingressSelectorLabels(in.Name)},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: ingressObjLabels(in.Name), Annotations: ingressProtocolAnnotations(in)},
+				ObjectMeta: metav1.ObjectMeta{Labels: ingressObjLabels(in.Name), Annotations: ingressPodAnnotations(in, tn)},
 				Spec: corev1.PodSpec{
 					SecurityContext:              podSec,
 					AutomountServiceAccountToken: &automount,

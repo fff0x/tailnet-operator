@@ -440,7 +440,7 @@ Full procedures in [INSTALL §9](INSTALL.md#9-rollback).
 | --- | --- | --- | --- |
 | Bootstrap API key | Secret `headscale-bootstrap` (yours) | as created | manual — replace the Secret before it expires; the operator only reads it |
 | Working API key | Secret `corp-apikey` (operator) | `apiKeyLifetime` (720h) | automatic at half-life, verified before the old one is expired |
-| Pre-auth key per CR | Secret `<cr>-authkey` (operator) | `authKeyLifetime` (168h) | automatic at half-life; a restarted agent re-registers with it |
+| Pre-auth key per CR | Secret `<cr>-authkey` (operator) | `authKeyLifetime` (168h) | automatic at half-life, immediately when the control server or the effective tag changes (the agent pod restarts and re-registers); a restarted agent re-registers with it |
 
 ```sh
 kubectl get tailnet corp -o jsonpath='{.status.apiKeyExpiresAt}'      # working key

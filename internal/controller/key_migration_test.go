@@ -147,6 +147,9 @@ func TestTransferredKeysReuseCredentials(t *testing.T) {
 				if kind == "Tailnet" && updated.Annotations[annPrefix] != headscale.PrefixOf(key) {
 					t.Fatal("canonical working-key prefix was not rebuilt")
 				}
+				if kind != "Tailnet" && (updated.Annotations[annServer] != server.URL || updated.Annotations[annTag] != "tag:app" || updated.Annotations[annTailnetUID] != string(tn.UID)) {
+					t.Fatal("transferred authkey was not bound to its effective identity")
+				}
 			})
 		}
 	}

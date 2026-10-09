@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -23,7 +24,6 @@ import (
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/headscale"
-	"tsunaro.io/tailnet-operator/internal/keys"
 	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 	"tsunaro.io/tailnet-operator/internal/naming"
 	"tsunaro.io/tailnet-operator/internal/ports"
@@ -208,9 +208,9 @@ func (r *TailnetEgressReconciler) readWorkingKey(ctx context.Context, tnName str
 	return v, nil
 }
 
-// ensureAuthKey mints (or rotates at half-life) the reusable ephemeral pre-auth key and writes it to
-// the CR's authkey Secret. Reusable so a pod restart re-registers on its own; ephemeral so a deleted
-// CR's node ages out by itself.
+// ensureAuthKey mints (or rotates at half-life, or re-mints when server or tag changed) the reusable
+// ephemeral pre-auth key and writes it to the CR's authkey Secret. Reusable so a pod restart
+// re-registers on its own; ephemeral so a deleted CR's node ages out by itself.
 func (r *TailnetEgressReconciler) ensureAuthKey(ctx context.Context, eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, hs *headscale.Client, tag string) (*time.Time, error) {
 	lifetime := tn.Spec.AuthKeyLifetime.Duration
 	if lifetime == 0 {
@@ -218,18 +218,26 @@ func (r *TailnetEgressReconciler) ensureAuthKey(ctx context.Context, eg *tnv1.Ta
 	}
 	now := time.Now()
 
+	binding := authKeyBinding(tn, tag)
 	var cur corev1.Secret
-	var curExp time.Time
 	if err := r.Get(ctx, types.NamespacedName{Namespace: eg.Namespace, Name: authKeySecretName(eg.Name)}, &cur); err == nil {
-		if s := cur.Annotations[annExpiresAt]; s != "" {
-			curExp, _ = time.Parse(time.RFC3339, s)
+		if reuse, relabel := authKeyReuse(&cur, binding, lifetime, now); reuse {
+			if relabel {
+				// Legacy or transferred Secret, or a re-created Tailnet CR: record the binding without rotating.
+				before := cur.DeepCopy()
+				if cur.Annotations == nil {
+					cur.Annotations = map[string]string{}
+				}
+				maps.Copy(cur.Annotations, binding)
+				if err := r.Patch(ctx, &cur, client.MergeFrom(before)); err != nil {
+					return nil, fmt.Errorf("bind authkey: %w", err)
+				}
+			}
+			curExp, _ := time.Parse(time.RFC3339, cur.Annotations[annExpiresAt])
+			return &curExp, nil
 		}
 	} else if !apierrors.IsNotFound(err) {
 		return nil, err
-	}
-
-	if keys.Evaluate(curExp, lifetime, now) == keys.OK {
-		return &curExp, nil
 	}
 
 	exp := now.Add(lifetime)
@@ -242,7 +250,7 @@ func (r *TailnetEgressReconciler) ensureAuthKey(ctx context.Context, eg *tnv1.Ta
 	if err != nil {
 		return nil, fmt.Errorf("mint pre-auth key: %w", err)
 	}
-	sec := authKeySecret(eg, eg.Namespace, pak.Key, exp.UTC().Format(time.RFC3339))
+	sec := authKeySecret(eg, eg.Namespace, pak.Key, exp.UTC().Format(time.RFC3339), binding)
 	if err := controllerutil.SetControllerReference(eg, sec, r.Scheme); err != nil {
 		return nil, err
 	}

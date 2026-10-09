@@ -4,80 +4,15 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
-### Fixed
-
-- Test flake `TestVirtualHostReloadFencesDelayedSNIMetrics` (cmd/agent): the metric
-  snapshot could race the new generation's own byte accounting, which the HTTP
-  listener records after `Conn.Write` returns. The test now closes its keep-alive
-  connection and waits for the connection gauge to drop before snapshotting; the
-  fencing assertion itself is unchanged. No runtime change.
-
-## [0.13.0] - 2026-10-09
-
-### Added
-
-- `Tailnet` condition `UsersUnique` and gauge `tailnet_headscale_user_conflicts`
-  (`status.userConflicts`): the operator lists Headscale users every reconcile
-  and reports names shared by more than one user. Headscale rejects every policy
-  write while such a collision exists (`multiple users found`), which used to
-  surface only as `PolicyApplied=False/PolicyRejected` with a bare HTTP status;
-  that message now points at `UsersUnique`. Only the count and the user IDs are
-  published, never a name. The check is informational and does not block writes.
-- Dashboard: row 2 gains a stacked bar chart of resources per active `Ready`
-  reason, row 3 a history of egress targets in `NotApproved`.
-
 ### Changed
 
-- `Ready=False` on `TailnetEgress` and `TailnetIngress` now repeats the reason
-  and message of the first blocking condition (egress: `Registered`,
-  `RoutesGranted`, `TargetsReachable`; ingress: `Registered`, `PolicyGranted`,
-  `BackendsReachable`) instead of the generic `NotReady`, so the
-  `TailnetResourceNotReady` alert label and the dashboard name the failure class.
-  `NotReady` remains only before the first complete reconcile.
-- `TailnetGateway` keeps `WorkloadCurrent` as `Unknown/Suspended`,
-  `Unknown/RuntimeUnavailable` or `Unknown/TearingDown` instead of removing the
-  condition; a suspended or draining gateway now shows seven conditions.
-- The agent no longer defaults `AGENT_MODE` to `egress`. An unset or unknown
-  value is a startup error, and the egress Deployment now sets `AGENT_MODE=egress`
-  explicitly, as the ingress Deployment always did. An ingress agent that lost the
-  variable used to come up silently as an egress; it now fails loudly. Upgrade
-  the operator before or together with the agent image: an older operator renders
-  egress Deployments without the variable, and this agent refuses to start from
-  them. The chart ships both at matching versions.
-- The post-publication image audit (`hack/audit-image.sh`) pins the tools the CI
-  broker v1.4.1 ships: syft 1.54.1, trivy 0.75.0, and `cosign-legacy` v2.5.0 for
-  every signature and attestation operation. The broker now dual-signs with
-  cosign v3 (OCI referrers bundles) and the legacy tag form; the audit stays on
-  the legacy binary because that is the form the registry's trust extension and
-  Kyverno verify. Every `main` build since 2026-10-08 had failed at the audit's
-  tool preflight after the broker upgrade; those commits were published without
-  SBOM or provenance attestations. The same broker also writes `artifactType`
-  (image config) and empty base-image annotations into every index descriptor;
-  the audit's index contract now accepts exactly that and still rejects any
-  other artifact type or key.
-
-### Security
-
-- Go 1.26.9 and `golang.org/x/net` v0.60.0: `govulncheck` reported ten reachable
-  `net/http`, `net/textproto` and `crypto/tls` advisories (GO-2026-6603 … 6617)
-  against Go 1.26.7 / x/net v0.58.0, on the agent's TLS and health paths among
-  others. The module now requires Go 1.26.9, the CI test image is pinned to it,
-  and the scan is clean with the fixed toolchain. The single remaining finding
-  is the unfixed `x/crypto/openpgp` advisory (GO-2026-5932) in a module we
-  require but never import.
-
-### Documentation
-
-- Gateway reference: when to set `routes.advertiseEgressTargets: false`, why
-  the DNS zone's `NS`/SOA primary point at the apex itself, and that container
-  images are the only mutable part of the gateway Pod template.
-- `status.dnsName`/`status.hosts` are gateway-zone names rendered from the CR
-  name and do not follow `spec.hostname`; `status.hostname` is the MagicDNS
-  identity. INSTALL and USAGE now state that the `ingressNameTemplate` zone must
-  differ from the MagicDNS `base_domain`, and the Kind rename test pins the
-  invariant instead of recording it as a divergence.
-
-## [0.12.1] - 2026-10-07
+- Pre-auth keys are bound to the identity they were minted for: the authkey Secret carries
+  `tsunaro.io/server`, `tsunaro.io/tag` and `tsunaro.io/tailnet-uid`. A key is reused only while
+  its server and effective tag match the CR; a changed server or tag mints a new key at once and the
+  agent pod restarts so the node re-registers with the new identity (the tag is now a pod-template
+  annotation; the Tailnet UID is recorded only). Legacy and transferred Secrets without a binding
+  keep their key and are labelled in place — `TestTransferredKeysReuseCredentials` still holds.
+  Upgrading rolls every agent pod once because the pod template changed.
 
 ### Fixed
 

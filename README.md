@@ -201,7 +201,8 @@ restart to add or remove a target:
 - **Tailnet** — mints the working API key from the bootstrap key, rotates it at half-life (new key
   verified before the old one is expired), reports reachability.
 - **Egress / Ingress** — per CR: tag pre-check against the live policy, a reusable ephemeral pre-auth
-  key (rotated at half-life; a restarted pod re-registers on its own, a deleted CR's node ages out),
+  key (rotated at half-life and on server/tag change; a restarted pod re-registers on its own, a
+  deleted CR's node ages out),
   one agent Deployment, one Service per target, a NetworkPolicy scoped to `consumerNamespaces`, and a
   status that classifies every target route (`NotAdvertised` / `NotApproved` / `NoGrant`) from the
   node's netmap and the router's advertised/approved sets — the two silent failures of a hand-built

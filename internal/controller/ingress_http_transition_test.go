@@ -233,7 +233,7 @@ func TestIngressHTTPTransitionRecovery(t *testing.T) {
 	if _, reason := transitionReconcile(t, r, in); reason != "NoAPIKey" {
 		t.Fatalf("expected unavailable key, got %s", reason)
 	}
-	auth := ingressAuthKeySecret(in, in.Namespace, "auth-key", time.Now().Add(168*time.Hour).Format(time.RFC3339))
+	auth := ingressAuthKeySecret(in, in.Namespace, "auth-key", time.Now().Add(168*time.Hour).Format(time.RFC3339), authKeyBinding(tn, ingressTag(tn, in)))
 	for _, obj := range []client.Object{transitionWorkingKey(), auth} {
 		if err := r.Create(ctx, obj); err != nil {
 			t.Fatal(err)
