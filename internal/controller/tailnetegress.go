@@ -458,7 +458,7 @@ func (r *TailnetEgressReconciler) computeTargetStatus(eg *tnv1.TailnetEgress, li
 
 	ready := allPresent && allReachable && eg.Status.NodeID != ""
 	readyStatus := metav1.ConditionFalse
-	readyReason, readyMsg := "NotReady", "not all targets are served yet"
+	readyReason, readyMsg := blockingReason(eg.Status.Conditions, "Registered", "RoutesGranted", "TargetsReachable")
 	if ready {
 		readyStatus, readyReason, readyMsg = metav1.ConditionTrue, "Ready", "all targets served"
 	}

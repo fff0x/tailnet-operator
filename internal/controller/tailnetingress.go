@@ -434,7 +434,7 @@ func (r *TailnetIngressReconciler) computeExposeStatus(in *tnv1.TailnetIngress, 
 
 	ready := unreachable == 0 && in.Status.NodeID != ""
 	readyStatus := metav1.ConditionFalse
-	readyReason, readyMsg := "NotReady", "not all backends are served yet"
+	readyReason, readyMsg := blockingReason(in.Status.Conditions, "Registered", "PolicyGranted", "BackendsReachable")
 	if ready {
 		readyStatus, readyReason, readyMsg = metav1.ConditionTrue, "Ready", "all backends served"
 	}

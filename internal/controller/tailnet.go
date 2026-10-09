@@ -214,6 +214,7 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !preflightConditions(ctx, hs, &tn) {
 		ok = false
 	}
+	userConditions(ctx, hs, &tn)
 
 	et := metav1.NewTime(exp)
 	tn.Status.APIKeyExpiresAt = &et
@@ -276,6 +277,19 @@ func setCond(conds *[]metav1.Condition, gen int64, t string, status metav1.Condi
 		Message:            msg,
 		ObservedGeneration: gen,
 	})
+}
+
+// blockingReason returns reason and message of the first condition in order that is False, so a
+// roll-up Ready=False names what actually blocks instead of a generic placeholder: the alert
+// TailnetResourceNotReady carries the Ready reason as its label. Falls back to NotReady when no
+// listed condition is False (a transient status before the first full reconcile).
+func blockingReason(conds []metav1.Condition, order ...string) (string, string) {
+	for _, t := range order {
+		if c := meta.FindStatusCondition(conds, t); c != nil && c.Status == metav1.ConditionFalse {
+			return c.Reason, c.Message
+		}
+	}
+	return "NotReady", "waiting for the first complete reconcile"
 }
 
 // SetupWithManager registers the Tailnet controller.
