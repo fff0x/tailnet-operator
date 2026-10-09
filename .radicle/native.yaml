@@ -17,6 +17,14 @@ shell: |
       exit 1
     }
   done
+  # Replay guard (broker >= v1.5.0): a re-delivered !TagCreated event for a release that
+  # this very commit already published ends here, green, instead of a 15-minute rebuild
+  # that dies on the immutability check. Older brokers lack the flag; skip the guard then.
+  if grep -qx '# ci-build-capability: release-published-v1' "$publisher" &&
+    ci-build --release-published; then
+    echo 'release already published from this commit; nothing to do'
+    exit 0
+  fi
   bash hack/chart-check.sh
   bash hack/audit-image.sh --check-tools
   # No credentials/build args/host mounts: only tracked test inputs enter this context.
