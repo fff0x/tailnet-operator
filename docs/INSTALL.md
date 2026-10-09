@@ -120,9 +120,14 @@ not a version string; `spec.headscale.version` is an optional hint for diagnosti
 | `PolicyMode=Unknown/CannotVerify` | The response omits `updatedAt` |
 | `…=Unknown/ProbeFailed` | A request failed or returned an invalid body; check reachability, credentials and Headscale logs |
 | `SplitDNS=Unknown/CannotVerify` | Headscale has no DNS API; configure the displayed split zone yourself |
+| `UsersUnique=False/Duplicate` | Two Headscale users share a name (`status.userConflicts`, IDs in the message); Headscale rejects every policy write until one is removed (`headscale users destroy -i <id>`) |
 
 The split-DNS hint is the literal zone after the last placeholder label of `dns.ingressNameTemplate`:
-`{name}-{namespace}.prod-1.tailnet.example.com` → `prod-1.tailnet.example.com`. An empty policy
+`{name}-{namespace}.prod-1.tailnet.example.com` → `prod-1.tailnet.example.com`. That zone must not
+be the MagicDNS `base_domain`: the gateway serves it from the CR names (`status.dnsName`,
+`status.hosts`), while MagicDNS serves `<hostname>.<base_domain>` from the node name
+(`status.hostname`) — the two stay in sync only by accident and diverge on the first
+`spec.hostname` change. An empty policy
 database does not block bootstrap (key validation uses the API-key listing); `DryRun` publishes
 the rendered policy even in file mode.
 
@@ -553,6 +558,7 @@ must stop. Keep the desired CR manifests in Git: an older schema prunes newer op
 | `PolicyMode=False/File`, `PolicyApplied=False/PolicyModeFile` | Headscale `policy.mode` | switch to database mode using §7.3; writes are skipped until mode detection changes |
 | Preflight `Unknown/ProbeFailed` | API/key conditions and Headscale logs | failed requests or invalid response shape; not proof of file mode |
 | `SplitDNS=Unknown/CannotVerify` | condition message and Headscale DNS config | manually configure the named split zone; external Headscale has no DNS API |
+| `UsersUnique=False/Duplicate`, `PolicyApplied=False/PolicyRejected` | `headscale users list` | duplicate user names (typically OIDC plus a CLI-created user); destroy the surplus user, the next reconcile clears both |
 | Egress `TagKnown=False/Unknown` | `kubectl describe tailnetegress` | tag missing in `tagOwners` (file mode) |
 | Egress `TagKnown=False/PolicyPending` | `kubectl describe tailnet` → `PolicyApplied` | policy not applied yet / rejected |
 | `status.targets[].reason=NotAdvertised` | router `--advertise-routes` | route not advertised |

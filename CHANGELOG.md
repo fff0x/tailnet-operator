@@ -4,8 +4,29 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- `Tailnet` condition `UsersUnique` and gauge `tailnet_headscale_user_conflicts`
+  (`status.userConflicts`): the operator lists Headscale users every reconcile
+  and reports names shared by more than one user. Headscale rejects every policy
+  write while such a collision exists (`multiple users found`), which used to
+  surface only as `PolicyApplied=False/PolicyRejected` with a bare HTTP status;
+  that message now points at `UsersUnique`. Only the count and the user IDs are
+  published, never a name. The check is informational and does not block writes.
+- Dashboard: row 2 gains a stacked bar chart of resources per active `Ready`
+  reason, row 3 a history of egress targets in `NotApproved`.
+
 ### Changed
 
+- `Ready=False` on `TailnetEgress` and `TailnetIngress` now repeats the reason
+  and message of the first blocking condition (egress: `Registered`,
+  `RoutesGranted`, `TargetsReachable`; ingress: `Registered`, `PolicyGranted`,
+  `BackendsReachable`) instead of the generic `NotReady`, so the
+  `TailnetResourceNotReady` alert label and the dashboard name the failure class.
+  `NotReady` remains only before the first complete reconcile.
+- `TailnetGateway` keeps `WorkloadCurrent` as `Unknown/Suspended`,
+  `Unknown/RuntimeUnavailable` or `Unknown/TearingDown` instead of removing the
+  condition; a suspended or draining gateway now shows seven conditions.
 - The agent no longer defaults `AGENT_MODE` to `egress`. An unset or unknown
   value is a startup error, and the egress Deployment now sets `AGENT_MODE=egress`
   explicitly, as the ingress Deployment always did. An ingress agent that lost the
@@ -34,8 +55,14 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Documentation
 
-- Gateway reference: when to set `routes.advertiseEgressTargets: false`, and why
-  the DNS zone's `NS`/SOA primary point at the apex itself.
+- Gateway reference: when to set `routes.advertiseEgressTargets: false`, why
+  the DNS zone's `NS`/SOA primary point at the apex itself, and that container
+  images are the only mutable part of the gateway Pod template.
+- `status.dnsName`/`status.hosts` are gateway-zone names rendered from the CR
+  name and do not follow `spec.hostname`; `status.hostname` is the MagicDNS
+  identity. INSTALL and USAGE now state that the `ingressNameTemplate` zone must
+  differ from the MagicDNS `base_domain`, and the Kind rename test pins the
+  invariant instead of recording it as a divergence.
 
 ## [0.12.1] - 2026-10-07
 

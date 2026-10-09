@@ -211,8 +211,11 @@ The agent terminates TLS on one certificate covering every name, selects the bac
 requires the HTTP `Host` to equal the SNI. The backend receives plain HTTP unless `backend.tls`
 selects verified HTTPS. `Tailnet.spec.dns.ingressNameTemplate` must be set; each resolved name is
 reported in `status.exposes[].dnsName`. The `HOSTS` column (`status.hosts`) lists every name that is
-actually served, aliases included; `status.dnsName` is the node's identity and the first certificate
-name, which is *not* a route once every HTTP expose carries a `dnsLabel`. A request to that name
+actually served, aliases included; `status.dnsName` is the ingress base name in the gateway zone and
+the first certificate name, which is *not* a route once every HTTP expose carries a `dnsLabel`.
+It is rendered from the CR name and does not change with `spec.hostname`; the MagicDNS identity
+(`<hostname>.<base_domain>`) is `status.hostname`, which is why the gateway zone must differ from the
+MagicDNS `base_domain` ([INSTALL §2.5](INSTALL.md#25-preflight)). A request to that name
 (or any other certificate name without a route) gets the certificate and an HTTP answer instead of a
 TLS alert: `308` to the only served host, or `404` listing the served hosts.
 
@@ -409,7 +412,10 @@ If Headscale refuses:
 ```
 
 the previous policy is still active. Upstream error bodies are withheld because they can contain credentials.
-Validate the rendered policy privately, then fix the base and push again. Use the base's `tests` block to
+One cause is named anyway: while two Headscale users share a name, Headscale rejects every policy
+write ("multiple users found"); the Tailnet then shows `UsersUnique=False/Duplicate` with the user IDs
+and the `PolicyRejected` message points there — destroy the surplus user (`headscale users destroy -i <id>`).
+Otherwise validate the rendered policy privately, then fix the base and push again. Use the base's `tests` block to
 pin what must never break (your own device → Kubernetes API, the resolver) — a wrong edit is then
 rejected instead of applied.
 
@@ -574,6 +580,7 @@ monitoring:
 - `tailnet_resource_ready` exists only for the current-generation `Ready` condition; `Tailnet` has none.
 - `tailnet_resource_condition` is 1 for the active reason and 0 for previously seen reasons — read type and reason, not the value as a boolean.
 - `tailnet_policy_pending` is 1 only in `Apply` mode while `renderedHash != appliedHash`; an old `appliedAt` alone is healthy.
+- `tailnet_headscale_user_conflicts` mirrors `status.userConflicts` (shared Headscale user names); anything above 0 blocks policy writes.
 - `tailnet_node_online` reflects the last successful Headscale node list; `tailnet_node_last_seen_seconds` is a Unix timestamp (`time() - …` for the age).
 - Headscale request labels are bounded method/path templates and status codes; code 0 means no HTTP response.
 - `tailnet_route_approvals_replayed_total` counts routes, so one batch can add several.
@@ -598,8 +605,11 @@ database. Transport failures are code 0, not 5xx. Do not rotate keys because a s
 ### Monitoring: resource not ready
 
 `TailnetResourceNotReady`: a CR has been `Ready=False` for 10 min; the alert carries the active
-reason. Use the tables in §1, §5 and §6 to distinguish policy, registration, routing, TLS and backend
-failures.
+reason. `Ready=False` never says just "not ready": it repeats the reason of the first blocking
+condition — egress in the order `Registered`, `RoutesGranted`, `TargetsReachable`; ingress in the
+order `Registered`, `PolicyGranted`, `TLSReady`, `BackendsReachable` — so the label distinguishes
+`NotRegistered`, `RoutesMissing`, `ProbeFailed`, `Unreachable`, `PolicyDenied` and the `TLS*` reasons
+directly. Use the tables in §1, §5 and §6 for the remedy per reason.
 
 ### Monitoring: policy stale
 

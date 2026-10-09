@@ -531,7 +531,10 @@ base label can never become removable. A pool key that equals one of the operato
 label keys is refused at render time (`Ready=False/FreshBlocked`). Service and template
 writes are independent: a blocked Service does not stall the routes.
 
-**Images.** `UpdateWorkloadRevision` rewrites only the container `image` fields and the
+**Images.** Container images (and `TS_ROUTES`) are the only mutable part of the gateway Pod
+template; resources, sysctls, tolerations and every other template field are pinned at creation
+and a change there blocks with `Ready=False/FreshBlocked` until reverted (or the gateway is
+recreated with `deletionPolicy: Delete`). `UpdateWorkloadRevision` rewrites only the container `image` fields and the
 `TS_ROUTES` value of the StatefulSet template, after re-verifying the receipt UID and the image-less digest, with
 the observed `resourceVersion` as CAS. The StatefulSet uses `OnDelete`: the operator
 never restarts the Pod. The `WorkloadCurrent` condition reports the result:
