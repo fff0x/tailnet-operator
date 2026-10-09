@@ -262,7 +262,19 @@ func TestVirtualHostReloadFencesDelayedSNIMetrics(t *testing.T) {
 		if current[cfg.Name].generation <= old[cfg.Name].generation || next == h || next.routes[cfg.DNSName].metrics.active == h.routes[cfg.DNSName].metrics.active {
 			t.Fatal("reload did not replace listener/metric generation")
 		}
-		virtualGET(t, virtualClient(t, next, cfg, false), cfg, "/", 204)
+		client := virtualClient(t, next, cfg, false)
+		virtualGET(t, client, cfg, "/", 204)
+		// sniMeasuredConn counts bytes after Conn.Write returns, so the client can
+		// finish reading before the server goroutine adds them. Close the keep-alive
+		// connection and wait for its Close (which runs after the last Write) so the
+		// snapshot below cannot race the new generation's own accounting.
+		client.CloseIdleConnections()
+		for deadline := time.Now().Add(3 * time.Second); metricValue(t, fw.metrics, "tailnet_agent_connections_active", "expose", cfg.Name) != 0; {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: new-generation connection did not close", cfg.Name)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 	// Snapshot all per-target connection, wire-byte directions and dial counts.
 	snapshot := func() map[string]float64 {
@@ -297,7 +309,7 @@ func TestVirtualHostReloadFencesDelayedSNIMetrics(t *testing.T) {
 	}
 	before := snapshot()
 	for _, cfg := range targets {
-		if metricValue(t, fw.metrics, "tailnet_agent_connections_active", "expose", cfg.Name) != 1 || metricValue(t, fw.metrics, "tailnet_agent_dial_duration_seconds", "expose", cfg.Name) != 1 {
+		if metricValue(t, fw.metrics, "tailnet_agent_bytes_total", "expose", cfg.Name) == 0 || metricValue(t, fw.metrics, "tailnet_agent_dial_duration_seconds", "expose", cfg.Name) != 1 {
 			t.Fatal("new generation was not populated by its own request")
 		}
 	}

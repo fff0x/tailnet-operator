@@ -2,6 +2,16 @@
 
 Notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Test flake `TestVirtualHostReloadFencesDelayedSNIMetrics` (cmd/agent): the metric
+  snapshot could race the new generation's own byte accounting, which the HTTP
+  listener records after `Conn.Write` returns. The test now closes its keep-alive
+  connection and waits for the connection gauge to drop before snapshotting; the
+  fencing assertion itself is unchanged. No runtime change.
+
 ## [0.13.0] - 2026-10-09
 
 ### Added
