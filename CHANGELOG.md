@@ -22,6 +22,16 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   tool preflight after the broker upgrade; those commits were published without
   SBOM or provenance attestations.
 
+### Security
+
+- Go 1.26.9 and `golang.org/x/net` v0.60.0: `govulncheck` reported ten reachable
+  `net/http`, `net/textproto` and `crypto/tls` advisories (GO-2026-6603 … 6617)
+  against Go 1.26.7 / x/net v0.58.0, on the agent's TLS and health paths among
+  others. The module now requires Go 1.26.9, the CI test image is pinned to it,
+  and the scan is clean with the fixed toolchain. The single remaining finding
+  is the unfixed `x/crypto/openpgp` advisory (GO-2026-5932) in a module we
+  require but never import.
+
 ## [0.12.1] - 2026-10-07
 
 ### Fixed
