@@ -32,6 +32,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   is the unfixed `x/crypto/openpgp` advisory (GO-2026-5932) in a module we
   require but never import.
 
+### Documentation
+
+- Gateway reference: when to set `routes.advertiseEgressTargets: false`, and why
+  the DNS zone's `NS`/SOA primary point at the apex itself.
+
 ## [0.12.1] - 2026-10-07
 
 ### Fixed

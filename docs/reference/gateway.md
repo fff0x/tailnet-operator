@@ -513,6 +513,14 @@ approvals. A `tailnetLBCIDR` that no longer contains `loadBalancerIP`, an invali
 prefix or an IPv6 route reports `WorkloadUpdateBlocked` and writes nothing. Egress
 changes reach the gateway at the next reconcile (within 5 seconds).
 
+*When to turn `advertiseEgressTargets` off.* The default `true` makes the gateway the
+subnet router for every literal egress target, so an egress host outside `routes.lan`
+needs no extra prefix. Set it to `false` when every target already lies inside a LAN
+prefix: covered host routes are not deduplicated, so each target would add a redundant
+`/32` to the advertised and approved set, and every new or deleted `TailnetEgress` would mark
+the Pod `PodTemplateStale` until you delete it. A fixed route set that mirrors a legacy
+router is the typical reason to choose `false`.
+
 **Pool labels.** `UpdateServiceRevision` sets and removes the pool labels on the
 LoadBalancer Service after re-verifying its UID and receipt digest (labels and
 annotations are not part of the digest). The keys it wrote are recorded in the
@@ -570,7 +578,12 @@ one address family. Dynamic and static records share one file zone: a known name
 missing record type returns NODATA, without falling through to a wildcard or upstream.
 Wildcards follow normal DNS closest-encloser semantics; they are not catch-all templates.
 The primary apex is reserved for the gateway nameserver/address. Host snapshots that
-claim it are rejected. Names outside the primary zone are not served.
+claim it are rejected. Names outside the primary zone are not served. The apex is also
+its own nameserver: `NS` and the SOA primary point at the zone name itself, and the SOA
+mailbox is the reserved `hostmaster.invalid.`. This is valid DNS, just unusual; there is
+deliberately no `ns.<zone>` label because the zone name may already sit at the wire-length
+limit, and adding one would churn the SOA serial of every deployed zone for no resolver
+benefit.
 
 **Additional forward zones are deliberately unsupported by this renderer.** Any
 nonempty `extraZones` returns an error and no partial output. With CoreDNS 1.14.6,
