@@ -334,7 +334,7 @@ func TestAuditFindingsPolicy(t *testing.T) {
 
 func TestAuditRejectsIncompleteOrUntrustedEvidence(t *testing.T) {
 	for _, scenario := range []string{
-		"missing-platform", "duplicate-platform", "duplicate-digest", "extra-platform", "bad-index", "index-urls", "unsupported-descriptor",
+		"missing-platform", "duplicate-platform", "duplicate-digest", "extra-platform", "bad-index", "index-urls", "unsupported-descriptor", "foreign-artifact-type",
 		"config-mismatch", "layer-urls", "nested-index", "signature-error", "signature-mismatch", "signature-empty",
 		"malformed-spdx", "empty-spdx", "missing-spdx", "invalid-spdx",
 		"scan-error", "second-scan-error", "scan-timeout", "malformed-trivy", "empty-trivy", "missing-trivy", "missing-binary",
@@ -606,10 +606,15 @@ func auditMockTool(tool string, args []string) int {
 			return 92
 		}
 		if digest == auditIndex {
-			amd := map[string]any{"mediaType": "application/vnd.oci.image.manifest.v1+json", "size": 123, "digest": auditAMD, "platform": map[string]string{"os": "linux", "architecture": "amd64"}}
+			// Broker v1.4.1 (crane 0.22 / buildah) writes artifactType and empty base annotations
+			// into every descriptor; the audit must accept exactly that shape and nothing wider.
+			base := map[string]string{"org.opencontainers.image.base.digest": "", "org.opencontainers.image.base.name": ""}
+			amd := map[string]any{"mediaType": "application/vnd.oci.image.manifest.v1+json", "size": 123, "digest": auditAMD, "platform": map[string]string{"os": "linux", "architecture": "amd64"}, "artifactType": "application/vnd.oci.image.config.v1+json", "annotations": base}
 			arm := map[string]any{"mediaType": "application/vnd.oci.image.manifest.v1+json", "size": 123, "digest": auditARM, "platform": map[string]string{"os": "linux", "architecture": "arm64", "variant": "v8"}}
 			manifests := []any{amd, arm}
 			switch scenario {
+			case "foreign-artifact-type":
+				amd["artifactType"] = "application/vnd.example.sbom+json"
 			case "missing-platform":
 				manifests = manifests[:1]
 			case "duplicate-platform":

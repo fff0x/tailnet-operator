@@ -128,9 +128,10 @@ jq -e -s '
      .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json") and
     (.manifests | type == "array" and length == 2 and
       all(.[];
-        (keys - ["mediaType","digest","size","platform","annotations"] | length == 0) and
+        (keys - ["mediaType","digest","size","platform","annotations","artifactType"] | length == 0) and
         (.mediaType == "application/vnd.oci.image.manifest.v1+json" or
          .mediaType == "application/vnd.docker.distribution.manifest.v2+json") and
+        ((.artifactType // "application/vnd.oci.image.config.v1+json") == "application/vnd.oci.image.config.v1+json") and
         (.digest | digest) and (.size | type == "number" and . > 0 and floor == .) and
         (.platform | type == "object" and
           (keys - ["os","architecture","variant"] | length == 0) and .os == "linux" and

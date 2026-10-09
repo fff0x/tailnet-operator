@@ -41,7 +41,10 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   the legacy binary because that is the form the registry's trust extension and
   Kyverno verify. Every `main` build since 2026-10-08 had failed at the audit's
   tool preflight after the broker upgrade; those commits were published without
-  SBOM or provenance attestations.
+  SBOM or provenance attestations. The same broker also writes `artifactType`
+  (image config) and empty base-image annotations into every index descriptor;
+  the audit's index contract now accepts exactly that and still rejects any
+  other artifact type or key.
 
 ### Security
 
