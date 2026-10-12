@@ -352,6 +352,50 @@ spec:
                         type: object
                     type: object
                 type: object
+              reservedNetworks:
+                description: |-
+                  Address space TailnetSite prefixes must not overlap (node prefix, every cluster's LAN/pod/
+                  service/LB ranges on this control server). Only consulted for TailnetSite CRs.
+                items:
+                  description: |-
+                    ReservedNetwork is address space no TailnetSite may overlap: the node prefix of the control
+                    server, and per cluster its LAN, pod, service and tailnet-LB ranges. A site overlapping one of
+                    these is blocked with RouteConflict/OverlapsReserved naming this entry.
+                  properties:
+                    name:
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    prefixes:
+                      items:
+                        description: |-
+                          GatewayPrefix is a canonical, non-default subnet route. Network ownership and
+                          reachability still require runtime validation against the selected Tailnet.
+                        maxLength: 49
+                        type: string
+                        x-kubernetes-validations:
+                        - message: route must be a canonical masked non-default CIDR
+                          rule: isCIDR(self) && cidr(self).prefixLength() > 0 && string(cidr(self).masked())
+                            == self
+                        - message: route must not overlap unspecified loopback or
+                            multicast ranges or use mapped IPv4
+                          rule: isCIDR(self) && !self.startsWith('::ffff:') && ['0.0.0.0/32',
+                            '127.0.0.0/8', '224.0.0.0/4', '::/128', '::1/128', 'ff00::/8'].all(r,
+                            !cidr(self).containsIP(cidr(r).ip()) && !cidr(r).containsCIDR(cidr(self)))
+                      maxItems: 32
+                      minItems: 1
+                      type: array
+                      x-kubernetes-list-type: set
+                  required:
+                  - name
+                  - prefixes
+                  type: object
+                maxItems: 64
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               server:
                 description: Login/control URL, becomes the agent's ControlURL (e.g.
                   https://ts.example.com).

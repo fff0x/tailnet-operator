@@ -1,0 +1,11 @@
+# ExpectedError: spec.owner
+---
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetSite
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  prefixes:
+    - 192.0.2.0/24

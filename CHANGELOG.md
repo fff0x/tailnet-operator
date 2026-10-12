@@ -4,6 +4,26 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- `TailnetSite` (cluster-scoped): declare a remote network — branch `/24`, management range or a
+  single host as `/32` — advertised by routers identified **by tag** (`advertisedBy.tags`, default
+  `policy.routeApprovers`). The policy controller appends `autoApprovers.routes` for the prefixes,
+  the existing replay approves them on every node carrying an advertiser tag (including a hand-built
+  router in another cluster), and the site reports `Advertised`, `Approved`, `Ready` from the node
+  list. Grants are not rendered: who may reach a site stays in the base policy.
+- `Tailnet.spec.reservedNetworks[]`: address space no site may overlap (node prefix, each
+  cluster's LAN/pod/service/LB ranges). The pure registry `internal/routes.Build` blocks a site that
+  overlaps a reserved network (`RouteConflict/OverlapsReserved`) or an **older** site
+  (`OverlapsSite`; the older site is never affected), and reports — never blocks — a node without
+  an advertiser tag that advertises an overlapping route (`UnmanagedOverlap`). Blocked sites are
+  listed as `site/<name>` in `PolicyRendered`'s skipped inputs.
+- Alerts `TailnetRouteConflict` (warning, 15 min) and `TailnetUnmanagedRouteOverlap` (info,
+  30 min); dashboard row "8. Routes"; `tailnet_resource_ready`/`_condition` carry
+  `kind="TailnetSite"`. Runbooks in USAGE §9a and §14. RBAC: read `tailnetsites`, write their status.
+- Without `TailnetSite` CRs the rendered policy is byte-identical to before, so upgrading never
+  triggers a policy write.
+
 ### Changed
 
 - Pre-auth keys are bound to the identity they were minted for: the authkey Secret carries

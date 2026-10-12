@@ -35,6 +35,7 @@ import (
 	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 	"tsunaro.io/tailnet-operator/internal/naming"
 	"tsunaro.io/tailnet-operator/internal/policy"
+	"tsunaro.io/tailnet-operator/internal/routes"
 )
 
 const (
@@ -129,10 +130,14 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Render.
-	in, skipped, err := r.collect(ctx, &tn)
+	in, skipped, sites, err := r.collect(ctx, &tn)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	// Site status is written on every exit below from the freshest node list this reconcile
+	// obtained (nil when the control server was not queried).
+	var nodes []headscale.Node
+	defer func() { r.siteStatus(ctx, &tn, sites, nodes) }()
 	rendered, sum, err := policy.Render([]byte(base), in)
 	if err != nil {
 		reason := "BaseInvalid"
@@ -194,6 +199,16 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	if spec.Mode != "Apply" {
+		// DryRun still observes the control server for the site CRs when the working key exists.
+		if len(sites) > 0 {
+			if apiKey, err := readWorkingKey(ctx, r.Client, r.OperatorNamespace, tn.Name); err == nil {
+				apiURL := tn.Spec.APIURL
+				if apiURL == "" {
+					apiURL = tn.Spec.Server
+				}
+				nodes, _ = headscale.New(apiURL, apiKey, r.Metrics.Headscale(tn.Name)).ListNodes(ctx)
+			}
+		}
 		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 			renderedCond(t)
 			setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionFalse, "DryRun",
@@ -249,7 +264,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	now := metav1.Now()
 	if liveHash == hash {
 		r.clearRetry(tn.Name)
-		r.approveRoutes(ctx, hs, &tn, rendered)
+		nodes = r.approveRoutes(ctx, hs, &tn, rendered)
 		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 			renderedCond(t)
 			if t.Status.Policy.AppliedHash != hash {
@@ -300,7 +315,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		})
 	}
 	r.clearRetry(tn.Name)
-	r.approveRoutes(ctx, hs, &tn, rendered)
+	nodes = r.approveRoutes(ctx, hs, &tn, rendered)
 	l.Info("policy applied", "tailnet", tn.Name, "hash", hash[:12], "tags", sum.Tags, "grants", sum.Grants, "routes", sum.Routes)
 	return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 		renderedCond(t)
@@ -339,7 +354,7 @@ func (r *TailnetPolicyReconciler) off(ctx context.Context, tn *tnv1.Tailnet) err
 // collect turns the CRs bound to tn into policy inputs. Egress CRs live in the operator namespace
 // (admin-controlled), ingress CRs anywhere. Targets addressed by name (no IP) get no grant and are
 // returned as skipped — the policy cannot express them as a route.
-func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet) (policy.Inputs, []string, error) {
+func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet) (policy.Inputs, []string, []tnv1.TailnetSite, error) {
 	in := policy.Inputs{
 		TagOwners:              tn.Spec.Policy.TagOwners,
 		RouteApprovers:         tn.Spec.Policy.RouteApprovers,
@@ -348,7 +363,7 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 	var skipped []string
 	var egs tnv1.TailnetEgressList
 	if err := r.List(ctx, &egs, client.InNamespace(r.OperatorNamespace)); err != nil {
-		return in, nil, err
+		return in, nil, nil, err
 	}
 	for _, eg := range egs.Items {
 		if eg.Spec.TailnetRef.Name != tn.Name {
@@ -367,7 +382,7 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 	}
 	var ins tnv1.TailnetIngressList
 	if err := r.List(ctx, &ins); err != nil {
-		return in, nil, err
+		return in, nil, nil, err
 	}
 	for _, ig := range ins.Items {
 		if ig.Spec.TailnetRef.Name != tn.Name {
@@ -383,7 +398,7 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 	// same inputs); a gateway whose routes do not plan is skipped and reported, never half-rendered.
 	var gws tnv1.TailnetGatewayList
 	if err := r.List(ctx, &gws); err != nil {
-		return in, nil, err
+		return in, nil, nil, err
 	}
 	sort.Slice(gws.Items, func(a, b int) bool { return gws.Items[a].Name < gws.Items[b].Name }) // merge order must not depend on list order
 	for _, g := range gws.Items {
@@ -397,10 +412,32 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 		}
 		in.Gateways = append(in.Gateways, policy.Gateway{Tags: slices.Clone(g.Spec.Tags), Routes: plan.Routes})
 	}
+	// Sites are cluster-scoped. Only sites the registry does not block are rendered; blocked ones
+	// are reported on the site CR (siteStatus) and listed as skipped here.
+	var sites tnv1.TailnetSiteList
+	if err := r.List(ctx, &sites); err != nil {
+		return in, nil, nil, err
+	}
+	bound := sites.Items[:0]
+	for _, s := range sites.Items {
+		if s.Spec.TailnetRef.Name == tn.Name && s.DeletionTimestamp.IsZero() {
+			bound = append(bound, s)
+		}
+	}
+	rs, reserved := registryInputs(tn, bound)
+	reg := routes.Build(rs, reserved, nil) // blocking does not depend on live nodes
+	for _, s := range reg.Shipped {
+		in.Sites = append(in.Sites, policy.Site{Prefixes: s.Prefixes, Approvers: s.Tags})
+	}
+	for name, st := range reg.States {
+		if st.Blocked != nil {
+			skipped = append(skipped, "site/"+name)
+		}
+	}
 	sort.Slice(in.Egresses, func(a, b int) bool { return in.Egresses[a].Tag < in.Egresses[b].Tag })
 	sort.Slice(in.Ingresses, func(a, b int) bool { return in.Ingresses[a].Tag < in.Ingresses[b].Tag })
 	sort.Strings(skipped)
-	return in, skipped, nil
+	return in, skipped, bound, nil
 }
 
 // policyOwned reports whether the operator writes this Tailnet's policy (mode Apply), i.e. whether a
@@ -490,6 +527,8 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			name = cr.Spec.TailnetRef.Name
 		case *tnv1.TailnetGateway:
 			name = string(cr.Spec.TailnetRef.Name)
+		case *tnv1.TailnetSite:
+			name = cr.Spec.TailnetRef.Name
 		}
 		if name == "" {
 			return nil
@@ -531,6 +570,14 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&tnv1.TailnetEgress{}, handler.EnqueueRequestsFromMapFunc(byRef), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&tnv1.TailnetIngress{}, handler.EnqueueRequestsFromMapFunc(byRef), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&tnv1.TailnetGateway{}, handler.EnqueueRequestsFromMapFunc(byRef), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		// Sites have no reconciler of their own: a deleted site must drop its metrics here.
+		Watches(&tnv1.TailnetSite{}, handler.EnqueueRequestsFromMapFunc(byRef), builder.WithPredicates(predicate.Funcs{
+			UpdateFunc: predicate.GenerationChangedPredicate{}.Update,
+			DeleteFunc: func(e event.DeleteEvent) bool {
+				r.Metrics.Delete("TailnetSite", "", e.Object.GetName())
+				return true
+			},
+		})).
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(byBase)).
 		Complete(r)
 }

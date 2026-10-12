@@ -1,0 +1,14 @@
+# ExpectedError: spec.advertisedBy.tags[0]
+---
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetSite
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  owner: netops
+  prefixes:
+    - 192.0.2.0/24
+  advertisedBy:
+    tags: [fabric]

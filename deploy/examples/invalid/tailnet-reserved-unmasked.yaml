@@ -1,0 +1,13 @@
+# ExpectedError: spec.reservedNetworks[0].prefixes[0]
+---
+apiVersion: tsunaro.io/v1alpha1
+kind: Tailnet
+metadata:
+  name: invalid
+spec:
+  server: https://ts.example.com
+  apiSecretRef:
+    name: bootstrap
+  reservedNetworks:
+    - name: nodes
+      prefixes: [100.64.0.1/16]

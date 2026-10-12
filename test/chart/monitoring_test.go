@@ -43,7 +43,7 @@ func TestBundledRules(t *testing.T) {
 	spec := builtinRules(t)
 	equal(t, "group count", len(spec.Groups), 1)
 	rules := spec.Groups[0].Rules
-	equal(t, "rule count", len(rules), 13)
+	equal(t, "rule count", len(rules), 15)
 	usage, err := os.ReadFile(filepath.Join(chartPath(t), "..", "..", "docs", "USAGE.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestBundledRules(t *testing.T) {
 			equal(t, "pending duration", rule.For, "15m")
 		}
 	}
-	for _, name := range []string{"TailnetOperatorDown", "TailnetReconcileErrors", "TailnetHeadscaleAPIErrors", "TailnetResourceNotReady", "TailnetPolicyStale", "TailnetPolicyRejected", "TailnetPolicyApplyErrors", "TailnetPolicyGeneratedDrop", "TailnetApprovalReplays", "TailnetNodeOffline", "TailnetAPIKeyExpiringSoon", "TailnetEgressAuthKeyExpiringSoon", "TailnetIngressAuthKeyExpiringSoon"} {
+	for _, name := range []string{"TailnetOperatorDown", "TailnetReconcileErrors", "TailnetHeadscaleAPIErrors", "TailnetResourceNotReady", "TailnetPolicyStale", "TailnetPolicyRejected", "TailnetPolicyApplyErrors", "TailnetPolicyGeneratedDrop", "TailnetApprovalReplays", "TailnetRouteConflict", "TailnetUnmanagedRouteOverlap", "TailnetNodeOffline", "TailnetAPIKeyExpiringSoon", "TailnetEgressAuthKeyExpiringSoon", "TailnetIngressAuthKeyExpiringSoon"} {
 		if !seen[name] {
 			t.Errorf("missing alert %s", name)
 		}
@@ -314,7 +314,7 @@ func TestDashboardLint(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := dashboard["panels"].([]interface{})
-	equal(t, "dashboard row count", len(rows), 7)
+	equal(t, "dashboard row count", len(rows), 8)
 	queries := map[string]bool{}
 	gatewayPlaceholder := false
 	for _, row := range rows {
@@ -338,6 +338,7 @@ func TestDashboardLint(t *testing.T) {
 		`time() - min by (kind, namespace, name) (tailnet_node_last_seen_seconds{namespace=~"$namespace",kind=~"$kind"})`,
 		`sum by (reason) (tailnet_resource_condition{namespace=~"$namespace",kind=~"$kind",type="Ready"} == 1)`,
 		`sum by (namespace, name) (tailnet_egress_target_state{namespace=~"$namespace",reason="NotApproved"} == 1)`,
+		`sum by (name, reason) (tailnet_resource_condition{kind="TailnetSite",type="RouteConflict",reason!="None"} == 1)`,
 	} {
 		if !queries[expr] {
 			t.Errorf("missing dashboard query: %s", expr)

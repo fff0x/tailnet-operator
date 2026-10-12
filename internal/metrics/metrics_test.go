@@ -296,3 +296,42 @@ func TestSharedManagerRegistrationAndOperations(t *testing.T) {
 		t.Fatal("registry leaked state")
 	}
 }
+
+func TestSiteConditions(t *testing.T) {
+	m, reg := isolated(t)
+	site := &tnv1.TailnetSite{ObjectMeta: metav1.ObjectMeta{Name: "branch-a", Generation: 2}}
+	site.Spec.TailnetRef.Name = "hub"
+	site.Status.Conditions = []metav1.Condition{
+		cond("RouteConflict", "OverlapsSite", metav1.ConditionTrue, 2),
+		cond("Ready", "RouteConflict", metav1.ConditionFalse, 2),
+		cond("Advertised", "Advertised", metav1.ConditionTrue, 1), // stale generation: ignored
+	}
+	m.Observe(site)
+	labels := map[string]string{"kind": "TailnetSite", "name": "branch-a", "namespace": ""}
+	value(t, reg, "tailnet_resource_ready", map[string]string{"kind": "TailnetSite", "name": "branch-a", "tailnet": "hub"}, 0)
+	value(t, reg, "tailnet_resource_condition", map[string]string{"kind": "TailnetSite", "name": "branch-a", "type": "RouteConflict", "reason": "OverlapsSite"}, 1)
+	for _, s := range samples(t, reg, "tailnet_resource_condition") {
+		for _, p := range s.Label {
+			if p.GetName() == "type" && p.GetValue() == "Advertised" {
+				t.Fatal("stale-generation condition exported")
+			}
+		}
+	}
+	site.Status.Conditions = []metav1.Condition{
+		cond("RouteConflict", "None", metav1.ConditionFalse, 2),
+		cond("Ready", "Ready", metav1.ConditionTrue, 2),
+	}
+	m.Observe(site)
+	value(t, reg, "tailnet_resource_ready", map[string]string{"kind": "TailnetSite", "name": "branch-a"}, 1)
+	value(t, reg, "tailnet_resource_condition", map[string]string{"kind": "TailnetSite", "name": "branch-a", "type": "RouteConflict", "reason": "OverlapsSite"}, 0)
+	m.Delete("TailnetSite", "", "branch-a")
+	for _, name := range []string{"tailnet_resource_ready", "tailnet_resource_condition"} {
+		for _, s := range samples(t, reg, name) {
+			for _, p := range s.Label {
+				if p.GetName() == "name" && p.GetValue() == "branch-a" {
+					t.Fatal("delete retained", name, labels)
+				}
+			}
+		}
+	}
+}

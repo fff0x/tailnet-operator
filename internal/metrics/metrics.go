@@ -169,7 +169,7 @@ func (m *Metrics) delete(id identity) {
 
 func conditionType(s string) string {
 	switch s {
-	case "Ready", "ApiKeyValid", "ApiReachable", "PolicyMode", "HeadscaleCompatible", "SplitDNS", "UsersUnique", "PolicyRendered", "PolicyApplied", "TagKnown", "Registered", "ServiceConflict", "RoutesGranted", "TargetsReachable", "BackendsReachable", "PolicyGranted", "TLSReady", "TLSCleanup":
+	case "Ready", "ApiKeyValid", "ApiReachable", "PolicyMode", "HeadscaleCompatible", "SplitDNS", "UsersUnique", "PolicyRendered", "PolicyApplied", "TagKnown", "Registered", "ServiceConflict", "RoutesGranted", "TargetsReachable", "BackendsReachable", "PolicyGranted", "TLSReady", "TLSCleanup", "RouteConflict", "UnmanagedOverlap", "Advertised", "Approved":
 		return s
 	default:
 		return "Other"
@@ -184,7 +184,8 @@ func reason(s string) string {
 		"TLSCertificateUnavailable", "TLSCertificateForbidden", "TLSCertificateConflict", "CertManagerMissing",
 		"TLSProbePending", "TLSProbeFailed", "TLSProbeStale", "TLSConfigMismatch", "TLSCertificateMismatch",
 		"DNSNameConflict", "DNSConflictUnresolved", "DNSEgressTargetInvalid", "DNSEgressAliasInvalid",
-		"DNSEgressAliasAmbiguous", "DNSClaimIdentityInvalid", "DNSClaimInputInvalid":
+		"DNSEgressAliasAmbiguous", "DNSClaimIdentityInvalid", "DNSClaimInputInvalid",
+		"OverlapsReserved", "OverlapsSite", "Unmanaged", "None", "NotObserved", "Advertised", "Approved":
 		return s
 	default:
 		return "Other"
@@ -218,6 +219,10 @@ func (m *Metrics) Observe(obj metav1.Object) {
 		conditions = o.Status.Conditions
 	case *tnv1.TailnetIngress:
 		kind = "TailnetIngress"
+		tailnet = o.Spec.TailnetRef.Name
+		conditions = o.Status.Conditions
+	case *tnv1.TailnetSite:
+		kind = "TailnetSite"
 		tailnet = o.Spec.TailnetRef.Name
 		conditions = o.Status.Conditions
 	default:

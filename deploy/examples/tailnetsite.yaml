@@ -1,0 +1,23 @@
+---
+# A remote network a tagged subnet router advertises into the tailnet: a branch (/24), a
+# management range or a single host (/32). Cluster-scoped, lives in the cluster whose operator
+# owns the policy (mode Apply). The operator appends autoApprovers for the prefixes, replays the
+# approval on every node carrying an advertiser tag — including a hand-built router in another
+# cluster — and reports Advertised/Approved/Ready. Who may reach the prefixes stays a grant in the
+# base policy. Overlap with Tailnet.spec.reservedNetworks or an older TailnetSite blocks the CR
+# (RouteConflict); nothing is rendered for it until the overlap is resolved.
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetSite
+metadata:
+  name: branch-north
+spec:
+  tailnetRef:
+    name: corp
+  prefixes:
+    - 192.0.2.0/24
+    - 203.0.113.17/32
+  # Routers allowed to advertise these prefixes. Omit to use Tailnet.spec.policy.routeApprovers.
+  advertisedBy:
+    tags: [tag:fabric]
+  owner: netops
+  description: Branch office north, reached through the on-prem subnet router

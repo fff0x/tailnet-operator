@@ -52,6 +52,13 @@ type Gateway struct {
 	Routes []string
 }
 
+// Site is one unblocked TailnetSite: its prefixes and the tags allowed to advertise them. Only
+// autoApprovers are rendered — who may reach a site stays a grant in the base policy.
+type Site struct {
+	Prefixes  []string
+	Approvers []string
+}
+
 // Inputs is everything Render needs besides the base document.
 type Inputs struct {
 	TagOwners              []string
@@ -60,6 +67,7 @@ type Inputs struct {
 	Egresses               []Egress
 	Ingresses              []Ingress
 	Gateways               []Gateway
+	Sites                  []Site
 }
 
 // Summary counts what was added and which ingress tags were denied a grant.
@@ -141,6 +149,18 @@ func Render(base []byte, in Inputs) ([]byte, Summary, error) {
 		gatewayTags := dedupe(g.Tags) // sorted: spec.tags is a set, the render must not depend on its order
 		for _, cidr := range g.Routes {
 			merged, added := union(strs(routes[cidr]), gatewayTags)
+			if added {
+				routes[cidr] = toAny(merged)
+				sum.Routes++
+			}
+		}
+	}
+
+	// Site prefixes may be auto-approved on the routers that carry the site's advertiser tags.
+	for _, s := range in.Sites {
+		approvers := dedupe(s.Approvers)
+		for _, cidr := range s.Prefixes {
+			merged, added := union(strs(routes[cidr]), approvers)
 			if added {
 				routes[cidr] = toAny(merged)
 				sum.Routes++

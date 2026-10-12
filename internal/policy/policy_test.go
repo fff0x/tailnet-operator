@@ -214,3 +214,42 @@ func TestRenderGateways(t *testing.T) {
 		t.Fatal("fixture drifted")
 	}
 }
+
+func TestRenderSites(t *testing.T) {
+	plain, _, err := Render([]byte(base), inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No sites: the document is byte-identical to the pre-site render, so upgrading never writes.
+	withEmpty := inputs
+	withEmpty.Sites = []Site{}
+	same, _, _ := Render([]byte(base), withEmpty)
+	if string(same) != string(plain) {
+		t.Fatal("empty Sites changed the rendered policy")
+	}
+
+	in := inputs
+	in.Sites = []Site{
+		{Prefixes: []string{"10.1.1.0/24", "10.0.0.0/24"}, Approvers: []string{"tag:fabric"}}, // second prefix already in base: no change
+		{Prefixes: []string{"100.100.16.0/20"}, Approvers: []string{"tag:mgmt-router", "tag:fabric"}},
+	}
+	out, sum, err := Render([]byte(base), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aps, _ := Approvers(out)
+	if strings.Join(aps["10.1.1.0/24"], ",") != "tag:fabric" || strings.Join(aps["10.0.0.0/24"], ",") != "tag:fabric" || strings.Join(aps["100.100.16.0/20"], ",") != "tag:fabric,tag:mgmt-router" {
+		t.Fatalf("site approvers = %v", aps)
+	}
+	// Sites add approvers only: tagOwners and grants are untouched.
+	var withSites, without map[string]any
+	_ = json.Unmarshal(out, &withSites)
+	_ = json.Unmarshal(plain, &without)
+	if len(withSites["grants"].([]any)) != len(without["grants"].([]any)) || len(withSites["tagOwners"].(map[string]any)) != len(without["tagOwners"].(map[string]any)) {
+		t.Fatal("sites changed grants or tagOwners")
+	}
+	_, plainSum, _ := Render([]byte(base), inputs)
+	if sum.Routes != plainSum.Routes+2 {
+		t.Fatalf("routes added = %d, want %d", sum.Routes, plainSum.Routes+2)
+	}
+}

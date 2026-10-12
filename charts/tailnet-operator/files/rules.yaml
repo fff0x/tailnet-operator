@@ -78,6 +78,24 @@
         summary: Route approvals are being replayed repeatedly
         description: More than three routes were successfully approved by replay in one hour. This counts routes, not API requests; inspect Headscale restarts and route stability.
         runbook_url: docs/USAGE.md#monitoring-route-replays
+    - alert: TailnetRouteConflict
+      expr: max by (name, tailnet, reason) ((tailnet_resource_condition{kind="TailnetSite",type="RouteConflict",reason!="None"} == 1) * on (job, instance, kind, namespace, name) group_left(tailnet) tailnet_resource_ready{kind="TailnetSite"})
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: TailnetSite blocked by a route conflict
+        description: The site overlaps a reserved network or an older site (reason label) and nothing is rendered or approved for it. Resolve the overlap in the CRs; the operator never de-approves routes.
+        runbook_url: docs/USAGE.md#monitoring-route-conflict
+    - alert: TailnetUnmanagedRouteOverlap
+      expr: max by (name, tailnet) ((tailnet_resource_condition{kind="TailnetSite",type="UnmanagedOverlap",reason="Unmanaged"} == 1) * on (job, instance, kind, namespace, name) group_left(tailnet) tailnet_resource_ready{kind="TailnetSite"})
+      for: 30m
+      labels:
+        severity: info
+      annotations:
+        summary: A node without an advertiser tag advertises a route overlapping a TailnetSite
+        description: Report only; the managed route still ships and clients pick the longest prefix. The condition message names the node.
+        runbook_url: docs/USAGE.md#monitoring-unmanaged-route-overlap
     - alert: TailnetNodeOffline
       expr: min by (kind, namespace, name) (tailnet_node_online) == 0
       for: 5m

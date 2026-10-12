@@ -97,7 +97,7 @@ func TestAdmission(t *testing.T) {
 	}
 
 	templates := map[string]*unstructured.Unstructured{}
-	for _, kind := range []string{"tailnet", "tailnetegress", "tailnetingress", "tailnetgateway"} {
+	for _, kind := range []string{"tailnet", "tailnetegress", "tailnetingress", "tailnetgateway", "tailnetsite"} {
 		obj := load(t, filepath.Join(root, "deploy", "examples", kind+".yaml"))
 		templates[kind] = obj
 		t.Run("example/"+kind, func(t *testing.T) { accept(t, obj) })

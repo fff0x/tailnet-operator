@@ -30,6 +30,8 @@ bindings: a RoleBinding limits its role to that namespace, a ClusterRoleBinding 
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses` | `get`, `list`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnets/status` | `get`, `patch`, `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnets` | `get`, `list`, `watch` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetsites/status` | `get`, `patch`, `update` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetsites` | `get`, `list`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `configmaps`, `secrets` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `events` | `create`, `patch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `pods` | `get`, `list`, `watch` | all names | — |

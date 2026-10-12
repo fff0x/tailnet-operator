@@ -53,7 +53,7 @@ func TestPolicyCollect(t *testing.T) {
 	}
 	r := &TailnetPolicyReconciler{Client: fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(objs...).Build(), Scheme: s, OperatorNamespace: "tailnet-system"}
 
-	in, skipped, err := r.collect(context.Background(), tn)
+	in, skipped, _, err := r.collect(context.Background(), tn)
 	if err != nil {
 		t.Fatal(err)
 	}

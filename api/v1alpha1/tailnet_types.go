@@ -116,6 +116,20 @@ type HeadscaleSpec struct {
 	Ref string `json:"ref,omitempty"`
 }
 
+// ReservedNetwork is address space no TailnetSite may overlap: the node prefix of the control
+// server, and per cluster its LAN, pod, service and tailnet-LB ranges. A site overlapping one of
+// these is blocked with RouteConflict/OverlapsReserved naming this entry.
+type ReservedNetwork struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=set
+	Prefixes []GatewayPrefix `json:"prefixes"`
+}
+
 // TailnetSpec describes a control server and how the operator authenticates to it.
 type TailnetSpec struct {
 	// Defaults inherited by ingress resources that do not select their own TLS source.
@@ -165,6 +179,13 @@ type TailnetSpec struct {
 	// Policy generation from CRs. Off when baseConfigMap is empty.
 	// +optional
 	Policy PolicySpec `json:"policy,omitempty"`
+	// Address space TailnetSite prefixes must not overlap (node prefix, every cluster's LAN/pod/
+	// service/LB ranges on this control server). Only consulted for TailnetSite CRs.
+	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	// +listType=map
+	// +listMapKey=name
+	ReservedNetworks []ReservedNetwork `json:"reservedNetworks,omitempty"`
 }
 
 // PolicyGenerated counts what the operator added to the base policy.

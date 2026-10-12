@@ -1,0 +1,12 @@
+# ExpectedError: spec.prefixes[0]
+---
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetSite
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  owner: netops
+  prefixes:
+    - 0.0.0.0/0

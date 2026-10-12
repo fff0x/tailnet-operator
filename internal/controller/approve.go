@@ -75,17 +75,19 @@ func approvals(nodes []headscale.Node, approvers map[string][]string) map[string
 }
 
 // approveRoutes applies approvals for the rendered policy. Failures are logged and reported as
-// events; they never fail the policy reconcile that called this.
-func (r *TailnetPolicyReconciler) approveRoutes(ctx context.Context, hs *headscale.Client, tn *tnv1.Tailnet, rendered []byte) {
+// events; they never fail the policy reconcile that called this. Returns the node list it worked
+// from, with successful approvals folded in, so callers can observe routes without a second list;
+// nil when the list failed.
+func (r *TailnetPolicyReconciler) approveRoutes(ctx context.Context, hs *headscale.Client, tn *tnv1.Tailnet, rendered []byte) []headscale.Node {
 	l := log.FromContext(ctx)
 	aps, err := policy.Approvers(rendered)
 	if err != nil {
-		return // rendered by us; cannot happen
+		return nil // rendered by us; cannot happen
 	}
 	nodes, err := hs.ListNodes(ctx)
 	if err != nil {
 		l.Error(err, "route approval replay skipped: node list failed")
-		return
+		return nil
 	}
 	for id, a := range approvals(nodes, aps) {
 		if err := hs.SetApprovedRoutes(ctx, id, a.Routes); err != nil {
@@ -100,5 +102,11 @@ func (r *TailnetPolicyReconciler) approveRoutes(ctx context.Context, hs *headsca
 		if r.Recorder != nil {
 			r.Recorder.Eventf(tn, corev1.EventTypeNormal, "RoutesApproved", "node %s: %s", id, strings.Join(a.Added, ", "))
 		}
+		for i := range nodes {
+			if nodes[i].ID == id {
+				nodes[i].ApprovedRoutes = a.Routes
+			}
+		}
 	}
+	return nodes
 }

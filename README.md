@@ -32,6 +32,11 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
   forward TCP; one or more `mode: http` exposes (virtual hosts, each with its own name and optional
   short alias) terminate TLS on the agent with a Secret or cert-manager certificate and forward HTTP
   or explicitly verified HTTPS to the app, routed by SNI — no shared gateway needed.
+- **`TailnetSite`** (cluster-scoped) — a remote network behind a subnet router: a branch `/24`, a
+  management range, a single host as `/32`. Declared once in the policy-owning cluster; the router
+  is identified **by tag**, so a hand-built router in another cluster qualifies. The operator renders
+  the `autoApprovers`, replays approvals, blocks overlaps with `reservedNetworks` or older sites and
+  reports `Advertised`/`Approved`/`Ready`. Who may *reach* the site stays a grant in the base policy.
 - **The tag is the authorization.** Each CR is its own node with its own tag; the policy's grants for
   that tag decide what it may reach (egress) or who may reach it (ingress). Without
   `Tailnet.spec.policy` the operator only *reads* the policy and reports what is missing; with it, the
@@ -134,6 +139,7 @@ before installing the additional CRD.
 | `policy.routeApprovers` | required when on | approvers of generated `/32` routes, e.g. `[tag:fabric]` |
 | `policy.ingressSourceAllowlist` | none | globs an ingress `allowFrom` entry must match, e.g. `["group:*"]` |
 | `defaults.tls.issuerRef` | none | cert-manager issuer used by `mode: http` ingresses that select no TLS source |
+| `reservedNetworks[].{name,prefixes[]}` | none | address space no `TailnetSite` may overlap (node prefix, each cluster's LAN/pod/service/LB ranges); up to 64 entries × 32 prefixes |
 
 ### TailnetEgress (operator namespace)
 
@@ -167,12 +173,23 @@ before installing the additional CRD.
 Kubernetes ≥1.31 is required. CR names, addresses, ports, list sizes and policy inputs are checked
 at admission. See [validation rules and tests](docs/USAGE.md#13-validation) before upgrading CRDs.
 
+### TailnetSite (cluster-scoped)
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `tailnetRef.name` | — | the Tailnet whose policy renders the approvals |
+| `prefixes[]` | — | 1–64 canonical CIDRs; a `/32` is a single host |
+| `advertisedBy.tags[]` | `policy.routeApprovers` | tags of the routers that advertise the prefixes (any Headscale node, operator-managed or not) |
+| `owner` | required | accountable team/person, ≤63 characters; named in conflict messages |
+| `description` | none | free text |
+
 ### Status and conditions
 
 | Kind | Conditions | Notable reasons |
 | --- | --- | --- |
 | `Tailnet` | `ApiReachable`, `ApiKeyValid`, `HeadscaleCompatible`, `PolicyMode`, `SplitDNS`, `UsersUnique`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable` / `Unhealthy` (database down); `Valid` / `Rejected` / `Error`; `Compatible` / `Incompatible` / `CannotVerify` / `ProbeFailed`; `Database` / `File`; `SplitDNS=Unknown/CannotVerify` (manual configuration required); `Unique` / `Duplicate` (two Headscale users share a name — every policy write is rejected until one is destroyed; `status.userConflicts` counts them) / `CannotVerify`; `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyModeFile` (write skipped), `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
 | `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`, `ProbeFailed` (agent not scraped — NetworkPolicy or pod down; nothing is known about routes/dials); `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`, otherwise with the reason of the first blocking condition (`NotRegistered`, `RoutesMissing`, `ProbeFailed`, `Unreachable`); per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved` (re-approved by the operator on the next policy reconcile), `NoGrant`, `ProbeFailed` |
+| `TailnetSite` | `RouteConflict`, `UnmanagedOverlap`, `Advertised`, `Approved`, `Ready` | `OverlapsReserved` / `OverlapsSite` (blocked, nothing rendered; the older site is untouched); `Unmanaged` (a node without an advertiser tag advertises an overlapping route — report only); `NotAdvertised` / `NotApproved` (exact-prefix match on advertiser nodes); `NotObserved` (control server not queried); `Ready` false carries the first blocking reason in the order `RouteConflict`, `Advertised`, `Approved` |
 | `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `TLSReady`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist), `InvalidDNSName`, `DNSNameConflict` (an older CR already claims a name/alias), and for `mode: http` the `TLS*` reasons ([USAGE §6.1](docs/USAGE.md#61-ingress-terminate-tls-on-the-agent)); `Ready` false carries the first blocking reason in the order `Registered`, `PolicyGranted`, `TLSReady`, `BackendsReachable` |
 
 `Tailnet.status.policy` = `{renderedHash, appliedHash, appliedAt, generated{tags,grants,routes}}`;
