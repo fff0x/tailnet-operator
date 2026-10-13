@@ -280,7 +280,7 @@ func TestDefaultRender(t *testing.T) {
 		}
 	}
 	for _, obj := range m {
-		if obj.Kind == "Namespace" || obj.Kind == "PodDisruptionBudget" || obj.Kind == "NetworkPolicy" || obj.Kind == "ConfigMap" || obj.Kind == "GrafanaDashboard" || strings.HasPrefix(obj.APIVersion, "monitoring.coreos.com/") {
+		if obj.Kind == "Namespace" || obj.Kind == "PodDisruptionBudget" || obj.Kind == "NetworkPolicy" || obj.Kind == "CiliumNetworkPolicy" || obj.Kind == "ConfigMap" || obj.Kind == "GrafanaDashboard" || strings.HasPrefix(obj.APIVersion, "monitoring.coreos.com/") {
 			t.Errorf("default chart unexpectedly renders %s/%s", obj.Kind, obj.Metadata.Name)
 		}
 	}
@@ -749,6 +749,8 @@ func TestInvalidValues(t *testing.T) {
 		{"network policy without CIDRs", "networkPolicy: {enabled: true}", "CIDRs"},
 		{"network policy without API CIDRs", "networkPolicy: {enabled: true, headscaleCIDRs: [192.0.2.1/32]}", "kubeAPICIDRs"},
 		{"network policy without Headscale CIDRs", "networkPolicy: {enabled: true, kubeAPICIDRs: [10.96.0.1/32]}", "headscaleCIDRs"},
+		{"network policy unknown provider", "networkPolicy: {enabled: true, provider: calico}", "provider"},
+		{"cilium policy with ipBlock peer", "networkPolicy: {enabled: true, provider: cilium, dnsPeers: [{ipBlock: {cidr: 10.0.0.0/8}}]}", "ipBlock"},
 	}
 	for _, name := range []string{"POD_NAMESPACE", "OPERATOR_IMAGE", "AGENT_IMAGE_PULL_SECRETS", "AGENT_RESOURCES", "SSL_CERT_FILE"} {
 		cases = append(cases, struct{ name, values, diagnostic string }{"reserved " + name, "env: {extra: [{name: " + name + ", value: override}]}", name})
@@ -849,6 +851,78 @@ func TestMonitoringOptIns(t *testing.T) {
 	equal(t, "dashboard sidecar label", cm.Labels["grafana_dashboard"], "1")
 	equal(t, "dashboard extra label", cm.Labels["team"], "platform")
 	equal(t, "dashboard JSON", cm.Data["tailnet-operator.json"], `{"title":"Tailnet operator","panels":[]}`)
+}
+
+// ciliumPolicy decodes the fields the chart renders; no Cilium module is imported.
+type ciliumPolicy struct {
+	Spec struct {
+		EndpointSelector metav1.LabelSelector `json:"endpointSelector"`
+		Egress           []struct {
+			ToEntities  []string               `json:"toEntities"`
+			ToEndpoints []metav1.LabelSelector `json:"toEndpoints"`
+			ToPorts     []struct {
+				Ports []struct{ Port, Protocol string } `json:"ports"`
+			} `json:"toPorts"`
+		} `json:"egress"`
+		Ingress []interface{} `json:"ingress"`
+	} `json:"spec"`
+}
+
+func TestCiliumNetworkPolicy(t *testing.T) {
+	// No CIDRs: the cilium provider needs identities, not addresses.
+	m := render(t, `networkPolicy:
+  enabled: true
+  provider: cilium
+  headscalePorts: [8443]
+  dnsPeers:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: dns-system}}
+      podSelector: {matchLabels: {app: dns}}
+`)
+	for _, obj := range m {
+		if obj.Kind == "NetworkPolicy" {
+			t.Error("provider cilium must not render a NetworkPolicy")
+		}
+	}
+	cnp := decode[ciliumPolicy](t, m.one(t, "CiliumNetworkPolicy"))
+	dep, _ := operator(t, m)
+	if !matches(t, cnp.Spec.EndpointSelector, dep.Spec.Template.Labels) || reflect.DeepEqual(cnp.Spec.EndpointSelector, metav1.LabelSelector{}) {
+		t.Error("CiliumNetworkPolicy must specifically select the operator pod")
+	}
+	if len(cnp.Spec.Ingress) != 0 {
+		t.Error("provider cilium is egress-only; ingress must stay open")
+	}
+	equal(t, "egress rule count", len(cnp.Spec.Egress), 4)
+	hasPort := func(i int, port, protocol string) bool {
+		for _, tp := range cnp.Spec.Egress[i].ToPorts {
+			for _, p := range tp.Ports {
+				if p.Port == port && p.Protocol == protocol {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	equal(t, "kube-apiserver entity", cnp.Spec.Egress[0].ToEntities, []string{"kube-apiserver"})
+	dns := cnp.Spec.Egress[1].ToEndpoints
+	if len(dns) != 1 || dns[0].MatchLabels["app"] != "dns" || dns[0].MatchLabels["k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name"] != "dns-system" || !hasPort(1, "53", "UDP") || !hasPort(1, "53", "TCP") {
+		t.Errorf("DNS peer not translated into Cilium namespace labels: %#v", dns)
+	}
+	hs := cnp.Spec.Egress[2].ToEndpoints
+	if len(hs) != 1 || hs[0].MatchLabels["app.kubernetes.io/name"] != "headscale" || len(hs[0].MatchExpressions) != 0 || !hasPort(2, "8443", "TCP") {
+		t.Errorf("Headscale peer must stay scoped to the operator namespace: %#v", hs)
+	}
+	agents := map[string]bool{}
+	for _, sel := range cnp.Spec.Egress[3].ToEndpoints {
+		name := sel.MatchLabels["app.kubernetes.io/name"]
+		anyNamespace := false
+		for _, e := range sel.MatchExpressions {
+			anyNamespace = anyNamespace || e.Key == "k8s:io.kubernetes.pod.namespace" && e.Operator == metav1.LabelSelectorOpExists
+		}
+		agents[name] = anyNamespace
+	}
+	if _, ok := agents["tailnet-egress"]; !ok || !agents["tailnet-ingress"] || !hasPort(3, "9080", "TCP") {
+		t.Errorf("agent scrape rule must cover egress agents and ingress agents in every namespace: %#v", agents)
+	}
 }
 
 func TestNetworkPolicy(t *testing.T) {

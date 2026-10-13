@@ -151,13 +151,15 @@ See [compatibility](../../docs/COMPATIBILITY.md#http-extension-compatibility-v05
 | monitoring.serviceMonitor.interval | string | `"30s"` | Scrape interval. |
 | monitoring.serviceMonitor.labels | object | `{}` | Additional ServiceMonitor labels for your Prometheus selector. |
 | namespace | string | `""` | Operator namespace; empty uses the Helm release namespace. Bootstrap and working keys live here. |
+| networkPolicy.cilium.headscalePeers | list | `[{"podSelector":{"matchLabels":{"app.kubernetes.io/name":"headscale"}}}]` | Headscale peers for provider cilium (namespaceSelector / podSelector; no ipBlock). Without a namespaceSelector the peer is scoped to the operator namespace. |
 | networkPolicy.dnsPeers | list | `[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"kube-system"}},"podSelector":{"matchLabels":{"k8s-app":"kube-dns"}}}]` | DNS NetworkPolicy peers; customize for NodeLocal DNS or a different resolver. |
-| networkPolicy.enabled | bool | `false` | Enable operator isolation. Requires explicit kubeAPI and Headscale CIDRs; CNI Service-DNAT behavior must be checked locally. |
-| networkPolicy.headscaleCIDRs | list | `[]` | Headscale API endpoint CIDRs (not hostnames). Required when enabled; update when DNS addresses change. |
+| networkPolicy.enabled | bool | `false` | Enable operator isolation. With provider kubernetes this requires explicit kubeAPI and Headscale CIDRs; CNI Service-DNAT behavior must be checked locally. |
+| networkPolicy.headscaleCIDRs | list | `[]` | Headscale API endpoint CIDRs (not hostnames). Required for provider kubernetes; update when DNS addresses change. |
 | networkPolicy.headscalePorts | list | `[443,8080]` | Headscale REST API TCP ports. |
-| networkPolicy.kubeAPICIDRs | list | `[]` | API endpoint and/or Service CIDRs appropriate for your CNI, e.g. [10.96.0.1/32]. Required when enabled. |
+| networkPolicy.kubeAPICIDRs | list | `[]` | API endpoint and/or Service CIDRs appropriate for your CNI, e.g. [10.96.0.1/32]. Required for provider kubernetes. |
 | networkPolicy.kubeAPIPorts | list | `[443,6443]` | Kubernetes API TCP ports. |
-| networkPolicy.metricsPeers | list | `[]` | Peers permitted to scrape metrics. Empty denies metrics ingress when isolation is enabled. |
+| networkPolicy.metricsPeers | list | `[]` | Peers permitted to scrape metrics (provider kubernetes). Empty denies metrics ingress when isolation is enabled. |
+| networkPolicy.provider | string | `"kubernetes"` | `kubernetes` renders a NetworkPolicy (ingress and egress, ipBlock-based). `cilium` renders an egress-only CiliumNetworkPolicy using `toEntities: kube-apiserver` and label selectors — ipBlock peers are rejected, ingress stays open, requires the cilium.io/v2 CRDs. |
 | podSecurityContext | object | `{"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod security context; the scratch image requires a numeric non-root UID. |
 | replicas | int | `1` | Operator replicas; more than one requires leaderElection.enabled. A PDB with minAvailable=1 is rendered for multiple replicas. |
 | resources | object | `{"limits":{"memory":"128Mi"},"requests":{"cpu":"25m","memory":"64Mi"}}` | Operator resource requests and limits. |

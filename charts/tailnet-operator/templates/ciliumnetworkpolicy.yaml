@@ -1,0 +1,49 @@
+{{- if and .Values.networkPolicy.enabled (eq .Values.networkPolicy.provider "cilium") }}
+# Egress-only: the operator may reach exactly the four destinations it dials. Ingress (metrics
+# :8080, health :8081) stays open. If any rule is missing the operator fails silently; keep this
+# in sync with what internal/controller dials.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "tailnet-operator.name" . | quote }}
+  namespace: {{ include "tailnet-operator.namespace" . | quote }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "tailnet-operator.selector" . | nindent 6 }}
+  egress:
+    # 1. kube-apiserver — watch/patch CRs, Secrets, child objects
+    - toEntities:
+        - kube-apiserver
+    {{- with .Values.networkPolicy.dnsPeers }}
+    # 2. cluster DNS — resolve the Headscale Service and the agent pods
+    - toEndpoints:
+        {{- include "tailnet-operator.ciliumEndpoints" . | trim | nindent 8 }}
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+    {{- end }}
+    # 3. Headscale — the REST API (mint/rotate keys, list nodes, read/write policy)
+    - toEndpoints:
+        {{- include "tailnet-operator.ciliumEndpoints" .Values.networkPolicy.cilium.headscalePeers | trim | nindent 8 }}
+      toPorts:
+        - ports:
+            {{- range .Values.networkPolicy.headscalePorts }}
+            - {port: {{ . | quote }}, protocol: TCP}
+            {{- end }}
+    # 4. agent pods — scrape /status and /targets on :9080. Cilium scopes toEndpoints to the
+    #    policy namespace unless the namespace label is matched; ingress agents run in tenant
+    #    namespaces, so select across all of them.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: tailnet-egress
+        - matchLabels:
+            app.kubernetes.io/name: tailnet-ingress
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            - {port: "9080", protocol: TCP}
+{{- end }}

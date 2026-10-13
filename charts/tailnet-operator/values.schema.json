@@ -60,8 +60,10 @@
         "folder": {"type": "string", "minLength": 1}, "allowCrossNamespaceImport": {"type": "boolean"}, "datasourceName": {"type": "string", "minLength": 1}
       }}
     }},
-    "networkPolicy": {"type": "object", "additionalProperties": false, "required": ["enabled", "kubeAPICIDRs", "kubeAPIPorts", "headscaleCIDRs", "headscalePorts", "dnsPeers", "metricsPeers"], "properties": {
+    "networkPolicy": {"type": "object", "additionalProperties": false, "required": ["enabled", "provider", "cilium", "kubeAPICIDRs", "kubeAPIPorts", "headscaleCIDRs", "headscalePorts", "dnsPeers", "metricsPeers"], "properties": {
       "enabled": {"type": "boolean"},
+      "provider": {"enum": ["kubernetes", "cilium"]},
+      "cilium": {"type": "object", "additionalProperties": false, "required": ["headscalePeers"], "properties": {"headscalePeers": {"$ref": "#/definitions/peers"}}},
       "kubeAPICIDRs": {"$ref": "#/definitions/cidrs"},
       "kubeAPIPorts": {"$ref": "#/definitions/ports"},
       "headscaleCIDRs": {"$ref": "#/definitions/cidrs"},

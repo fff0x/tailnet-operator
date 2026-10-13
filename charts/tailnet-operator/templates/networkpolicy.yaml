@@ -1,4 +1,4 @@
-{{- if .Values.networkPolicy.enabled }}
+{{- if and .Values.networkPolicy.enabled (eq .Values.networkPolicy.provider "kubernetes") }}
 {{- if not .Values.networkPolicy.kubeAPICIDRs }}
 {{- fail "networkPolicy.kubeAPICIDRs is required when networkPolicy.enabled=true" }}
 {{- end }}

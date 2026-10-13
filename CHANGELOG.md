@@ -6,6 +6,9 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Added
 
+- `networkPolicy.provider: cilium` renders an egress-only `CiliumNetworkPolicy` (`toEntities: kube-apiserver`,
+  label peers, no CIDRs) in place of the ipBlock-based NetworkPolicy; `kubernetes` stays the default.
+
 - `TailnetGateway` conditions are exported through `tailnet_resource_ready`/`tailnet_resource_condition`
   (suspended gateways are withdrawn), and the chart alert `TailnetGatewayFreshBlocked` (warning, 5 min)
   pages when the fresh writer blocks — follow-up to the 2026-10-07 expired-key incident (Issue `cdcfb19`).

@@ -110,13 +110,21 @@ monitoring:
     # -- Grafana Operator datasource name mapped to the bundled DS_PROMETHEUS input. Sidecar users must configure input substitution separately.
     datasourceName: Prometheus
 networkPolicy:
-  # -- Enable operator isolation. Requires explicit kubeAPI and Headscale CIDRs; CNI Service-DNAT behavior must be checked locally.
+  # -- Enable operator isolation. With provider kubernetes this requires explicit kubeAPI and Headscale CIDRs; CNI Service-DNAT behavior must be checked locally.
   enabled: false
-  # -- API endpoint and/or Service CIDRs appropriate for your CNI, e.g. [10.96.0.1/32]. Required when enabled.
+  # -- `kubernetes` renders a NetworkPolicy (ingress and egress, ipBlock-based). `cilium` renders an egress-only CiliumNetworkPolicy using `toEntities: kube-apiserver` and label selectors — ipBlock peers are rejected, ingress stays open, requires the cilium.io/v2 CRDs.
+  provider: kubernetes
+  cilium:
+    # -- Headscale peers for provider cilium (namespaceSelector / podSelector; no ipBlock). Without a namespaceSelector the peer is scoped to the operator namespace.
+    headscalePeers:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: headscale
+  # -- API endpoint and/or Service CIDRs appropriate for your CNI, e.g. [10.96.0.1/32]. Required for provider kubernetes.
   kubeAPICIDRs: []
   # -- Kubernetes API TCP ports.
   kubeAPIPorts: [443, 6443]
-  # -- Headscale API endpoint CIDRs (not hostnames). Required when enabled; update when DNS addresses change.
+  # -- Headscale API endpoint CIDRs (not hostnames). Required for provider kubernetes; update when DNS addresses change.
   headscaleCIDRs: []
   # -- Headscale REST API TCP ports.
   headscalePorts: [443, 8080]
@@ -128,5 +136,5 @@ networkPolicy:
       podSelector:
         matchLabels:
           k8s-app: kube-dns
-  # -- Peers permitted to scrape metrics. Empty denies metrics ingress when isolation is enabled.
+  # -- Peers permitted to scrape metrics (provider kubernetes). Empty denies metrics ingress when isolation is enabled.
   metricsPeers: []

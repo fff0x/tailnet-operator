@@ -46,3 +46,33 @@ app.kubernetes.io/name: {{ .Chart.Name | quote }}
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- /*
+ciliumEndpoints translates NetworkPolicyPeer entries into Cilium endpoint selectors so the
+kubernetes and cilium providers share the same peer values. Namespace labels become
+k8s:io.cilium.k8s.namespace.labels.<key>; an empty namespaceSelector means any namespace;
+no namespaceSelector keeps Cilium's default scope (the policy namespace). ipBlock has no
+identity in Cilium and is rejected.
+*/ -}}
+{{- define "tailnet-operator.ciliumEndpoints" -}}
+{{- range . }}
+{{- if .ipBlock }}{{ fail "networkPolicy.provider cilium cannot translate ipBlock peers; use namespaceSelector/podSelector" }}{{ end }}
+{{- $labels := dict }}
+{{- $exprs := list }}
+{{- with .podSelector }}
+{{- range $k, $v := .matchLabels }}{{ $_ := set $labels $k $v }}{{ end }}
+{{- range .matchExpressions }}{{ $exprs = append $exprs . }}{{ end }}
+{{- end }}
+{{- if hasKey . "namespaceSelector" }}
+{{- $ns := .namespaceSelector | default dict }}
+{{- if and (not $ns.matchLabels) (not $ns.matchExpressions) }}
+{{- $exprs = append $exprs (dict "key" "k8s:io.kubernetes.pod.namespace" "operator" "Exists") }}
+{{- end }}
+{{- range $k, $v := $ns.matchLabels }}{{ $_ := set $labels (printf "k8s:io.cilium.k8s.namespace.labels.%s" $k) $v }}{{ end }}
+{{- range $ns.matchExpressions }}{{ $exprs = append $exprs (merge (dict "key" (printf "k8s:io.cilium.k8s.namespace.labels.%s" .key)) .) }}{{ end }}
+{{- end }}
+- matchLabels: {{ $labels | toJson }}
+{{- with $exprs }}
+  matchExpressions: {{ . | toJson }}
+{{- end }}
+{{- end }}
+{{- end -}}
