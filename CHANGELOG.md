@@ -2,6 +2,17 @@
 
 Notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Documentation
+
+- `docs/README.md` indexes every page with reading paths by role; USAGE §12a lists what the operator
+  persists, what must be backed up and what happens while the operator is down.
+- The chart README's permissions paragraph describes the shipped RBAC (no CR spec writes, gateway `patch`
+  only for the teardown finalizer) instead of a planned DNS claim history; stale `0.7.1` version pins
+  updated; the gateway is described by its scope (fresh-only, no adoption, IPv4) rather than as
+  "experimental".
+
 ## [0.14.2] - 2026-10-13
 
 ### Added

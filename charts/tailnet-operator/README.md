@@ -27,13 +27,13 @@ manual installation, or `install.crds: CreateReplace` / `upgrade.crds: CreateRep
 
 ## Permissions
 
-The chart grants main-resource PATCH for ingress CRs cluster-wide and egress CRs in the operator
-namespace, intended for future drain finalizers. PATCH also permits spec edits; RBAC cannot restrict
-it to metadata. Main Tailnet resources remain read-only. ReplicaSets and Pods have only
-`get/list/watch`; Services remain operator-namespace scoped. Review the
-[exact RBAC reference](../../docs/reference/rbac.md) and
-[DNS history schema limitations](../../docs/SECURITY.md#dns-claim-history-schema-not-lifecycle-enforcement).
-The schema/RBAC addition installs no finalizers and implements no DNS lifecycle or publisher behavior.
+The operator never writes a CR spec. `Tailnet`, `TailnetEgress`, `TailnetIngress` and `TailnetSite`
+are `get/list/watch` plus `status` and (where owner references need it) `finalizers`; `TailnetGateway`
+additionally has `patch` on the main resource, used only to add or remove the `deletionPolicy: Delete`
+teardown finalizer (identity fields stay immutable through CEL for every writer). Pods and
+ReplicaSets are read-only; Services stay operator-namespace scoped; cert-manager access is limited to
+`Certificate` objects. The generated [RBAC reference](../../docs/reference/rbac.md) lists every rule
+and `task rbac-check` fails CI when chart and reference drift.
 
 ## Leader election and availability
 

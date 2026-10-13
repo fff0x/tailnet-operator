@@ -49,7 +49,7 @@ Operator and agent pods run as non-root numeric users with `RuntimeDefault` secc
 escalation, all capabilities dropped and a read-only root filesystem. Agents keep a writable `/state`
 and do not mount a ServiceAccount token.
 
-The experimental kernel Gateway is different: Tailscale uses UID 0, only NET_ADMIN,
+The kernel-mode `TailnetGateway` is different: Tailscale uses UID 0, only NET_ADMIN,
 and `/dev/net/tun`; CoreDNS uses UID 65532 and only NET_BIND_SERVICE. Its projected
 API token can get/update/patch only its pre-created State Secret. It cannot create
 state or list Secrets. The operator reads private state keys in memory to verify
@@ -106,7 +106,7 @@ bound together independently of the registry:
 
 ```sh
 rad clone rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX && cd tailnet-operator
-rad-artifact show v0.7.1 --pretty          # creator must be a delegate; shows image/chart digests
+rad-artifact show v0.14.2 --pretty          # creator must be a delegate; shows image/chart digests
 test "$(rad-artifact cid deploy/cosign.pub)" = "<cid from show>"
 ```
 

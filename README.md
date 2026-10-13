@@ -17,6 +17,7 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
 | **Install** — Headscale, operator, CoreDNS, gateway, policy mode, upgrade, rollback | [docs/INSTALL.md](docs/INSTALL.md) |
 | **Use & operate** — recipes for egress, ingress, policy, keys, diagnosis | [docs/USAGE.md](docs/USAGE.md) |
 | **Reference** — CRD fields, conditions, metrics | [below](#crd-reference) |
+| **All docs by role** — evaluator, installer, SRE, tenant, policy admin, auditor, contributor | [docs/README.md](docs/README.md) |
 
 ## Model
 
@@ -109,11 +110,12 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 
 ## CRD reference
 
-The development [TailnetGateway API](docs/reference/gateway.md) is experimental and
-suspended by default. Explicit `suspend: false` enables fresh IPv4 creation with
-persistent identity checks. It does not adopt, update or replace retained gateways.
-Review its [migration boundary](docs/COMPATIBILITY.md#experimental-gateway-api)
-before installing the additional CRD.
+The [TailnetGateway API](docs/reference/gateway.md) (subnet router + split-DNS as a kernel-mode
+StatefulSet) is **fresh-only and suspended by default**: explicit `suspend: false` creates a new
+IPv4 gateway with a persistent identity; it does not adopt, update or replace an existing gateway, and
+IPv6 is not yet supported. It runs in production on arm64 and amd64 ([verified
+platforms](docs/reference/gateway.md#verified-platforms)); review its
+[scope and migration boundary](docs/COMPATIBILITY.md#gateway-api-scope) before installing the CRD.
 
 ### Tailnet
 

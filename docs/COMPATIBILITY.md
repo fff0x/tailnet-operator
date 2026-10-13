@@ -52,9 +52,9 @@ Before downgrading below v0.5.0, move extended ingresses to a verified legacy ga
 Do not remove backend TLS to make old agents accept the configuration.
 The two timeout fields do not reproduce Envoy connection-idle or stream-idle policies; review those separately before migrating applications.
 
-## Experimental gateway API
+## Gateway API scope
 
-The development `TailnetGateway` CRD defaults to `suspend: true`. Explicit `false`
+The `TailnetGateway` CRD is fresh-only and defaults to `suspend: true`. Explicit `false`
 activates fresh-only IPv4 creation; existing gateways are never adopted or replaced.
 The operator/chart require this fourth CRD, gateway read/status authorization and
 operator-namespace get/create/delete for StatefulSets, PDBs, ServiceAccounts, Roles and
@@ -80,7 +80,7 @@ See the [gateway reference](reference/gateway.md).
 The legacy `tailnet.this-is-fine.io` → `tsunaro.io` ownership-inventory helper supports
 exactly the original three kinds. Discovery of `TailnetGateway` deliberately blocks
 that helper, even with no gateway instances. Complete the legacy handover using the
-reviewed three-kind API set **before** installing this experimental CRD. Do not
+reviewed three-kind API set **before** installing the gateway CRD. Do not
 invent a legacy gateway kind, omit discovered resources, or delete a CRD to bypass
 this guard. A broader migration contract requires separate review.
 

@@ -1,4 +1,8 @@
-# TailnetGateway: experimental fresh-only writer
+# TailnetGateway: fresh-only writer
+
+Status: in production ([verified platforms](#verified-platforms)); scope is deliberately narrow —
+fresh IPv4 gateways only, no adoption of existing nodes ([adoption and retention](#adoption-and-retention)),
+no IPv6. The contract below (receipts, immutable identity, `OnDelete` StatefulSet) is stable since v0.11.0.
 
 **`spec.suspend` defaults to `true`. Setting it to `false` opts into fresh IPv4 creation.**
 The cluster-scoped `tsunaro.io/v1alpha1` resource does not adopt existing gateways.
@@ -17,7 +21,7 @@ RoleBindings, and `patch` on `tailnetgateways` for the teardown finalizer. `dele
 used only by the teardown and always with a UID precondition. There are no update,
 escalation, binding or CR-spec grants.
 Do not remove an existing gateway, move its Secret, or change Headscale split-DNS
-because this CRD is installed. See [compatibility](../COMPATIBILITY.md#experimental-gateway-api).
+because this CRD is installed. See [compatibility](../COMPATIBILITY.md#gateway-api-scope).
 
 ## Minimal fresh lifecycle
 
