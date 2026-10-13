@@ -664,6 +664,57 @@ The fresh resource model above includes a StatefulSet and Services, but source
 watches and update serial persistence remain pending. The active controller creates
 only the initial snapshot and never rewrites or resets a retained DNS ConfigMap.
 
+## Key and expiry lifecycle
+
+The gateway touches exactly one credential: a reusable, non-ephemeral pre-auth key with the
+gateway's tags and a 24-hour expiry that the operator mints for the bootstrap
+([auth mint](#pure-fresh-resource-renderer)). The key is spent once the completion receipt exists;
+its expiry is recorded as a value and never compared against the clock again. Nothing is renewed,
+re-minted or rotated afterwards, and nothing has to be:
+
+- **Node key.** Headscale registers a pre-auth-key node without an expiry (`expiry: null`;
+  observed on Headscale 0.29.3 with a gateway whose bootstrap key had expired days earlier and
+  that stayed online). The node never needs to re-authenticate.
+- **Pod recreation.** The StatefulSet is `OnDelete`; a deleted or evicted Pod comes back with
+  the same state Secret and re-joins with its stored node key — no auth key is involved. The kind
+  suite (`TestGatewayFreshPod`, phase `recreated`) proves identity, node ID and container IDs
+  survive the recreation.
+- **State Secret loss.** There is no recovery: a gateway whose state Secret is gone is a new node.
+  Delete the CR (`deletionPolicy: Delete` tears down Headscale node and resources) and create it
+  again; the operator mints a fresh bootstrap key for the new identity.
+- **Blocked bootstrap.** An expired or drifted key before the receipt, unverified provenance or
+  template drift stop the writer with `Ready=False/FreshBlocked`; the chart alert
+  `TailnetGatewayFreshBlocked` fires after five minutes ([USAGE](../USAGE.md#monitoring-gateway-fresh-blocked)).
+
+## Rollback
+
+The operator never restarts the Pod and never de-approves routes, so every rollback is a spec revert
+plus, at most, one Pod deletion. The receipt is not touched by any of these.
+
+| Situation | Action | What stays |
+|---|---|---|
+| New `image`/`dns.image` misbehaves | revert the image fields; `WorkloadCurrent=PodTemplateStale` → delete Pod `<gateway>-0` | node identity, routes, state Secret |
+| Wrong `routes.lan` / `tailnetLBCIDR` / egress route | revert the spec; the template follows within 5 s; delete the Pod to re-advertise | approvals in Headscale (removed routes stay approved — withdraw by hand with `headscale nodes approve-routes` if they must go) |
+| Pool labels wrong | revert `service.poolLabels`; only keys recorded in `tsunaro.io/pool-label-keys` are removed | LoadBalancer IP |
+| Pinned identity field changed (`IdentityChanged`) | revert the field — nothing was written; or recreate with `deletionPolicy: Delete` | everything until you recreate |
+| Bootstrap blocked (`FreshBlocked`) before a receipt | fix the cause (key, provenance, template); no partial state is adopted or retried automatically | retained partial resources, delete with `Delete` to clear |
+| Operator downgrade | receipts are format 3 (v0.10.0) with the digest rule of v0.11.0, migrated in place; an older operator reports `IdentityChanged` or a digest mismatch and writes nothing — downgrade only to ≥ 0.11.0 | the running gateway keeps serving |
+| Frozen zone / stale aliases | the zone follows the hosts source once `Ready` returns; never edit the derived ConfigMap by hand (digest mismatch blocks the next write) | |
+
+What a rollback cannot do: un-approve routes, restore a lost state Secret, or move the node to a
+different identity. Those are new gateways.
+
+## Gateway NetworkPolicy — deliberately none
+
+The operator renders NetworkPolicies for its agents but not for the gateway Pod, and this is a
+decision, not a gap. A gateway must accept DNS (53/udp+tcp) from every cluster Pod and from LAN
+clients behind the LoadBalancer, and WireGuard UDP from the tailnet; both have to stay open to
+unbounded sources. A policy could therefore only restrict `kernel-health` :8080 (kubelet probes)
+and `metrics-dns` :9153 (scrapers) — little gain for the risk that the first ingress rule
+default-denies DNS or WireGuard on a CNI whose LoadBalancer source handling differs. If a site
+needs it, a site-owned policy that whitelists 53, the WireGuard port, 8080 and the scrape peers is
+the complete rule set; the operator will not render half of it.
+
 ## Adoption and retention
 
 `adoption` is optional but immutable once the CR is created. It contains:
@@ -689,6 +740,16 @@ Headscale node. The read-only planner also does not implement transactional
 multi-object takeover. A future writer must revalidate snapshots, use UID/resource-
 version preconditions, preserve externally owned credentials, and coordinate with
 GitOps. Ephemeral-agent duplicate deletion and node renaming must not be reused.
+
+## Verified platforms
+
+| Platform | Evidence |
+|---|---|
+| Linux amd64 | the kind suites and the isolated bootstrap gate run on amd64 ([above](#isolated-fresh-pod-bootstrap-gate)) |
+| Linux arm64 | production gateway on an all-arm64 Talos cluster (Talos v1.13.10, kernel 6.18, containerd 2.2): Pod running since 2026-10-06, node online, routes advertised and approved; the pinned `tailscale` and `coredns` digests are multi-arch indexes carrying `linux/arm64` (`skopeo inspect --raw docker://<image>@<digest> \| jq '[.manifests[].platform.architecture]'`) |
+
+The kernel preflight (tun, forwarding, sysctls) is architecture-independent; a new OS image is
+qualified by the preflight result, not by the CPU.
 
 ## Status
 
@@ -716,8 +777,10 @@ every five seconds; unchanged status is not rewritten.
 Status patches use resource-version preconditions. Conflicts retry through the
 work queue, unchanged status is not rewritten, and status-only events withdraw
 stale success conditions. API errors retain machine-readable classification but
-expose only fixed, non-sensitive text. There are no gateway-specific operational
-metrics or alerts yet; generic Ready gauges do not include suspended gateways.
+expose only fixed, non-sensitive text. Active gateways export the generic
+`tailnet_resource_ready`/`tailnet_resource_condition` gauges (kind `TailnetGateway`) and
+`TailnetGatewayFreshBlocked` fires after 5 min of `Ready=False/FreshBlocked`; suspended gateways
+are withdrawn from the gauges. There are no gateway request or data-path metrics yet.
 
 Isolated API-server tests exercise the production manager with generated RBAC,
 status events and deletion without state mutation. No kubelet or garbage collector
