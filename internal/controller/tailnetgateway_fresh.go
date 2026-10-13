@@ -88,6 +88,7 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 		if err := r.RuntimeClient.Status().Patch(ctx, g, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return ctrl.Result{}, &gatewayAPIError{operation: "fresh status write", cause: err}
 		}
+		r.Metrics.Observe(g)
 	}
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }

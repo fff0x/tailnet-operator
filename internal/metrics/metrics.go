@@ -169,7 +169,8 @@ func (m *Metrics) delete(id identity) {
 
 func conditionType(s string) string {
 	switch s {
-	case "Ready", "ApiKeyValid", "ApiReachable", "PolicyMode", "HeadscaleCompatible", "SplitDNS", "UsersUnique", "PolicyRendered", "PolicyApplied", "TagKnown", "Registered", "ServiceConflict", "RoutesGranted", "TargetsReachable", "BackendsReachable", "PolicyGranted", "TLSReady", "TLSCleanup", "RouteConflict", "UnmanagedOverlap", "Advertised", "Approved":
+	case "Ready", "ApiKeyValid", "ApiReachable", "PolicyMode", "HeadscaleCompatible", "SplitDNS", "UsersUnique", "PolicyRendered", "PolicyApplied", "TagKnown", "Registered", "ServiceConflict", "RoutesGranted", "TargetsReachable", "BackendsReachable", "PolicyGranted", "TLSReady", "TLSCleanup", "RouteConflict", "UnmanagedOverlap", "Advertised", "Approved",
+		"RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "WorkloadCurrent", "ServiceReady":
 		return s
 	default:
 		return "Other"
@@ -185,7 +186,9 @@ func reason(s string) string {
 		"TLSProbePending", "TLSProbeFailed", "TLSProbeStale", "TLSConfigMismatch", "TLSCertificateMismatch",
 		"DNSNameConflict", "DNSConflictUnresolved", "DNSEgressTargetInvalid", "DNSEgressAliasInvalid",
 		"DNSEgressAliasAmbiguous", "DNSClaimIdentityInvalid", "DNSClaimInputInvalid",
-		"OverlapsReserved", "OverlapsSite", "Unmanaged", "None", "NotObserved", "Advertised", "Approved", "RouteConflict":
+		"OverlapsReserved", "OverlapsSite", "Unmanaged", "None", "NotObserved", "Advertised", "Approved", "RouteConflict",
+		"FreshBlocked", "IdentityChanged", "Provisioning", "FreshRuntimeReady", "RuntimeUnavailable", "ExternallyManaged",
+		"DNSInSync", "DNSUpdateConflict", "DNSUpdateBlocked", "LBPending", "LoadBalancerAssigned":
 		return s
 	default:
 		return "Other"
@@ -225,6 +228,16 @@ func (m *Metrics) Observe(obj metav1.Object) {
 		kind = "TailnetSite"
 		tailnet = o.Spec.TailnetRef.Name
 		conditions = o.Status.Conditions
+	case *tnv1.TailnetGateway:
+		kind = "TailnetGateway"
+		tailnet = string(o.Spec.TailnetRef.Name)
+		conditions = o.Status.Conditions
+		// A suspended gateway reports Ready=False/Suspended by design; exporting it would page
+		// TailnetResourceNotReady forever. Suspended gateways are absent from the gauges.
+		if o.Spec.Suspend == nil || *o.Spec.Suspend {
+			m.delete(identity{kind, "", o.Name})
+			return
+		}
 	default:
 		return
 	}

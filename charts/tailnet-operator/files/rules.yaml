@@ -96,6 +96,15 @@
         summary: A node without an advertiser tag advertises a route overlapping a TailnetSite
         description: Report only; the managed route still ships and clients pick the longest prefix. The condition message names the node.
         runbook_url: docs/USAGE.md#monitoring-unmanaged-route-overlap
+    - alert: TailnetGatewayFreshBlocked
+      expr: max by (name, tailnet) ((tailnet_resource_condition{kind="TailnetGateway",type="Ready",reason="FreshBlocked"} == 1) * on (job, instance, kind, namespace, name) group_left(tailnet) tailnet_resource_ready{kind="TailnetGateway"})
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: TailnetGateway bootstrap is blocked
+        description: The fresh writer refuses to continue (expired or drifted bootstrap key, unverified provenance, template drift) and nothing is written. Read the Ready message; the zone stays frozen until the cause is reverted.
+        runbook_url: docs/USAGE.md#monitoring-gateway-fresh-blocked
     - alert: TailnetNodeOffline
       expr: min by (kind, namespace, name) (tailnet_node_online) == 0
       for: 5m

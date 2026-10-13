@@ -293,7 +293,24 @@ tests:
         values: '1x40'
       - series: 'tailnet_resource_condition{kind="TailnetSite",namespace="",name="branch-a",type="UnmanagedOverlap",reason="Unmanaged"}'
         values: '1x40'
+      - series: 'tailnet_resource_ready{kind="TailnetGateway",namespace="",name="hub-gw",tailnet="lab"}'
+        values: '0x40'
+      - series: 'tailnet_resource_condition{kind="TailnetGateway",namespace="",name="hub-gw",type="Ready",reason="FreshBlocked"}'
+        values: '1x40'
+      - series: 'tailnet_resource_condition{kind="TailnetGateway",namespace="",name="hub-gw",type="Ready",reason="Provisioning"}'
+        values: '0x40'
     alert_rule_test:
+      - eval_time: 4m
+        alertname: TailnetGatewayFreshBlocked
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: TailnetGatewayFreshBlocked
+        exp_alerts:
+          - exp_labels: {name: hub-gw, tailnet: lab, severity: warning}
+            exp_annotations:
+              summary: TailnetGateway bootstrap is blocked
+              description: The fresh writer refuses to continue (expired or drifted bootstrap key, unverified provenance, template drift) and nothing is written. Read the Ready message; the zone stays frozen until the cause is reverted.
+              runbook_url: docs/USAGE.md#monitoring-gateway-fresh-blocked
       - eval_time: 14m
         alertname: TailnetRouteConflict
         exp_alerts: []

@@ -43,7 +43,7 @@ func TestBundledRules(t *testing.T) {
 	spec := builtinRules(t)
 	equal(t, "group count", len(spec.Groups), 1)
 	rules := spec.Groups[0].Rules
-	equal(t, "rule count", len(rules), 15)
+	equal(t, "rule count", len(rules), 16)
 	usage, err := os.ReadFile(filepath.Join(chartPath(t), "..", "..", "docs", "USAGE.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestBundledRules(t *testing.T) {
 			equal(t, "pending duration", rule.For, "15m")
 		}
 	}
-	for _, name := range []string{"TailnetOperatorDown", "TailnetReconcileErrors", "TailnetHeadscaleAPIErrors", "TailnetResourceNotReady", "TailnetPolicyStale", "TailnetPolicyRejected", "TailnetPolicyApplyErrors", "TailnetPolicyGeneratedDrop", "TailnetApprovalReplays", "TailnetRouteConflict", "TailnetUnmanagedRouteOverlap", "TailnetNodeOffline", "TailnetAPIKeyExpiringSoon", "TailnetEgressAuthKeyExpiringSoon", "TailnetIngressAuthKeyExpiringSoon"} {
+	for _, name := range []string{"TailnetOperatorDown", "TailnetReconcileErrors", "TailnetHeadscaleAPIErrors", "TailnetResourceNotReady", "TailnetPolicyStale", "TailnetPolicyRejected", "TailnetPolicyApplyErrors", "TailnetPolicyGeneratedDrop", "TailnetApprovalReplays", "TailnetRouteConflict", "TailnetUnmanagedRouteOverlap", "TailnetGatewayFreshBlocked", "TailnetNodeOffline", "TailnetAPIKeyExpiringSoon", "TailnetEgressAuthKeyExpiringSoon", "TailnetIngressAuthKeyExpiringSoon"} {
 		if !seen[name] {
 			t.Errorf("missing alert %s", name)
 		}

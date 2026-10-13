@@ -297,6 +297,27 @@ func TestSharedManagerRegistrationAndOperations(t *testing.T) {
 	}
 }
 
+func TestGatewayConditions(t *testing.T) {
+	m, reg := isolated(t)
+	off, on := true, false
+	gw := &tnv1.TailnetGateway{ObjectMeta: metav1.ObjectMeta{Name: "hub-gw", Generation: 3}}
+	gw.Spec.TailnetRef.Name = "hub"
+	gw.Spec.Suspend = &on
+	gw.Status.Conditions = []metav1.Condition{cond("Ready", "FreshBlocked", metav1.ConditionFalse, 3)}
+	m.Observe(gw)
+	value(t, reg, "tailnet_resource_ready", map[string]string{"kind": "TailnetGateway", "name": "hub-gw", "tailnet": "hub"}, 0)
+	value(t, reg, "tailnet_resource_condition", map[string]string{"kind": "TailnetGateway", "name": "hub-gw", "type": "Ready", "reason": "FreshBlocked"}, 1)
+	// Suspension withdraws the gauges instead of paging TailnetResourceNotReady forever.
+	gw.Spec.Suspend = &off
+	gw.Status.Conditions = []metav1.Condition{cond("Ready", "Suspended", metav1.ConditionFalse, 3)}
+	m.Observe(gw)
+	for _, name := range []string{"tailnet_resource_ready", "tailnet_resource_condition"} {
+		if len(samples(t, reg, name)) != 0 {
+			t.Fatalf("%s exported for a suspended gateway", name)
+		}
+	}
+}
+
 func TestSiteConditions(t *testing.T) {
 	m, reg := isolated(t)
 	site := &tnv1.TailnetSite{ObjectMeta: metav1.ObjectMeta{Name: "branch-a", Generation: 2}}

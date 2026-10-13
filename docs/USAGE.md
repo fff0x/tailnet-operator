@@ -646,7 +646,7 @@ monitoring:
 
 ### Metric interpretation
 
-- `tailnet_resource_ready` exists only for the current-generation `Ready` condition; `Tailnet` has none.
+- `tailnet_resource_ready` exists only for the current-generation `Ready` condition; `Tailnet` has none, suspended `TailnetGateway`s are withdrawn.
 - `tailnet_resource_condition` is 1 for the active reason and 0 for previously seen reasons — read type and reason, not the value as a boolean.
 - `tailnet_policy_pending` is 1 only in `Apply` mode while `renderedHash != appliedHash`; an old `appliedAt` alone is healthy.
 - `tailnet_headscale_user_conflicts` mirrors `status.userConflicts` (shared Headscale user names); anything above 0 blocks policy writes.
@@ -720,6 +720,15 @@ advertiser tags has advertised a route overlapping the site (e.g. a laptop runni
 `--advertise-routes` for debugging). The managed route still ships and clients pick the longest
 prefix. Find the node in the `UnmanagedOverlap` message and withdraw its route, or add the tag if it
 is a legitimate second router.
+
+### Monitoring: gateway fresh blocked
+
+`TailnetGatewayFreshBlocked`: a `TailnetGateway` has reported `Ready=False/FreshBlocked` for 5 min.
+The fresh writer found an expired or drifted bootstrap key, unverified provenance or template
+drift and writes nothing; the derived zone keeps its last state. The `Ready` message names the
+check that failed — see the gateway reference for each case. Suspended gateways are absent from
+`tailnet_resource_ready`/`tailnet_resource_condition` and never raise this or
+`TailnetResourceNotReady`.
 
 ### Monitoring: key expiry
 

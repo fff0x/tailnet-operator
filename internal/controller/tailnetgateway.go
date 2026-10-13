@@ -13,6 +13,7 @@ import (
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/gateway"
+	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 )
 
 // TailnetGatewayReconciler keeps suspension read-only and explicitly opts fresh
@@ -23,6 +24,7 @@ type TailnetGatewayReconciler struct {
 	RuntimeClient     client.Client
 	OperatorNamespace string
 	Recorder          record.EventRecorder
+	Metrics           *operatormetrics.Metrics
 }
 
 // gatewayAPIError retains classification without exposing API response bodies,
@@ -39,6 +41,7 @@ func (r *TailnetGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	var gw tnv1.TailnetGateway
 	if err := r.Get(ctx, req.NamespacedName, &gw); err != nil {
 		if client.IgnoreNotFound(err) == nil {
+			r.Metrics.Delete("TailnetGateway", "", req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, &gatewayAPIError{operation: "resource read", cause: err}
@@ -96,6 +99,7 @@ func (r *TailnetGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.Status().Patch(ctx, &gw, patch); err != nil {
 		return ctrl.Result{}, &gatewayAPIError{operation: "status write", cause: err}
 	}
+	r.Metrics.Observe(&gw)
 	return ctrl.Result{}, nil
 }
 

@@ -4,6 +4,12 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- `TailnetGateway` conditions are exported through `tailnet_resource_ready`/`tailnet_resource_condition`
+  (suspended gateways are withdrawn), and the chart alert `TailnetGatewayFreshBlocked` (warning, 5 min)
+  pages when the fresh writer blocks — follow-up to the 2026-10-07 expired-key incident (Issue `cdcfb19`).
+
 ### Changed
 
 - `task e2e-full` runs the CI gate (`hack/ci-test.sh`) followed by every Tier-2 kind suite; the
