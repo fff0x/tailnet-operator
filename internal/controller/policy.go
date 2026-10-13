@@ -187,7 +187,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		msg += "; denied ingress tags: " + strings.Join(sum.Denied, ", ")
 	}
 	if len(skipped) > 0 {
-		msg += "; skipped (name-addressed target without grant, or gateway routes that do not plan): " + strings.Join(skipped, ", ")
+		msg += "; skipped (name-addressed target without grant, gateway routes that do not plan, or blocked site): " + strings.Join(skipped, ", ")
 	}
 	renderedCond := func(t *tnv1.Tailnet) {
 		if t.Status.Policy == nil {

@@ -2,6 +2,16 @@
 
 Notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- `TailnetSite`: an exit node's default routes (`0.0.0.0/0`, `::/0`) no longer count as an
+  `UnmanagedOverlap` — they offer the internet, not a subnet. Before, every site on a tailnet
+  with an exit node reported `Unmanaged` and `TailnetUnmanagedRouteOverlap` fired after 30 min.
+- Metrics: `Ready` with reason `RouteConflict` is exported as such instead of `Other`.
+- `PolicyRendered` names blocked sites (`site/<name>`) in its skipped list wording.
+
 ## [0.14.0] - 2026-10-12
 
 ### Added

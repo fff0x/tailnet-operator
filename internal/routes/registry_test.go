@@ -74,6 +74,8 @@ func TestBuildUnmanagedReportsNeverBlocks(t *testing.T) {
 		{Name: "router", Tags: fabric, Available: []string{"10.1.1.0/24"}, Approved: []string{"10.1.1.0/24"}},
 		{Name: "laptop", Tags: []string{"tag:debug"}, Available: []string{"10.1.1.0/26"}},
 		{Name: "other", Tags: []string{"tag:debug"}, Available: []string{"10.9.0.0/24"}},
+		// An exit node offers default routes, not a subnet: never an overlap (hydra probe 2026-10-13).
+		{Name: "exit", Tags: []string{"tag:exit"}, Available: []string{"0.0.0.0/0", "::/0"}, Approved: []string{"0.0.0.0/0", "::/0"}},
 	}
 	res := Build([]Site{site("branch-a", t0, "10.1.1.0/24")}, nil, nodes)
 	st := res.States["branch-a"]

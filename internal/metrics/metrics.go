@@ -185,7 +185,7 @@ func reason(s string) string {
 		"TLSProbePending", "TLSProbeFailed", "TLSProbeStale", "TLSConfigMismatch", "TLSCertificateMismatch",
 		"DNSNameConflict", "DNSConflictUnresolved", "DNSEgressTargetInvalid", "DNSEgressAliasInvalid",
 		"DNSEgressAliasAmbiguous", "DNSClaimIdentityInvalid", "DNSClaimInputInvalid",
-		"OverlapsReserved", "OverlapsSite", "Unmanaged", "None", "NotObserved", "Advertised", "Approved":
+		"OverlapsReserved", "OverlapsSite", "Unmanaged", "None", "NotObserved", "Advertised", "Approved", "RouteConflict":
 		return s
 	default:
 		return "Other"

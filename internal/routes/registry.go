@@ -131,7 +131,8 @@ func siteConflict(s Site, older []Site) *Conflict {
 
 // overlapsAny reports whether any prefix in a shares an address with any prefix in b.
 // Unparsable entries never overlap (the CRD guarantees canonical prefixes; live routes come
-// from the control server and are trusted to be well-formed).
+// from the control server and are trusted to be well-formed). A default route (/0) is an
+// exit-node offer, not a subnet claim, and never counts as an overlap.
 func overlapsAny(a, b []string) bool {
 	for _, x := range a {
 		px, err := netip.ParsePrefix(x)
@@ -140,7 +141,7 @@ func overlapsAny(a, b []string) bool {
 		}
 		for _, y := range b {
 			py, err := netip.ParsePrefix(y)
-			if err == nil && (px.Overlaps(py)) {
+			if err == nil && py.Bits() > 0 && px.Overlaps(py) {
 				return true
 			}
 		}
