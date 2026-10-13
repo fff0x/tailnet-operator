@@ -3,6 +3,9 @@
 Status: in production ([verified platforms](#verified-platforms)); scope is deliberately narrow —
 fresh IPv4 gateways only, no adoption of existing nodes ([adoption and retention](#adoption-and-retention)),
 no IPv6. The contract below (receipts, immutable identity, `OnDelete` StatefulSet) is stable since v0.11.0.
+This page is the contract; the operator-facing path is [INSTALL §7a](../INSTALL.md#7a-gateway-subnet-router--split-dns)
+(wiring) and [USAGE §9b](../USAGE.md#9b-gateway-run-the-subnet-router-and-split-dns-as-a-cr) (worked example),
+field summary in the [README](../../README.md#tailnetgateway-cluster-scoped).
 
 **`spec.suspend` defaults to `true`. Setting it to `false` opts into fresh IPv4 creation.**
 The cluster-scoped `tsunaro.io/v1alpha1` resource does not adopt existing gateways.
@@ -119,14 +122,13 @@ A digest pin is preferable for new workloads, but must not force an adoption rol
 Forward listeners cannot use DNS/sidecar ports `53`, `8080`, `8181` or `9153`.
 Subnet prefixes cannot intersect unspecified, loopback or multicast ranges;
 IPv4-mapped CIDRs and noncanonical spellings are rejected. These checks do not
-prove reachability or exclude deployment-specific control/peer networks.
-The eventual runtime must validate those conflicts and the selected Tailnet scope.
-Cluster CoreDNS forwarding and Headscale split-DNS remain externally managed.
+prove reachability or exclude deployment-specific control/peer networks; the writer
+validates the selected Tailnet scope at render time ([fresh lifecycle](#minimal-fresh-lifecycle)).
+Cluster CoreDNS forwarding and Headscale split-DNS are externally managed.
 
-The future desired route set is **LAN ∪ LB CIDR ∪ optional egress host routes**.
-The pure planner preserves explicit prefix granularity and waits for a 30-second
-quiet period before making a route update eligible. Status must acknowledge a
-successful write, not merely elapsed time. No running router is changed yet.
+The desired route set is **LAN ∪ LB CIDR ∪ optional egress host routes**. The planner
+preserves explicit prefix granularity; route changes are written into the StatefulSet template
+and applied by the next Pod start ([Spec updates](#spec-updates)).
 
 ## Pure fresh resource renderer
 
@@ -790,5 +792,6 @@ Isolated API-server tests exercise the production manager with generated RBAC,
 status events and deletion without state mutation. No kubelet or garbage collector
 runs there: these tests do not prove live pod retention or interruption-free adoption.
 
-The [example](../../deploy/examples/tailnetgateway.yaml) uses synthetic digest pins
-and is suitable only for admission validation in a disposable API server.
+The [example](../../deploy/examples/tailnetgateway.yaml) is the USAGE §9b manifest with
+`suspend: true`: it admits as a fixture without creating anything and becomes a live gateway when
+`suspend` is set to `false` after the INSTALL §7a prerequisites are in place.

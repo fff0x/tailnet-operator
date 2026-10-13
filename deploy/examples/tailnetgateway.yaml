@@ -1,26 +1,40 @@
 ---
-# Experimental suspended example only. The controller reports status, not runtime.
-# Replace these synthetic digest pins before a future runtime-enabled deployment.
+# The gateway of USAGE §9b: subnet router for the prod-1 LAN and the tailnet LB range, plus the
+# split-DNS zone served from the operator's hosts file. Shipped with suspend: true so the fixture
+# admits without creating anything; set suspend: false once INSTALL §7a is in place (kernel
+# prerequisites, LB pool matching poolLabels, policy Apply, Headscale split-DNS). The zone is
+# prod.example.internal here (the envtest DNS fixtures pin it); USAGE uses prod-1.tailnet.example.internal.
 apiVersion: tsunaro.io/v1alpha1
 kind: TailnetGateway
 metadata:
   name: router
 spec:
   suspend: true
+  deletionPolicy: Retain
   tailnetRef:
     name: corp
   hostname: prod-router
+  tags: [tag:fabric]
   stateSecretRef:
     name: router-state
-  image: example.invalid/tailscale@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  # Version tag or digest; a digest is preferable for production, a tag reads better here.
+  image: ghcr.io/tailscale/tailscale:v1.102.4
   routes:
     lan: [192.0.2.0/24]
     advertiseEgressTargets: true
   service:
     loadBalancerIP: 198.51.100.17
     tailnetLBCIDR: 198.51.100.0/24
+    poolLabels:
+      io.cilium/lb-pool: tailnet
   dns:
     zone: prod.example.internal
     serviceName: router-dns
     serviceClusterIP: 10.96.0.54
-    image: example.invalid/coredns@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: docker.io/coredns/coredns:1.14.7
+    staticRecords:
+      - name: api
+        target: kube-api-platform.prod.example.internal
+      - name: router
+        address: 192.0.2.1
+    wildcardAddress: 198.51.100.80

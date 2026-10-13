@@ -11,6 +11,10 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Documentation
 
+- `TailnetGateway` is documented end to end: README model bullet, field table and status row; INSTALL §7a
+  (prerequisites, order, afterwards); USAGE §9b worked example (gateway, LB pool, iBGP, split-DNS, cluster
+  CoreDNS forward, `TailnetSite`, checks, change classes, fields the writer rejects). `deploy/examples/tailnetgateway.yaml`
+  is that manifest with `suspend: true`; gateway.md drops its planning-phase wording.
 - `docs/README.md` indexes every page with reading paths by role; USAGE §12a lists what the operator
   persists, what must be backed up and what happens while the operator is down.
 - The chart README's permissions paragraph describes the shipped RBAC (no CR spec writes, gateway `patch`

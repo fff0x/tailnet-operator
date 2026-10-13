@@ -15,6 +15,7 @@ All names below are placeholders: Tailnet `corp`, cluster `prod-1`, domain
 5. [DNS (CoreDNS)](#5-dns-coredns)
 6. [Ingress and HTTPS](#6-ingress-and-https)
 7. [Operator-owned policy](#7-operator-owned-policy)
+7a. [Gateway (subnet router + split-DNS)](#7a-gateway-subnet-router--split-dns)
 8. [Upgrade](#8-upgrade)
 9. [Rollback](#9-rollback)
 10. [Troubleshooting](#10-troubleshooting)
@@ -26,7 +27,7 @@ All names below are placeholders: Tailnet `corp`, cluster `prod-1`, domain
 | Kubernetes | ≥ 1.31 | CRD admission uses the CEL IP library (`isIP`) |
 | CNI | NetworkPolicy support | `consumerNamespaces` isolation is a NetworkPolicy |
 | Headscale | 0.29.x, reachable from the cluster over HTTP(S) | REST API for nodes, keys and (optionally) the policy |
-| Subnet router | a node tagged e.g. `tag:fabric` advertising the site routes | egress targets are reached through it |
+| Subnet router | a node tagged e.g. `tag:fabric` advertising the site routes — hand-built, or the operator-managed `TailnetGateway` ([§7a](#7a-gateway-subnet-router--split-dns)) | egress targets are reached through it |
 | CoreDNS | the cluster's, plus (optionally) a resolver you control for your tailnet zone | DNS aliases and ingress names ([§5](#5-dns-coredns)) |
 | cert-manager | optional | issues the certificate for a `mode: http` ingress ([§6](#6-ingress-and-https)) |
 | Gateway | optional: Envoy/Gateway API with a wildcard certificate for `*.prod-1.tailnet.example.internal` | HTTPS through a shared gateway instead ([§6](#6-ingress-and-https)) |
@@ -250,7 +251,7 @@ Use an overlay for namespace, images and site policies.
 | Headscale | not shipped | — | 0.29.x reachable from the cluster, bootstrap API key Secret, policy base per [§2](#2-headscale) |
 | PKI for `mode: http` ingress | not shipped | — | cert-manager and an issuer, or a TLS Secret; the ingress name must resolve to the agent |
 | Image-pull Secrets | none referenced | — | Secrets by name in operator and tenant namespaces (`imagePullSecrets`, `agent.imagePullSecrets`) |
-| LoadBalancer IPs for gateways | not shipped | — | an LB implementation and pool matching `tailnetLBCIDR` / `service.poolLabels` ([gateway reference](reference/gateway.md)) |
+| LoadBalancer IPs for gateways | not shipped | — | an LB implementation and pool matching `tailnetLBCIDR` / `service.poolLabels` ([§7a](#7a-gateway-subnet-router--split-dns)) |
 | Cluster CoreDNS forward | not touched | — | the `forward` stanza for the alias zones ([§5.3](#53-wire-the-cluster-coredns)) |
 | Flux/cosign verification | public key in `deploy/cosign.pub` | — | the `verify` block on `OCIRepository`/`HelmRelease` ([SECURITY.md](SECURITY.md)) |
 | `Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGateway` | none created | — | every CR; the chart installs only the schemas |
@@ -289,9 +290,10 @@ per-target `reason` in `status.targets[]` names the missing step — see
 
 Needed for two things: egress **aliases** (a client must dial `api.corp.example`, not
 `api.tailnet-system.svc`, when the far end routes by TLS SNI / HTTP Host) and **ingress names**
-(`shop-shop-dev.prod-1.tailnet.example.internal` for a `TailnetIngress`). The operator serves no DNS.
-It renders a CoreDNS [`hosts`](https://coredns.io/plugins/hosts/) file into a ConfigMap; you mount it
-into the resolver that is authoritative for those zones.
+(`shop-shop-dev.prod-1.tailnet.example.internal` for a `TailnetIngress`). The operator itself serves
+no DNS. It renders a CoreDNS [`hosts`](https://coredns.io/plugins/hosts/) file into a ConfigMap; either
+a `TailnetGateway` serves it as the zone ([§7a](#7a-gateway-subnet-router--split-dns); skip §5.2) or
+you mount it into the resolver that is authoritative for those zones.
 
 ### 5.1 Enable rendering
 
@@ -533,6 +535,54 @@ stays live. Rules found on Headscale v0.29:
 ```sh
 kubectl -n tailnet-system exec -i deploy/headscale -c headscale -- headscale policy check -f /dev/stdin < policy.jsonc
 ```
+
+## 7a. Gateway (subnet router + split-DNS)
+
+Optional. A `TailnetGateway` replaces the hand-built subnet router and the hand-built resolver of
+[§5.2](#52-serve-the-file) with one operator-managed Pod: kernel Tailscale advertising
+`routes.lan ∪ service.tailnetLBCIDR ∪ {egress targets}/32`, and a CoreDNS serving the hosts file of
+§5 as the authoritative zone. It is fresh-only — a new node with a persistent identity; an existing
+router is never adopted. The complete worked example (manifest, LB pool, iBGP, split-DNS, site) is
+[USAGE §9b](USAGE.md#9b-gateway-run-the-subnet-router-and-split-dns-as-a-cr); the contract
+(receipts, immutability, deletion) is the [gateway reference](reference/gateway.md).
+
+### 7a.1 Prerequisites
+
+| Requirement | Why | Check |
+| --- | --- | --- |
+| `/dev/net/tun` on the nodes and `net.ipv4.ip_forward=1` visible in the Pod network namespace (Talos inherits it from the host; elsewhere allow the namespaced `net.ipv4.ip_forward` unsafe sysctl) | kernel Tailscale; an unprivileged init container only *checks* and fails startup otherwise | `kubectl -n tailnet-system logs prod-1-gw-0 -c kernel-preflight` after the first start |
+| Pod Security admission in the operator namespace permits `NET_ADMIN` (level `privileged`, or an exemption) | the Tailscale container needs exactly that capability, no host network, no privilege escalation | `kubectl get ns tailnet-system -o jsonpath='{.metadata.labels}'` |
+| A LoadBalancer implementation with a pool whose selector matches `service.poolLabels` and whose CIDR contains `service.loadBalancerIP` | the LB IP is the split-DNS nameserver peers dial; `tailnetLBCIDR` is advertised so peers reach every IP of the pool | `kubectl -n tailnet-system get svc prod-1-gw` shows an `EXTERNAL-IP` |
+| A free, stable ClusterIP for `dns.serviceClusterIP` | the cluster CoreDNS forwards the zone to it; immutable | `kubectl get svc -A -o jsonpath='{.items[*].spec.clusterIP}' \| tr ' ' '\n' \| grep 10.96.0.54` prints nothing before creation |
+| `Tailnet.spec.policy.mode: Apply` with the gateway tag in `routeApprovers` and `tagOwners` set — or a hand-maintained policy with matching `tagOwners` and `autoApprovers.routes` | routes are approved automatically only when the operator owns the policy | `kubectl get tailnet corp` shows `POLICY=Applied` |
+| Headscale `dns.nameservers.split` for the zone → the LB IP (manual; Headscale has no DNS API) | peers must ask the gateway for `*.<zone>` | `Tailnet` reports `SplitDNS=Unknown/CannotVerify`, by design |
+| Backup of the state Secret and the receipt ConfigMaps | the node identity lives there; without them the gateway is a new node | [OPERATIONS §4](OPERATIONS.md#4-state-backup-and-loss) |
+
+### 7a.2 Order
+
+1. Pool and (if used) BGP for the tailnet LB range exist and announce.
+2. `Tailnet.spec.policy` is `Apply` (§7.4) or the policy carries the tag and routes by hand.
+3. Apply the `TailnetGateway` with `suspend: false` (USAGE §9b). Within about a minute:
+   `kubectl get tailnetgateway` → `READY=True`; `RoutesInSync=True/Approved` after the next policy
+   reconcile (≤ 5 min).
+4. Set the Headscale split-DNS entry; add the cluster CoreDNS `forward` for the zone to
+   `dns.serviceClusterIP` (§5.3 form, upstream = the gateway's DNS Service).
+5. Declare the LAN as a `TailnetSite` (USAGE §9a) so overlaps are blocked and the site has a status.
+6. Verify from both sides: a Pod resolves `api.<zone>` through the cluster CoreDNS; a tailnet peer
+   resolves `router.<zone>` through split-DNS and reaches `192.0.2.1` through the gateway.
+
+Done when `Ready=True`, `RoutesInSync=True/Approved`, `ServiceReady=True/LoadBalancerAssigned`,
+`WorkloadCurrent=True/PodCurrent`, and the alert `TailnetGatewayFreshBlocked` is silent.
+`ClusterDNSForward` and `StaleNodes` stay `Unknown/ExternallyManaged`: they are yours.
+
+### 7a.3 Afterwards
+
+The operator never restarts the gateway Pod. Image and route changes are written into the
+StatefulSet template and applied when *you* delete `prod-1-gw-0` (`WorkloadCurrent=False/PodTemplateStale`
+until then). Rollback of the operator keeps the gateway running — see the
+[rollback table](reference/gateway.md#rollback); a downgrade below 0.11.0 is not supported for an
+existing gateway. Deleting the CR with the default `deletionPolicy: Retain` keeps node, Secret and
+resources; `Delete` is the explicit teardown ([deletion](reference/gateway.md#deletion)).
 
 ## 8. Upgrade
 

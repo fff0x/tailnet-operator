@@ -38,6 +38,11 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
   is identified **by tag**, so a hand-built router in another cluster qualifies. The operator renders
   the `autoApprovers`, replays approvals, blocks overlaps with `reservedNetworks` or older sites and
   reports `Advertised`/`Approved`/`Ready`. Who may *reach* the site stays a grant in the base policy.
+- **`TailnetGateway`** (cluster-scoped) — the subnet router and split-DNS resolver as a CR: one
+  kernel-mode Tailscale Pod advertising the site LAN, the tailnet LoadBalancer range and every
+  egress target, plus a CoreDNS that serves the hosts file as the authoritative zone. Identity is
+  pinned in a state Secret and immutable receipts; **fresh-only** — it creates a new node and never
+  adopts, restarts or replaces one. Suspended by default.
 - **The tag is the authorization.** Each CR is its own node with its own tag; the policy's grants for
   that tag decide what it may reach (egress) or who may reach it (ingress). Without
   `Tailnet.spec.policy` the operator only *reads* the policy and reports what is missing; with it, the
@@ -110,12 +115,11 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 
 ## CRD reference
 
-The [TailnetGateway API](docs/reference/gateway.md) (subnet router + split-DNS as a kernel-mode
-StatefulSet) is **fresh-only and suspended by default**: explicit `suspend: false` creates a new
-IPv4 gateway with a persistent identity; it does not adopt, update or replace an existing gateway, and
-IPv6 is not yet supported. It runs in production on arm64 and amd64 ([verified
-platforms](docs/reference/gateway.md#verified-platforms)); review its
-[scope and migration boundary](docs/COMPATIBILITY.md#gateway-api-scope) before installing the CRD.
+Worked examples for every kind: [USAGE](docs/USAGE.md). The `TailnetGateway` is fresh-only and
+suspended by default; it runs in production on arm64 and amd64 ([verified
+platforms](docs/reference/gateway.md#verified-platforms)) — wiring in
+[INSTALL §7a](docs/INSTALL.md#7a-gateway-subnet-router--split-dns), scope and migration boundary
+in [COMPATIBILITY](docs/COMPATIBILITY.md#gateway-api-scope).
 
 ### Tailnet
 
@@ -185,6 +189,27 @@ at admission. See [validation rules and tests](docs/OPERATIONS.md#5-validation) 
 | `owner` | required | accountable team/person, ≤63 characters; named in conflict messages |
 | `description` | none | free text |
 
+### TailnetGateway (cluster-scoped)
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `suspend` | `true` | nothing is created until explicitly `false`; a suspend/resume cycle keeps the identity |
+| `deletionPolicy` | `Retain` | CR deletion keeps node, Secret and resources; `Delete` is the fail-closed teardown including the Headscale node |
+| `tailnetRef.name` | — | the Tailnet; immutable |
+| `hostname` | — | Headscale node name; immutable |
+| `tags[]` | `[tag:fabric]` | bootstrap tags; must be in `policy.routeApprovers` for automatic route approval; immutable |
+| `stateSecretRef.name` | — | state Secret the operator creates empty and the Pod fills with its node identity; immutable, back it up |
+| `image`, `dns.image` | — | kernel Tailscale / CoreDNS image with a version tag or digest (`latest` and bare images rejected); the only mutable Pod-template fields |
+| `routes.lan[]` | — | 1–32 IPv4 prefixes advertised as subnet routes |
+| `routes.advertiseEgressTargets` | `true` | also advertise every literal `TailnetEgress` target of the Tailnet as `/32` |
+| `service.loadBalancerIP`, `.tailnetLBCIDR` | — | LB address of the split-DNS Service (immutable) and the pool CIDR containing it, advertised as a route so peers reach every LB IP |
+| `service.poolLabels`, `.loadBalancerClass` | none | ≤ 16 labels your LB pool selects on (mutable); optional class (immutable) |
+| `dns.zone`, `.serviceName`, `.serviceClusterIP` | — | authoritative zone (= the split zone of `ingressNameTemplate`), ClusterIP Service for the cluster CoreDNS forward; all immutable |
+| `dns.staticRecords[]` | none | ≤ 128 relative names with an `address` (A/AAAA) **or** an in-zone `target` (CNAME); live-reloaded |
+| `dns.wildcardAddress` | none | fallback A record for `*.<zone>`; dynamic names always win |
+| `replicas` | `1` | only `1` is accepted |
+| `forwards[]`, `forwardImage`, `dns.extraZones[]`, `authKeySecretRef`, `adoption` | — | schema only; the current writer rejects them (`FreshBlocked`) |
+
 ### Status and conditions
 
 | Kind | Conditions | Notable reasons |
@@ -192,6 +217,7 @@ at admission. See [validation rules and tests](docs/OPERATIONS.md#5-validation) 
 | `Tailnet` | `ApiReachable`, `ApiKeyValid`, `HeadscaleCompatible`, `PolicyMode`, `SplitDNS`, `UsersUnique`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable` / `Unhealthy` (database down); `Valid` / `Rejected` / `Error`; `Compatible` / `Incompatible` / `CannotVerify` / `ProbeFailed`; `Database` / `File`; `SplitDNS=Unknown/CannotVerify` (manual configuration required); `Unique` / `Duplicate` (two Headscale users share a name — every policy write is rejected until one is destroyed; `status.userConflicts` counts them) / `CannotVerify`; `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyModeFile` (write skipped), `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
 | `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`, `ProbeFailed` (agent not scraped — NetworkPolicy or pod down; nothing is known about routes/dials); `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`, otherwise with the reason of the first blocking condition (`NotRegistered`, `RoutesMissing`, `ProbeFailed`, `Unreachable`); per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved` (re-approved by the operator on the next policy reconcile), `NoGrant`, `ProbeFailed` |
 | `TailnetSite` | `RouteConflict`, `UnmanagedOverlap`, `Advertised`, `Approved`, `Ready` | `OverlapsReserved` / `OverlapsSite` (blocked, nothing rendered; the older site is untouched); `Unmanaged` (a node without an advertiser tag advertises an overlapping route — report only); `NotAdvertised` / `NotApproved` (exact-prefix match on advertiser nodes); `NotObserved` (control server not queried); `Ready` false carries the first blocking reason in the order `RouteConflict`, `Advertised`, `Approved` |
+| `TailnetGateway` | `Registered`, `RoutesInSync`, `DNSReady`, `StaleNodes`, `ClusterDNSForward`, `WorkloadCurrent`, `ServiceReady`, `Ready` | `Suspended`; `Provisioning` / `FreshBlocked` / `IdentityChanged` / `FreshRuntimeReady` (Ready); `Approved` / `NotApproved` (routes); `PodCurrent` / `PodTemplateStale` / `WorkloadUpdateBlocked`; `LoadBalancerAssigned` / `LBPending`; `ExternallyManaged` (DNS forward, stale nodes) |
 | `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `TLSReady`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist), `InvalidDNSName`, `DNSNameConflict` (an older CR already claims a name/alias), and for `mode: http` the `TLS*` reasons ([USAGE §6.1](docs/USAGE.md#61-ingress-terminate-tls-on-the-agent)); `Ready` false carries the first blocking reason in the order `Registered`, `PolicyGranted`, `TLSReady`, `BackendsReachable` |
 
 `Tailnet.status.policy` = `{renderedHash, appliedHash, appliedAt, generated{tags,grants,routes}}`;
@@ -214,7 +240,7 @@ agents (TCP 9080): `tailnet_agent_connections_active`, `tailnet_agent_bytes_tota
 
 ## How it works
 
-Five reconcilers, each turning CRs into desired state applied with server-side apply — no per-CR
+Six reconcilers, each turning CRs into desired state applied with server-side apply — no per-CR
 restart to add or remove a target:
 
 - **Tailnet** — mints the working API key from the bootstrap key, rotates it at half-life (new key
@@ -226,6 +252,9 @@ restart to add or remove a target:
   status that classifies every target route (`NotAdvertised` / `NotApproved` / `NoGrant`) from the
   node's netmap and the router's advertised/approved sets — the two silent failures of a hand-built
   proxy, named.
+- **Gateway** — creates the subnet-router StatefulSet, its Services and CoreDNS zone exactly once
+  (immutable receipts pin the identity), then only follows image/route changes into the template and
+  the hosts file into the zone; it never restarts, adopts or deletes the Pod without `deletionPolicy: Delete`.
 - **DNS** — folds egress aliases and ingress names into one CoreDNS `hosts` ConfigMap per Tailnet.
   The resolver is the cluster's, not the operator's; if the operator dies the last file stays valid.
 - **Policy** — parses the base HuJSON generically, appends tagOwners / `/32` approvals / grants
@@ -265,9 +294,10 @@ chart; see [CONTRIBUTING](CONTRIBUTING.md), [COMPATIBILITY](docs/COMPATIBILITY.m
 
 | Path | What |
 | --- | --- |
-| `api/v1alpha1` | `Tailnet`, `TailnetEgress`, `TailnetIngress` CRD types |
+| `api/v1alpha1` | `Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGateway` CRD types |
 | `cmd/operator`, `cmd/agent` | control plane; `tailnet-agent`: tsnet node, TCP/HTTP forwarders, health and probe endpoints |
-| `internal/controller` | reconcilers (tailnet, egress, ingress, dns, policy) and resource builders |
+| `internal/controller` | reconcilers (tailnet, egress, ingress, gateway, dns, policy) and resource builders |
+| `internal/gateway` | gateway renderer, route planner, DNS zone, receipts and the fresh writer |
 | `internal/{headscale,policy,certificates}` | Headscale REST client; base + CR → rendered policy; TLS serving and certificate validation |
 | `internal/{keys,ports,routes,naming,metrics,manager}` | key rotation, port assignment, route diagnosis, templating, metrics, controller wiring |
 | `charts/tailnet-operator/` | Helm chart, copied CRDs, alerts, dashboard |

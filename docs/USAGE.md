@@ -24,6 +24,9 @@ domain `tailnet.example.internal`, tenant namespaces `billing-dev` / `billing`, 
 9. [Review before Apply, drift, rollback](#9-policy-review-before-apply-drift-rollback)
 9a. [Declare a site network (TailnetSite)](#9a-policy-declare-a-site-network-tailnetsite)
 
+**Gateway**
+9b. [Run the subnet router and split-DNS as a CR](#9b-gateway-run-the-subnet-router-and-split-dns-as-a-cr)
+
 **Operations** — keys, diagnosis, upgrade, backup, validation, alert runbooks: [OPERATIONS.md](OPERATIONS.md)
 
 ---
@@ -439,8 +442,9 @@ people as well as workloads must reach it. Today its prefixes are hand-written `
 lines that must stay identical to the router's advertised routes.*
 
 A `TailnetSite` declares the network once, in the cluster whose operator owns the policy
-(`policy.mode: Apply`). The router can be an operator-managed `TailnetGateway` **or a hand-built
-router in another cluster** — the operator identifies it by tag, not by CR:
+(`policy.mode: Apply`). The router can be an operator-managed `TailnetGateway` ([§9b](#9b-gateway-run-the-subnet-router-and-split-dns-as-a-cr))
+**or a hand-built router in another cluster** — the operator identifies it by tag, not by CR
+(fixture: [`deploy/examples/tailnetsite.yaml`](../deploy/examples/tailnetsite.yaml)):
 
 ```yaml
 apiVersion: tsunaro.io/v1alpha1
@@ -498,3 +502,215 @@ Migrating hand-written lines: create the sites, keep the old `autoApprovers` ent
 `renderedHash` equals today's live policy (the render is a set union, so the document does not
 change), then delete the base lines in Git. Rollback is deleting the `TailnetSite` CRs — approvals
 already granted stay, because the operator never de-approves.
+
+## 9b. Gateway: run the subnet router and split-DNS as a CR
+
+*`prod-1` sits in a datacenter LAN `192.0.2.0/24` (router `192.0.2.1`). Tailnet peers must reach
+that LAN, the cluster's tailnet-facing LoadBalancer IPs, and every egress target the operator
+manages — and resolve `*.prod-1.tailnet.example.internal` without a hand-built resolver. The
+cluster already runs Cilium with an IP pool and iBGP to the LAN router.*
+
+A `TailnetGateway` is one kernel-mode Tailscale Pod (subnet router, `NET_ADMIN`, no host
+network) plus a CoreDNS that serves the operator's hosts file as an authoritative zone. The CR is
+**fresh-only**: it creates a new node with a persistent identity and never adopts, updates or
+replaces an existing router ([reference](reference/gateway.md)). One-time wiring (kernel
+prerequisites, LB pool, Headscale split-DNS, cluster CoreDNS forward) is in
+[INSTALL §7a](INSTALL.md#7a-gateway-subnet-router--split-dns); this recipe is the manifest and
+how to read it.
+
+### The gateway
+
+```yaml
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetGateway
+metadata:
+  name: prod-1-gw                        # cluster-scoped; also names the LoadBalancer Service
+spec:
+  suspend: false                         # default true: nothing is created until you opt in
+  deletionPolicy: Retain                 # CR deletion keeps node, Secret and resources (Delete = teardown)
+  tailnetRef: { name: corp }
+  hostname: prod-1-gw                    # Headscale node name; immutable
+  tags: [tag:fabric]                     # default; must be in policy.routeApprovers for auto-approval
+  stateSecretRef: { name: prod-1-gw-state }   # created empty by the operator, holds the node identity
+  image: ghcr.io/tailscale/tailscale:v1.102.4 # kernel tailscale; a version tag or digest, never :latest
+  routes:
+    lan: [192.0.2.0/24]                  # the site LAN; 1–32 IPv4 prefixes
+    advertiseEgressTargets: true         # default: every literal TailnetEgress target becomes a /32 route
+  service:
+    loadBalancerIP: 198.51.100.17        # the split-DNS nameserver address peers will use; immutable
+    tailnetLBCIDR: 198.51.100.0/24       # the whole LB pool is advertised, so peers reach every LB IP
+    poolLabels:
+      io.cilium/lb-pool: tailnet         # how your LB implementation picks the pool (labels on the Service)
+  dns:
+    zone: prod-1.tailnet.example.internal    # = the split zone of Tailnet.spec.dns.ingressNameTemplate
+    serviceName: prod-1-gw-dns           # in-cluster DNS Service for the CoreDNS forward
+    serviceClusterIP: 10.96.0.54         # stable, must be free in the Service CIDR; immutable
+    image: docker.io/coredns/coredns:1.14.7
+    staticRecords:
+      - name: api                        # api.prod-1.tailnet.example.internal
+        target: kube-api-platform.prod-1.tailnet.example.internal   # CNAME to a TailnetIngress name (agents change IP; never pin)
+      - name: router                     # router.prod-1.tailnet.example.internal
+        address: 192.0.2.1               # A record for a fixed LAN host
+    wildcardAddress: 198.51.100.80       # *.prod-1.… → shared Envoy gateway (§6); dynamic names win
+```
+
+What the operator does with it, in order: render and validate; create the empty state Secret;
+mint a tag-bound 24 h pre-auth key; create ServiceAccount, Role, RoleBinding, PDB, three
+Services (`prod-1-gw` LoadBalancer :53, `prod-1-gw-dns` ClusterIP :53, `prod-1-gw-headless`), the
+`-coredns` ConfigMap and the StatefulSet (nine objects, StatefulSet last); write the immutable `-fresh` receipt; then report `Ready` once the Pod runs,
+the node is online and advertises the planned routes. The advertised set is
+`routes.lan ∪ tailnetLBCIDR ∪ {egress targets}/32` — here `192.0.2.0/24`, `198.51.100.0/24` and,
+from [§1](#1-egress-reach-a-database-at-the-site), `10.0.10.20/32`. When the Tailnet owns its
+policy (`policy.mode: Apply`) the policy controller renders `tag:fabric` into `tagOwners` and every
+route into `autoApprovers.routes` and approves them within one policy reconcile (≤ 5 min); otherwise
+approve in Headscale.
+
+Turn `advertiseEgressTargets` off when every egress host already lies inside `routes.lan`:
+covered `/32`s are not deduplicated, and each new or deleted `TailnetEgress` would mark the Pod
+template stale until you delete the Pod.
+
+### Site-provided pieces
+
+The operator configures none of these; it only depends on them.
+
+**LB pool.** The gateway's Service carries the labels from `service.poolLabels`; your pool selects on
+them, and the default pool excludes them so ordinary Services never land in the tailnet range:
+
+```yaml
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata: { name: tailnet }
+spec:
+  blocks: [{ cidr: 198.51.100.0/24 }]
+  serviceSelector: { matchLabels: { io.cilium/lb-pool: tailnet } }
+---
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata: { name: default }
+spec:
+  blocks: [{ cidr: 198.51.101.0/24 }]
+  serviceSelector:
+    matchExpressions: [{ key: io.cilium/lb-pool, operator: NotIn, values: [tailnet] }]
+```
+
+**iBGP.** Tailnet peers reach `198.51.100.0/24` through the gateway (it is an advertised route); the
+*LAN* reaches those addresses only if the nodes announce them. With Cilium's BGP control plane,
+one instance in the site ASN peering with the LAN router (MetalLB or kube-vip speakers do the same
+job):
+
+```yaml
+apiVersion: cilium.io/v2
+kind: CiliumBGPClusterConfig
+metadata: { name: site }
+spec:
+  bgpInstances:
+    - name: lan
+      localASN: 65010
+      peers:
+        - name: router
+          peerASN: 65010                 # same ASN = iBGP
+          peerAddress: 192.0.2.1
+          peerConfigRef: { name: router }
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPPeerConfig
+metadata: { name: router }
+spec:
+  families:
+    - afi: ipv4
+      safi: unicast
+      advertisements: { matchLabels: { advertise: lb } }
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPAdvertisement
+metadata: { name: lb, labels: { advertise: lb } }
+spec:
+  advertisements:
+    - advertisementType: Service
+      service: { addresses: [LoadBalancerIP] }
+      selector: { matchExpressions: [{ key: io.cilium/lb-pool, operator: Exists }] }
+```
+
+**Headscale split-DNS.** Peers resolve the zone at the gateway's LoadBalancer IP (Headscale has no
+API for this; `SplitDNS=Unknown/CannotVerify` on the Tailnet is the reminder):
+
+```yaml
+dns:
+  nameservers:
+    split:
+      prod-1.tailnet.example.internal: [198.51.100.17]
+```
+
+**Cluster CoreDNS.** Pods ask `kube-system` CoreDNS; forward the zone to the gateway's ClusterIP
+Service (replaces the hand-built resolver of [INSTALL §5.2](INSTALL.md#52-serve-the-file)):
+
+```corefile
+prod-1.tailnet.example.internal:53 {
+    errors
+    cache 30
+    forward . 10.96.0.54 { prefer_udp }
+}
+```
+
+### Declare the LAN as a site
+
+The gateway advertises `192.0.2.0/24`; a `TailnetSite` makes that network a first-class object with
+`Advertised`/`Approved`/`Ready`, metrics and the overlap guard of [§9a](#9a-policy-declare-a-site-network-tailnetsite).
+`advertisedBy` is omitted, so the advertiser tags default to `policy.routeApprovers` — the gateway's tag:
+
+```yaml
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetSite
+metadata: { name: prod-1-lan }
+spec:
+  tailnetRef: { name: corp }
+  prefixes: [192.0.2.0/24]
+  owner: platform
+  description: prod-1 datacenter LAN, advertised by prod-1-gw
+```
+
+Do **not** list the LAN or the LB CIDR in `Tailnet.spec.reservedNetworks` — those are routes the
+gateway advertises, so they are site material, not protected space.
+
+### Check
+
+```sh
+kubectl get tailnetgateway prod-1-gw
+# NAME        HOSTNAME    SUSPENDED   READY
+# prod-1-gw   prod-1-gw   false       True
+kubectl get tailnetgateway prod-1-gw -o jsonpath='{.status.nodeId} {.status.ipv4} {.status.serviceIP}{"\n"}{range .status.conditions[*]}{.type}={.status}/{.reason}{"\n"}{end}'
+# 42 100.64.0.17 198.51.100.17
+# Ready=True/FreshRuntimeReady  RoutesInSync=True/Approved  WorkloadCurrent=True/PodCurrent  ServiceReady=True/LoadBalancerAssigned
+kubectl -n tailnet-system exec deploy/headscale -- headscale nodes list-routes
+# prod-1-gw: 192.0.2.0/24, 198.51.100.0/24, 10.0.10.20/32 — all approved
+kubectl -n billing exec deploy/app -- getent hosts api.prod-1.tailnet.example.internal   # in-cluster path
+# from a tailnet peer:
+dig +short router.prod-1.tailnet.example.internal                                        # 192.0.2.1 via split-DNS
+kubectl get tailnetsite prod-1-lan                                                       # READY=Ready
+```
+
+| Symptom | Meaning | Fix |
+| --- | --- | --- |
+| `Ready=False/Provisioning` for minutes | Pod not yet running | `kubectl -n tailnet-system describe pod prod-1-gw-0`: image pull, kernel preflight (`/dev/net/tun`, `ip_forward`), Pod Security admission |
+| `Ready=False/FreshBlocked` | bootstrap blocked: key expired before registration, receipt or template drift, a pool key colliding with an operator label | alert `TailnetGatewayFreshBlocked`; runbook [OPERATIONS](OPERATIONS.md#monitoring-gateway-fresh-blocked) |
+| `RoutesInSync=False/NotApproved` | advertised but not approved | `policy.mode: Apply` with the tag in `routeApprovers`, or approve in Headscale |
+| `ServiceReady=False/LBPending` | no LoadBalancer address | pool CIDR contains `loadBalancerIP`, selector matches `poolLabels`, LB controller healthy; `Ready` does not wait for this |
+| `WorkloadCurrent=False/PodTemplateStale` | image or route change written to the template | delete Pod `prod-1-gw-0` when convenient; the running Pod keeps serving |
+| `WorkloadCurrent=False/WorkloadUpdateBlocked` | an IPv6 route, a `tailnetLBCIDR` that no longer contains the LB IP, or an unverified StatefulSet | revert the spec; IPv6 routes are not supported yet |
+| `ClusterDNSForward`, `StaleNodes` `Unknown/ExternallyManaged` | by design | the CoreDNS forward and old Headscale nodes are yours |
+| peers resolve nothing | split-DNS or route | `nameservers.split` points at `198.51.100.17`; `198.51.100.0/24` approved; `dig @198.51.100.17` from a peer |
+
+### After creation
+
+| Change | Effect |
+| --- | --- |
+| `image`, `dns.image`, `routes.*`, `service.tailnetLBCIDR`, egress targets | written into the StatefulSet template; apply by deleting the Pod (`PodTemplateStale`), no restart by the operator |
+| `dns.staticRecords`, `dns.wildcardAddress`, the hosts file | re-rendered live into the zone; no Pod change |
+| `service.poolLabels` | set/removed on the Service in place |
+| `deletionPolicy`, `suspend` | lifecycle only; a suspend/resume cycle keeps the identity |
+| `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `service.loadBalancerIP`, `service.loadBalancerClass`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP` | identity — admission rejects most, the rest report `IdentityChanged`; recreate with `deletionPolicy: Delete` |
+
+Declared in the schema but **rejected by the current writer** (`Ready=False/FreshBlocked` or
+admission): `forwards[]`/`forwardImage` (TCP forwards), `dns.extraZones[]`, `authKeySecretRef`
+(external bootstrap key), `adoption`, IPv6 prefixes, `replicas` other than `1`. Lifecycle, rollback
+and deletion: [gateway reference](reference/gateway.md#key-and-expiry-lifecycle).
