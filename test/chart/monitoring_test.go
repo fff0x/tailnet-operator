@@ -44,7 +44,7 @@ func TestBundledRules(t *testing.T) {
 	equal(t, "group count", len(spec.Groups), 1)
 	rules := spec.Groups[0].Rules
 	equal(t, "rule count", len(rules), 16)
-	usage, err := os.ReadFile(filepath.Join(chartPath(t), "..", "..", "docs", "USAGE.md"))
+	usage, err := os.ReadFile(filepath.Join(chartPath(t), "..", "..", "docs", "OPERATIONS.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,12 +61,12 @@ func TestBundledRules(t *testing.T) {
 			t.Errorf("duplicate alert %s", rule.Alert)
 		}
 		seen[rule.Alert] = true
-		if rule.Expr == "" || rule.Labels["severity"] == "" || rule.Annotations["summary"] == "" || rule.Annotations["description"] == "" || !strings.HasPrefix(rule.Annotations["runbook_url"], "docs/USAGE.md#monitoring-") {
+		if rule.Expr == "" || rule.Labels["severity"] == "" || rule.Annotations["summary"] == "" || rule.Annotations["description"] == "" || !strings.HasPrefix(rule.Annotations["runbook_url"], "docs/OPERATIONS.md#monitoring-") {
 			t.Errorf("incomplete rule: %#v", rule)
 		}
-		anchor := strings.TrimPrefix(rule.Annotations["runbook_url"], "docs/USAGE.md#")
+		anchor := strings.TrimPrefix(rule.Annotations["runbook_url"], "docs/OPERATIONS.md#")
 		if !anchors[anchor] {
-			t.Errorf("%s runbook has no Markdown heading anchor in docs/USAGE.md: %s", rule.Alert, anchor)
+			t.Errorf("%s runbook has no Markdown heading anchor in docs/OPERATIONS.md: %s", rule.Alert, anchor)
 		}
 		if strings.Contains(rule.Expr, "applied_timestamp") {
 			t.Error("old applied timestamp does not imply stale policy")

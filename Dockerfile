@@ -55,7 +55,7 @@ COPY test ./test
 COPY charts ./charts
 COPY deploy ./deploy
 COPY hack ./hack
-COPY docs/USAGE.md ./docs/USAGE.md
+COPY docs/OPERATIONS.md ./docs/OPERATIONS.md
 COPY docs/reference/rbac.md ./docs/reference/rbac.md
 COPY .radicle/native.yaml ./.radicle/native.yaml
 

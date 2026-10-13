@@ -23,7 +23,7 @@ in [INSTALL](../../docs/INSTALL.md).
 `task crds` generates `deploy/crds/` and copies the files into this chart's `crds/`. Helm installs
 missing CRDs but never upgrades or removes them: use `task crd-upgrade KUBE_CONTEXT=<context>` for a
 manual installation, or `install.crds: CreateReplace` / `upgrade.crds: CreateReplace` on a Flux
-`HelmRelease`. Validate existing CRs against a new schema first ([USAGE §13](../../docs/USAGE.md#13-validation)).
+`HelmRelease`. Validate existing CRs against a new schema first ([OPERATIONS §5](../../docs/OPERATIONS.md#5-validation)).
 
 ## Permissions
 
@@ -93,7 +93,7 @@ A PodMonitor grants no network access; agent NetworkPolicies allow TCP 9080 from
 namespace only, so a scraper elsewhere needs its own additive policy. Key-expiry alert thresholds are
 `monitoring.rules.apiKeyExpiryWarningSeconds` (7 d) and `authKeyExpiryWarningSeconds` (1 d); keep
 them below half the configured key lifetime. Alert semantics and runbooks:
-[USAGE §14](../../docs/USAGE.md#14-monitoring-and-alert-runbooks).
+[OPERATIONS §6](../../docs/OPERATIONS.md#6-monitoring-and-alert-runbooks).
 
 ## HTTP TLS termination
 

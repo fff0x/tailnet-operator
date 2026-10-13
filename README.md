@@ -173,7 +173,7 @@ platforms](docs/reference/gateway.md#verified-platforms)); review its
 | `image`, `resources` | Tailnet defaults | agent overrides |
 
 Kubernetes ≥1.31 is required. CR names, addresses, ports, list sizes and policy inputs are checked
-at admission. See [validation rules and tests](docs/USAGE.md#13-validation) before upgrading CRDs.
+at admission. See [validation rules and tests](docs/OPERATIONS.md#5-validation) before upgrading CRDs.
 
 ### TailnetSite (cluster-scoped)
 
@@ -210,7 +210,7 @@ Metrics (operator, TCP 8080): `tailnet_resource_ready`, `tailnet_resource_condit
 `tailnet_policy_applied_timestamp_seconds`, `tailnet_policy_apply_errors_total`,
 `tailnet_route_approvals_replayed_total`, `tailnet_headscale_api_requests_total`, key expiry gauges;
 agents (TCP 9080): `tailnet_agent_connections_active`, `tailnet_agent_bytes_total`,
-`tailnet_agent_dial_duration_seconds`. Bundled alerts and runbooks: [USAGE §14](docs/USAGE.md#14-monitoring-and-alert-runbooks).
+`tailnet_agent_dial_duration_seconds`. Bundled alerts and runbooks: [OPERATIONS §6](docs/OPERATIONS.md#6-monitoring-and-alert-runbooks).
 
 ## How it works
 

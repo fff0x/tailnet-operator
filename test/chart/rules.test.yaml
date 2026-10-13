@@ -38,7 +38,7 @@ tests:
             exp_annotations:
               summary: Rendered policy has not been applied
               description: Apply mode has a nonempty rendered hash different from the applied hash for fifteen minutes. A stable InSync policy is healthy regardless of its applied timestamp age.
-              runbook_url: docs/USAGE.md#monitoring-policy-stale
+              runbook_url: docs/OPERATIONS.md#monitoring-policy-stale
       - eval_time: 22m
         alertname: TailnetPolicyStale
         exp_alerts: []
@@ -65,7 +65,7 @@ tests:
             exp_annotations: &not_ready_annotations
               summary: Tailnet resource remains not ready
               description: The reason label is the current Ready reason, not a historical reason. Resources without a Ready condition, including Tailnet, are not evaluated.
-              runbook_url: docs/USAGE.md#monitoring-resource-not-ready
+              runbook_url: docs/OPERATIONS.md#monitoring-resource-not-ready
   - name: Healthy resources and historical rejection do not alert
     interval: 1m
     input_series:
@@ -177,7 +177,7 @@ tests:
             exp_annotations:
               summary: Route approvals are being replayed repeatedly
               description: More than three routes were successfully approved by replay in one hour. This counts routes, not API requests; inspect Headscale restarts and route stability.
-              runbook_url: docs/USAGE.md#monitoring-route-replays
+              runbook_url: docs/OPERATIONS.md#monitoring-route-replays
   - name: Reconcile error rate must exceed point one per second for ten minutes
     interval: 1m
     input_series:
@@ -197,7 +197,7 @@ tests:
             exp_annotations:
               summary: Tailnet controller reconciliation is failing
               description: Reconciliation errors exceed 0.1 per second for ten minutes. Inspect controller logs and the affected custom resource conditions.
-              runbook_url: docs/USAGE.md#monitoring-reconcile-errors
+              runbook_url: docs/OPERATIONS.md#monitoring-reconcile-errors
   - name: Observed offline nodes alert after five minutes but online and unknown nodes do not
     interval: 1m
     input_series:
@@ -219,7 +219,7 @@ tests:
             exp_annotations:
               summary: No matching Headscale node is online
               description: A successful node listing found no matching online node for five minutes. An absent series means no current observation, not an offline node.
-              runbook_url: docs/USAGE.md#monitoring-node-offline
+              runbook_url: docs/OPERATIONS.md#monitoring-node-offline
       - eval_time: 8m
         alertname: TailnetNodeOffline
         exp_alerts: []
@@ -261,7 +261,7 @@ tests:
             exp_annotations:
               summary: Working Headscale API key is nearing expiry
               description: Less than 604800 seconds remain. Check automatic rotation and the bootstrap credential. Negative values mean the key has already expired.
-              runbook_url: docs/USAGE.md#monitoring-key-expiry
+              runbook_url: docs/OPERATIONS.md#monitoring-key-expiry
       - eval_time: 5m
         alertname: TailnetEgressAuthKeyExpiringSoon
         exp_alerts:
@@ -269,7 +269,7 @@ tests:
             exp_annotations:
               summary: Egress pre-auth key is nearing expiry
               description: Less than 86400 seconds remain. Check key rotation before an agent needs to register again. Key expiry alone does not prove an existing node is offline.
-              runbook_url: docs/USAGE.md#monitoring-key-expiry
+              runbook_url: docs/OPERATIONS.md#monitoring-key-expiry
       - eval_time: 5m
         alertname: TailnetIngressAuthKeyExpiringSoon
         exp_alerts:
@@ -277,7 +277,7 @@ tests:
             exp_annotations:
               summary: Ingress pre-auth key is nearing expiry
               description: Less than 86400 seconds remain. Check key rotation before an agent needs to register again. Key expiry alone does not prove an existing node is offline.
-              runbook_url: docs/USAGE.md#monitoring-key-expiry
+              runbook_url: docs/OPERATIONS.md#monitoring-key-expiry
   - name: Site conflicts alert after fifteen minutes; unmanaged overlap is info after thirty
     interval: 1m
     input_series:
@@ -310,7 +310,7 @@ tests:
             exp_annotations:
               summary: TailnetGateway bootstrap is blocked
               description: The fresh writer refuses to continue (expired or drifted bootstrap key, unverified provenance, template drift) and nothing is written. Read the Ready message; the zone stays frozen until the cause is reverted.
-              runbook_url: docs/USAGE.md#monitoring-gateway-fresh-blocked
+              runbook_url: docs/OPERATIONS.md#monitoring-gateway-fresh-blocked
       - eval_time: 14m
         alertname: TailnetRouteConflict
         exp_alerts: []
@@ -321,7 +321,7 @@ tests:
             exp_annotations:
               summary: TailnetSite blocked by a route conflict
               description: The site overlaps a reserved network or an older site (reason label) and nothing is rendered or approved for it. Resolve the overlap in the CRs; the operator never de-approves routes.
-              runbook_url: docs/USAGE.md#monitoring-route-conflict
+              runbook_url: docs/OPERATIONS.md#monitoring-route-conflict
       - eval_time: 29m
         alertname: TailnetUnmanagedRouteOverlap
         exp_alerts: []
@@ -332,4 +332,4 @@ tests:
             exp_annotations:
               summary: A node without an advertiser tag advertises a route overlapping a TailnetSite
               description: Report only; the managed route still ships and clients pick the longest prefix. The condition message names the node.
-              runbook_url: docs/USAGE.md#monitoring-unmanaged-route-overlap
+              runbook_url: docs/OPERATIONS.md#monitoring-unmanaged-route-overlap

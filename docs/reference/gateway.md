@@ -688,7 +688,7 @@ re-minted or rotated afterwards, and nothing has to be:
   again; the operator mints a fresh bootstrap key for the new identity.
 - **Blocked bootstrap.** An expired or drifted key before the receipt, unverified provenance or
   template drift stop the writer with `Ready=False/FreshBlocked`; the chart alert
-  `TailnetGatewayFreshBlocked` fires after five minutes ([USAGE](../USAGE.md#monitoring-gateway-fresh-blocked)).
+  `TailnetGatewayFreshBlocked` fires after five minutes ([OPERATIONS](../OPERATIONS.md#monitoring-gateway-fresh-blocked)).
 
 ## Rollback
 

@@ -4,6 +4,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Changed
+
+- Alert `runbook_url` annotations point to `docs/OPERATIONS.md#monitoring-*`; USAGE §10–14 (keys, diagnosis,
+  upgrade, state and backup, validation, alert runbooks) moved there unchanged.
+
 ### Documentation
 
 - `docs/README.md` indexes every page with reading paths by role; USAGE §12a lists what the operator

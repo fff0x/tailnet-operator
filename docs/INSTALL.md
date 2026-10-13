@@ -537,7 +537,7 @@ kubectl -n tailnet-system exec -i deploy/headscale -c headscale -- headscale pol
 ## 8. Upgrade
 
 Validate existing CRs against the new schema **before** installing new CRDs — admission rules
-tighten between releases and the check is offline ([USAGE §13](USAGE.md#13-validation)):
+tighten between releases and the check is offline ([OPERATIONS §5](OPERATIONS.md#5-validation)):
 
 ```sh
 live=$(mktemp); kubectl get tailnet,tailnetegress,tailnetingress -A -o json > "$live"
