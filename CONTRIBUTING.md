@@ -28,6 +28,22 @@ Do not add broad suppressions to make a failing release pass.
 Use `task e2e-kind` for the disposable pod-level installation/failover suite.
 It requires local rootless Podman, kind and suitable cgroup delegation.
 See [the runner's safety boundaries](test/e2e-kind/README.md).
+
+The complete local run is `task e2e-full`: the exact CI gate (`hack/ci-test.sh` — gofmt/vet,
+govulncheck, unit, chart, admission against envtest 1.31, Tier 1 against real Headscale 0.28.0 and
+0.29.3) followed by every Tier-2 kind suite (`hack/e2e-kind.sh`, the projection runner with its
+default, `--rest-only`, `--gateway-preflight-only` and `--gateway-fresh-only` selections). Budget
+about 75 minutes; a failing stage stops the run. Each kind stage needs the delegated scope, so
+start the whole task inside one:
+
+```sh
+# Inside nix-shell; kind v0.32.0 comes from nixpkgs. GOTOOLCHAIN=auto only until the
+# nixpkgs Go matches go.mod — the CI image keeps GOTOOLCHAIN=local.
+nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- env GOTOOLCHAIN=auto task e2e-full'
+```
+
+CI runs the first stage on every push to `main`; the kind suites run only here, so run
+`task e2e-full` before a release and after changes to the agent, gateway or ingress data path.
 Do not point tests at your current kube-context. The disposable test cluster may provide
 a prerequisite the way the target node does (for example the gateway gate permits the
 namespaced `net.ipv4.ip_forward` unsafe sysctl so a fixture pod forwards like a Talos

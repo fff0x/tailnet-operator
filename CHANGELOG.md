@@ -2,6 +2,14 @@
 
 Notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- `task e2e-full` runs the CI gate (`hack/ci-test.sh`) followed by every Tier-2 kind suite; the
+  dev shell now ships `govulncheck`, and `hack/ci-test.sh`/`hack/e2e-kind.sh` honour a pre-set
+  `GOTOOLCHAIN` (CI keeps `local`). No runtime change.
+
 ## [0.14.1] - 2026-10-13
 
 ### Fixed

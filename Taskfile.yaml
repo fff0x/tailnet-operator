@@ -34,6 +34,16 @@ tasks:
     cmds:
       - bash hack/e2e-kind.sh
 
+  e2e-full:
+    desc: "Everything: the CI gate (lint, unit, chart, admission, Tier 1) plus every Tier-2 kind suite; ~75 min, see CONTRIBUTING.md for the required delegated scope"
+    cmds:
+      - bash hack/ci-test.sh
+      - bash hack/e2e-kind.sh
+      - bash hack/e2e-kind-projection.sh
+      - bash hack/e2e-kind-projection.sh --rest-only
+      - bash hack/e2e-kind-projection.sh --gateway-preflight-only
+      - bash hack/e2e-kind-projection.sh --gateway-fresh-only
+
   test-validation:
     desc: Validate CRDs, examples, optional LIVE_CR_FILE and gateway persistence in isolated envtest API servers
     requires:

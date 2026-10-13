@@ -253,6 +253,7 @@ task crds deploy-gen # regenerate CRDs and deploy/operator.yaml from their sourc
 task test-validation # admission tests on envtest (KUBEBUILDER_ASSETS)
 task e2e             # manager against envtest + real Headscale (pinned downloads)
 task e2e-kind        # rootless kind: install, failover, HTTP ingress with cert-manager
+task e2e-full        # CI gate + every kind suite in one run (~75 min, delegated scope; see CONTRIBUTING)
 task image           # build the combined image locally
 ```
 

@@ -107,6 +107,7 @@ the split zone you have to configure. See [preflight](INSTALL.md#25-preflight) f
 | Headscale integration | `task e2e` | The production manager against envtest plus real Headscale 0.28.0 and 0.29.3 binaries: preflight, policy lifecycle, retry/backoff, key rotation, approval replay, DNS hosts rendering, credential redaction |
 | Cluster | `task e2e-kind` | Rootless kind: Helm installation, two-replica leader failover, agent-to-peer HTTPS, Headscale over HTTPS, HTTP ingress with cert-manager issuance and renewal |
 
-All suites run without a kube-context and never touch an existing cluster; `task e2e` downloads
+`task e2e-full` chains all of the above, in the order CI runs the first three, and then every kind
+selection. All suites run without a kube-context and never touch an existing cluster; `task e2e` downloads
 checksum-pinned Headscale and envtest assets into `~/.cache/tailnet-operator-e2e`.
 See [CONTRIBUTING](../CONTRIBUTING.md) for prerequisites.

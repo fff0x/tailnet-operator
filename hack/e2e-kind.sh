@@ -13,7 +13,7 @@ unset CONTAINER_HOST CONTAINER_CONNECTION DOCKER_HOST DOCKER_CONTEXT CONTAINER_S
 unset KUBECONFIG KUBERNETES_MASTER KIND_EXPERIMENTAL_PROVIDER KIND_EXPERIMENTAL_DOCKER_NETWORK
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy
 export KIND_EXPERIMENTAL_PROVIDER=podman
-export GOFLAGS=-mod=readonly GOWORK=off GOTOOLCHAIN=local CGO_ENABLED=0 TS_NO_LOGS_NO_SUPPORT=1
+export GOFLAGS=-mod=readonly GOWORK=off GOTOOLCHAIN="${GOTOOLCHAIN:-local}" CGO_ENABLED=0 TS_NO_LOGS_NO_SUPPORT=1
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 for tool in podman kind kubectl helm go timeout; do
   command -v "$tool" >/dev/null || fail "missing $tool (kind can be supplied with nix-shell -p kind)"

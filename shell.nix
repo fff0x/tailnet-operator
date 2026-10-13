@@ -21,6 +21,7 @@ pkgs.mkShell {
     jq # Portable dashboard JSON validation (also available in the CI broker)
     curl
     sqlite # Offline route fixtures for the real Headscale integration tests
+    govulncheck # hack/ci-test.sh (task e2e-full) runs the same scanner the CI image pins
   ];
 
   # tsnet phones home to log.tailscale.com by default; keep the dev shell quiet too.

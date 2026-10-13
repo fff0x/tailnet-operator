@@ -14,7 +14,9 @@ esac
 
 # Never discover a live kube-context, accept live exports or inherit alternate test binaries.
 unset LIVE_CR_FILE KUBEBUILDER_ASSETS E2E_HEADSCALE_DIR
-export USE_EXISTING_CLUSTER=false GOTOOLCHAIN=local GOFLAGS=-mod=readonly
+# GOTOOLCHAIN stays local in the CI image (Dockerfile ENV); a developer whose system Go is older
+# than go.mod may export GOTOOLCHAIN=auto for a local run.
+export USE_EXISTING_CLUSTER=false GOTOOLCHAIN="${GOTOOLCHAIN:-local}" GOFLAGS=-mod=readonly
 export HEADSCALE_VERSIONS='v0.28.0 v0.29.3'
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
