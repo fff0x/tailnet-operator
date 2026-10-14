@@ -705,12 +705,39 @@ kubectl get tailnetsite prod-1-lan                                              
 | Change | Effect |
 | --- | --- |
 | `image`, `dns.image`, `routes.*`, `service.tailnetLBCIDR`, egress targets | written into the StatefulSet template; apply by deleting the Pod (`PodTemplateStale`), no restart by the operator |
-| `dns.staticRecords`, `dns.wildcardAddress`, the hosts file | re-rendered live into the zone; no Pod change |
+| `dns.staticRecords`, `dns.wildcardAddress`, the hosts file | re-rendered live into the zone (and the extra-zone `hosts` key); no Pod change |
 | `service.poolLabels` | set/removed on the Service in place |
 | `deletionPolicy`, `suspend` | lifecycle only; a suspend/resume cycle keeps the identity |
-| `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `service.loadBalancerIP`, `service.loadBalancerClass`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP` | identity — admission rejects most, the rest report `IdentityChanged`; recreate with `deletionPolicy: Delete` |
+| `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `service.loadBalancerIP`, `service.loadBalancerClass`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP`, `dns.extraZones` | identity — admission rejects most, the rest report `IdentityChanged`; recreate with `deletionPolicy: Delete` |
+
+### Extra zones for legacy networks
+
+When peers must also resolve corporate zones whose internal resolvers carry
+authoritative overrides (an SNI-routing proxy under `lolek.konzern.intern`, say),
+add them as `dns.extraZones`. Names inside such a zone that appear in the Tailnet
+hosts source are answered by the gateway; everything else is forwarded to the
+listed upstreams. Add the zone to the Headscale split-DNS (`nameservers.split`)
+pointing at the gateway LB IP, like the primary zone.
+
+```yaml
+spec:
+  dns:
+    zone: hydra.tailnet.example.internal
+    extraZones:
+      - zone: konzern.intern
+        upstreams: ["10.90.200.1", "10.90.200.2"]
+      - zone: it.persona.de
+        upstreams: ["10.90.200.1"]
+```
+
+Overrides come from the hosts source (`spec.dns.hostsConfigMap` of the Tailnet, i.e.
+`TailnetEgress` DNS aliases and `TailnetIngress` names): an alias such as
+`lolek.konzern.intern` on an egress makes the gateway answer it with the egress
+address instead of forwarding. Only A/AAAA are served locally; other record types for
+an overridden name reach the upstream. Zones must not overlap each other or the
+primary zone; `dns.extraZones` is immutable after creation.
 
 Declared in the schema but **rejected by the current writer** (`Ready=False/FreshBlocked` or
-admission): `forwards[]`/`forwardImage` (TCP forwards), `dns.extraZones[]`, `authKeySecretRef`
+admission): `forwards[]`/`forwardImage` (TCP forwards), `authKeySecretRef`
 (external bootstrap key), `adoption`, IPv6 prefixes, `replicas` other than `1`. Lifecycle, rollback
 and deletion: [gateway reference](reference/gateway.md#key-and-expiry-lifecycle).

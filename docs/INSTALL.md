@@ -566,7 +566,8 @@ router is never adopted. The complete worked example (manifest, LB pool, iBGP, s
    `kubectl get tailnetgateway` → `READY=True`; `RoutesInSync=True/Approved` after the next policy
    reconcile (≤ 5 min).
 4. Set the Headscale split-DNS entry; add the cluster CoreDNS `forward` for the zone to
-   `dns.serviceClusterIP` (§5.3 form, upstream = the gateway's DNS Service).
+   `dns.serviceClusterIP` (§5.3 form, upstream = the gateway's DNS Service). Repeat both for
+   every `dns.extraZones[]` zone the gateway serves for a legacy network (USAGE §9b, "Extra zones").
 5. Declare the LAN as a `TailnetSite` (USAGE §9a) so overlaps are blocked and the site has a status.
 6. Verify from both sides: a Pod resolves `api.<zone>` through the cluster CoreDNS; a tailnet peer
    resolves `router.<zone>` through split-DNS and reaches `192.0.2.1` through the gateway.

@@ -4,6 +4,20 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- `TailnetGateway.spec.dns.extraZones[]` is rendered: each zone becomes a CoreDNS `hosts … { fallthrough }`
+  + `cache 30` + `forward . <upstreams>` block next to the strict primary zone, for legacy networks whose
+  internal resolvers carry authoritative overrides. Hosts-source names inside an extra zone are written
+  to a third `-coredns` ConfigMap key `hosts` (live-reconciled and fingerprint-excluded like `zone.db`)
+  and answered locally (A/AAAA); everything else, including non-address types for a known name, is
+  forwarded — the documented weaker hosts+forward contract, opted into per zone. The renderer enforces
+  non-overlapping zones, 1–8 unique canonical unicast upstreams and never the gateway's LB IP. A
+  Gateway without extra zones renders byte-identical to 0.14.x (same keys, content hash and Pod
+  template), so upgrading does not touch its ConfigMap or serial. `task test-gateway-dns` covers the
+  rendered block against real CoreDNS 1.14.6 (local override, forward, NXDOMAIN, TXT fallthrough,
+  hosts reload without restart, strict primary zone).
+
 ### Changed
 
 - Alert `runbook_url` annotations point to `docs/OPERATIONS.md#monitoring-*`; USAGE §10–14 (keys, diagnosis,

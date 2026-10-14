@@ -31,7 +31,8 @@ because this CRD is installed. See [compatibility](../COMPATIBILITY.md#gateway-a
 The active controller uses uncached API reads and the selected Tailnet's existing
 working API key. It requires owned DNS hosts input, available resource names and
 nonconflicting Gateway identities/addresses. External auth references, adoption,
-IPv6, extra DNS zones and TCP forwards remain unsupported by this writer.
+IPv6 and TCP forwards remain unsupported by this writer; extra DNS zones are
+rendered as hosts+forward blocks (see [Extra zones](#extra-zones-dnsextrazones)).
 
 1. Render the initial plan without side effects; reject unsupported inputs and occupied names.
 2. Exclusively create the empty mutable State Secret. Its successful Create response supplies the expected UID.
@@ -107,7 +108,7 @@ There is no configurable target namespace or arbitrary Pod/Corefile/shell templa
 | `dns.zone` | Primary lowercase DNS zone |
 | `dns.serviceName`, `dns.serviceClusterIP` | Explicit stable DNS Service name/address, immutable |
 | `dns.image` | Separate CoreDNS version/digest pin |
-| `dns.extraZones[]` | Unique, non-overlapping zones with explicit unicast-IP upstreams; no resolver URLs |
+| `dns.extraZones[]` | ≤ 16 unique, non-overlapping zones with 1–8 explicit unicast-IP upstreams each (never the LB IP); no resolver URLs. Rendered as hosts+forward blocks; hosts-source names inside the zone are served locally |
 | `dns.staticRecords[]` | Unique relative labels below the primary zone with EITHER an explicit A/AAAA `address` OR a `target` FQDN inside the same zone (CNAME, never both and never neither; a target that equals the record's own FQDN is rejected) |
 | `dns.wildcardAddress` | Optional file-zone fallback; never a `template` plugin that shadows dynamic hosts |
 | `forwards[]` | Named TCP port to `targetAddress` IP and `targetPort`; unique listener ports |
@@ -481,8 +482,9 @@ The `DNSReady` condition reflects the writer verdict:
 - `False / DNSUpdateConflict` — a concurrent change on the ConfigMap aborted
   the CAS; the next reconcile retries.
 
-Only `zone.db` is excluded from the completion fingerprint; `Corefile` and every
-other key stay digest-bound and still trip `FreshBlocked` on drift. The
+Only `Corefile`, `zone.db` and the optional `hosts` key are excluded from the
+completion fingerprint; every other key stays digest-bound and still trips
+`FreshBlocked` on drift. The
 `DNSReady` condition is independent of `Ready`: a successful live reconcile does
 not make the gateway Ready, and a blocked DNS reconcile does not revoke it. The
 receipt ConfigMaps still demand the trust of a Secret; whoever can rewrite the
@@ -497,7 +499,7 @@ runtime shape; everything else is either reconciled or irrelevant to the retaine
 | Class | Fields | Effect of a change |
 |---|---|---|
 | Pinned identity | `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `service.loadBalancerIP`, `service.loadBalancerClass`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP`, `dns.extraZones`, `forwardImage`, `forwards`; Tailnet `spec.server` and `spec.dns.hostsConfigMap` | `Ready=False/IdentityChanged`; nothing is written. Revert the field, or delete with `deletionPolicy: Delete` and recreate. |
-| Live DNS | `dns.staticRecords`, `dns.wildcardAddress`, the hosts source | Re-rendered into `zone.db` ([Live DNS reconcile](#live-dns-reconcile)). |
+| Live DNS | `dns.staticRecords`, `dns.wildcardAddress`, the hosts source | Re-rendered into `zone.db` (and `hosts` for extra zones) ([Live DNS reconcile](#live-dns-reconcile)). |
 | Images | `image` (tailscale and kernel-preflight), `dns.image` | Written into `spec.template` of the receipt StatefulSet; see below. |
 | Routes | `routes.lan`, `routes.advertiseEgressTargets`, `service.tailnetLBCIDR`, the targets of the Tailnet's `TailnetEgress` objects | The planned set is written into `TS_ROUTES` of the template; see below. |
 | Pool labels | `service.poolLabels` | Written onto the receipt's LoadBalancer Service (same object); see below. |
@@ -587,18 +589,38 @@ one address family. Dynamic and static records share one file zone: a known name
 missing record type returns NODATA, without falling through to a wildcard or upstream.
 Wildcards follow normal DNS closest-encloser semantics; they are not catch-all templates.
 The primary apex is reserved for the gateway nameserver/address. Host snapshots that
-claim it are rejected. Names outside the primary zone are not served. The apex is also
+claim it are rejected. Names outside the primary zone are not served unless they fall
+inside a configured [extra zone](#extra-zones-dnsextrazones). The apex is also
 its own nameserver: `NS` and the SOA primary point at the zone name itself, and the SOA
 mailbox is the reserved `hostmaster.invalid.`. This is valid DNS, just unusual; there is
 deliberately no `ns.<zone>` label because the zone name may already sit at the wire-length
 limit, and adding one would churn the SOA serial of every deployed zone for no resolver
 benefit.
 
-**Additional forward zones are deliberately unsupported by this renderer.** Any
-nonempty `extraZones` returns an error and no partial output. With CoreDNS 1.14.6,
-`hosts` followed by `forward` keeps missing A/AAAA local, but forwards TXT for a
-known name. That does not satisfy the required strict-local contract. Admission
-still accepts the future API field; it does not activate this weaker behavior.
+### Extra zones (`dns.extraZones`)
+
+Each `dns.extraZones[]` entry renders one additional CoreDNS server block next to
+the strict primary zone, for legacy networks whose internal resolvers serve
+authoritative overrides (e.g. an SNI-routing proxy published under a corporate
+name). The block is `hosts hosts <zone> { fallthrough }`, `cache 30`,
+`forward . <upstreams> { max_concurrent 1000 }`, plus the shared `prometheus :9153`
+and `reload`. Hosts-source names that fall inside an extra zone are written to a
+third ConfigMap key, `hosts`, and answered locally (A/AAAA); every other name in
+the zone — and every non-address type, even for a locally known name — is forwarded
+to the upstreams. **This is the weaker hosts+forward contract by design**, opted
+into per zone; the primary zone keeps strict known-name locality. Names outside
+every configured zone are still not served.
+
+Validation (CRD CEL and the renderer): zones are lowercase DNS names that overlap
+neither the primary zone nor each other, 1–8 canonical unicast upstreams per zone,
+no duplicates and never the gateway's own LB address. The `hosts` key exists only
+when extra zones are configured: a Gateway without them renders byte-identical to
+earlier releases (same `Corefile`, same content hash, two keys, two projected
+items), so upgrading does not advance its serial or rewrite its ConfigMap. The
+`hosts` key is live-reconciled and excluded from the completion fingerprint like
+`zone.db`; a hosts-source change inside an extra zone advances the SOA serial of
+the primary zone like any other semantic change. `dns.extraZones` itself stays
+pinned identity (recreate with `deletionPolicy: Delete` to change it).
 
 Initial creation checks scope and ownership. Future dynamic DNS integration must also:
 
@@ -661,8 +683,11 @@ requires IPv4 and IPv6 loopback, and uses no Kubernetes context. CoreDNS **1.14.
 was checked over UDP/TCP. Cases cover A/AAAA, negative record types (including
 HTTPS/SVCB), wildcards, closest-encloser behavior, NXDOMAIN, refused zones and
 dynamic/static priority. Atomic directory-projection reloads were also checked.
-An intentionally unsafe hosts+forward
-control reproduces TXT fallthrough against an owned loopback upstream.
+`TestRenderedDNSExtraZones` runs the rendered extra-zone block against an owned
+loopback upstream: local hosts override without an upstream query, forwarded
+A/NXDOMAIN, the documented TXT fallthrough, a `hosts` projection update landing
+without restart, and the primary zone staying strict. An intentionally unsafe
+hosts+forward control reproduces the same TXT fallthrough in isolation.
 
 This does not verify the lab's CoreDNS 1.14.7 image, a running Kubernetes sidecar,
 external forwarding support, kernel subnet routing or interruption-free adoption.

@@ -208,7 +208,8 @@ at admission. See [validation rules and tests](docs/OPERATIONS.md#5-validation) 
 | `dns.staticRecords[]` | none | ≤ 128 relative names with an `address` (A/AAAA) **or** an in-zone `target` (CNAME); live-reloaded |
 | `dns.wildcardAddress` | none | fallback A record for `*.<zone>`; dynamic names always win |
 | `replicas` | `1` | only `1` is accepted |
-| `forwards[]`, `forwardImage`, `dns.extraZones[]`, `authKeySecretRef`, `adoption` | — | schema only; the current writer rejects them (`FreshBlocked`) |
+| `dns.extraZones[]` | none | ≤ 16 extra zones (`zone` + 1–8 `upstreams`): hosts-source names inside the zone answered locally, everything else forwarded; immutable |
+| `forwards[]`, `forwardImage`, `authKeySecretRef`, `adoption` | — | schema only; the current writer rejects them (`FreshBlocked`) |
 
 ### Status and conditions
 
