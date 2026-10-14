@@ -48,7 +48,7 @@ type GatewayAuthKeyReference struct {
 // operator namespace. DNS targets are explicitly skipped, not resolved.
 type GatewayRoutes struct {
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:MaxItems=128
 	// +listType=set
 	LAN []GatewayPrefix `json:"lan"`
 	// +kubebuilder:default=true

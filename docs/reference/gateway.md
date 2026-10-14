@@ -99,7 +99,7 @@ There is no configurable target namespace or arbitrary Pod/Corefile/shell templa
 | `replicas` | Exactly `1`, also the default |
 | `deletionPolicy` | `Retain` (default): CR deletion leaves every resource, the Headscale node and the key in place. `Delete`: consent to the fail-closed teardown below |
 | `tags` | Bootstrap tags, default `[tag:fabric]`; not authority to drop existing tags during adoption |
-| `routes.lan[]` | 1–32 canonical masked non-default IPv4/IPv6 prefixes |
+| `routes.lan[]` | 1–128 canonical masked non-default IPv4/IPv6 prefixes |
 | `routes.advertiseEgressTargets` | Default `true`; literal IPv4/IPv6 targets yield /32 or /128; DNS targets are not resolved |
 | `service.loadBalancerIP` | Stable unicast IP, immutable and inside `tailnetLBCIDR` |
 | `service.tailnetLBCIDR` | Mandatory route to the gateway's own LB address, independent of automatic egress routes |

@@ -4,6 +4,7 @@ package validation
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -217,6 +218,23 @@ func TestGatewayAdmission(t *testing.T) {
 		o = fresh()
 		set(o, "spec.dns.extraZones", []any{map[string]any{"zone": "konzern.intern", "upstreams": []any{"10.0.0.1", "10.0.0.2"}}, map[string]any{"zone": "it.persona.de", "upstreams": []any{"10.0.0.3"}}})
 		check(t, o, true)
+	})
+	t.Run("route-count-limit", func(t *testing.T) {
+		gen := func(n int) []any {
+			out := make([]any, n)
+			for i := 0; i < n; i++ {
+				out[i] = fmt.Sprintf("10.%d.%d.0/24", i/256, i%256)
+			}
+			return out
+		}
+		for _, tc := range []struct {
+			n     int
+			valid bool
+		}{{128, true}, {129, false}} {
+			o := fresh()
+			set(o, "spec.routes.lan", gen(tc.n))
+			check(t, o, tc.valid)
+		}
 	})
 	for _, tc := range []struct {
 		name, path string

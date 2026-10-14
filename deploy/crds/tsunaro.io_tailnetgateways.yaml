@@ -424,7 +424,7 @@ spec:
                         rule: isCIDR(self) && !self.startsWith('::ffff:') && ['0.0.0.0/32',
                           '127.0.0.0/8', '224.0.0.0/4', '::/128', '::1/128', 'ff00::/8'].all(r,
                           !cidr(self).containsIP(cidr(r).ip()) && !cidr(r).containsCIDR(cidr(self)))
-                    maxItems: 32
+                    maxItems: 128
                     minItems: 1
                     type: array
                     x-kubernetes-list-type: set

@@ -200,7 +200,7 @@ at admission. See [validation rules and tests](docs/OPERATIONS.md#5-validation) 
 | `tags[]` | `[tag:fabric]` | bootstrap tags; must be in `policy.routeApprovers` for automatic route approval; immutable |
 | `stateSecretRef.name` | — | state Secret the operator creates empty and the Pod fills with its node identity; immutable, back it up |
 | `image`, `dns.image` | — | kernel Tailscale / CoreDNS image with a version tag or digest (`latest` and bare images rejected); the only mutable Pod-template fields |
-| `routes.lan[]` | — | 1–32 IPv4 prefixes advertised as subnet routes |
+| `routes.lan[]` | — | 1–128 IPv4 prefixes advertised as subnet routes |
 | `routes.advertiseEgressTargets` | `true` | also advertise every literal `TailnetEgress` target of the Tailnet as `/32` |
 | `service.loadBalancerIP`, `.tailnetLBCIDR` | — | LB address of the split-DNS Service (immutable) and the pool CIDR containing it, advertised as a route so peers reach every LB IP |
 | `service.poolLabels`, `.loadBalancerClass` | none | ≤ 16 labels your LB pool selects on (mutable); optional class (immutable) |

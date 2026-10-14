@@ -2,6 +2,14 @@
 
 Notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- `TailnetGateway.spec.routes.lan[]` accepts up to 128 prefixes (was 32), so a single gateway can
+  advertise a LAN plus the dozens of single-host site routes a corporate fabric fans out, without
+  route aggregation the Headscale policy forbids.
+
 ## [0.15.0] - 2026-10-14
 
 ### Added

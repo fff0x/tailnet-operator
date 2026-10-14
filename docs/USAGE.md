@@ -534,7 +534,7 @@ spec:
   stateSecretRef: { name: prod-1-gw-state }   # created empty by the operator, holds the node identity
   image: ghcr.io/tailscale/tailscale:v1.102.4 # kernel tailscale; a version tag or digest, never :latest
   routes:
-    lan: [192.0.2.0/24]                  # the site LAN; 1–32 IPv4 prefixes
+    lan: [192.0.2.0/24]                  # the site LAN; 1–128 IPv4 prefixes
     advertiseEgressTargets: true         # default: every literal TailnetEgress target becomes a /32 route
   service:
     loadBalancerIP: 198.51.100.17        # the split-DNS nameserver address peers will use; immutable
