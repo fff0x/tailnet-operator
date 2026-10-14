@@ -1,4 +1,7 @@
 {{- if and .Values.networkPolicy.enabled (eq .Values.networkPolicy.provider "cilium") }}
+{{- if and (not .Values.networkPolicy.cilium.headscalePeers) (not .Values.networkPolicy.headscaleCIDRs) }}
+{{- fail "networkPolicy.provider cilium requires at least one of networkPolicy.cilium.headscalePeers (in-cluster) or networkPolicy.headscaleCIDRs (remote Headscale)" }}
+{{- end }}
 # Egress-only: the operator may reach exactly the four destinations it dials. Ingress (metrics
 # :8080, health :8081) stays open. If any rule is missing the operator fails silently; keep this
 # in sync with what internal/controller dials.
@@ -24,14 +27,31 @@ spec:
             - {port: "53", protocol: UDP}
             - {port: "53", protocol: TCP}
     {{- end }}
-    # 3. Headscale — the REST API (mint/rotate keys, list nodes, read/write policy)
+    # 3. Headscale — the REST API (mint/rotate keys, list nodes, read/write policy).
+    # In-cluster Headscale is expressed as label peers (toEndpoints). A Headscale that lives
+    # outside the cluster (shared control plane, spoke clusters) is unreachable through
+    # toEndpoints; declare it as toCIDR instead — Cilium's cilium.io/v2 CIDR syntax, not
+    # toEntities. Both blocks may coexist; at least one is required (fail guard above).
+    {{- with .Values.networkPolicy.cilium.headscalePeers }}
     - toEndpoints:
-        {{- include "tailnet-operator.ciliumEndpoints" .Values.networkPolicy.cilium.headscalePeers | trim | nindent 8 }}
+        {{- include "tailnet-operator.ciliumEndpoints" . | trim | nindent 8 }}
       toPorts:
         - ports:
-            {{- range .Values.networkPolicy.headscalePorts }}
+            {{- range $.Values.networkPolicy.headscalePorts }}
             - {port: {{ . | quote }}, protocol: TCP}
             {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.headscaleCIDRs }}
+    - toCIDR:
+        {{- range . }}
+        - {{ . | quote }}
+        {{- end }}
+      toPorts:
+        - ports:
+            {{- range $.Values.networkPolicy.headscalePorts }}
+            - {port: {{ . | quote }}, protocol: TCP}
+            {{- end }}
+    {{- end }}
     # 4. agent pods — scrape /status and /targets on :9080. Cilium scopes toEndpoints to the
     #    policy namespace unless the namespace label is matched; ingress agents run in tenant
     #    namespaces, so select across all of them.

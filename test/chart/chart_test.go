@@ -751,6 +751,7 @@ func TestInvalidValues(t *testing.T) {
 		{"network policy without Headscale CIDRs", "networkPolicy: {enabled: true, kubeAPICIDRs: [10.96.0.1/32]}", "headscaleCIDRs"},
 		{"network policy unknown provider", "networkPolicy: {enabled: true, provider: calico}", "provider"},
 		{"cilium policy with ipBlock peer", "networkPolicy: {enabled: true, provider: cilium, dnsPeers: [{ipBlock: {cidr: 10.0.0.0/8}}]}", "ipBlock"},
+		{"cilium policy without any Headscale egress", "networkPolicy: {enabled: true, provider: cilium, cilium: {headscalePeers: []}}", "headscaleCIDRs"},
 	}
 	for _, name := range []string{"POD_NAMESPACE", "OPERATOR_IMAGE", "AGENT_IMAGE_PULL_SECRETS", "AGENT_RESOURCES", "SSL_CERT_FILE"} {
 		cases = append(cases, struct{ name, values, diagnostic string }{"reserved " + name, "env: {extra: [{name: " + name + ", value: override}]}", name})
@@ -860,6 +861,7 @@ type ciliumPolicy struct {
 		Egress           []struct {
 			ToEntities  []string               `json:"toEntities"`
 			ToEndpoints []metav1.LabelSelector `json:"toEndpoints"`
+			ToCIDR      []string               `json:"toCIDR"`
 			ToPorts     []struct {
 				Ports []struct{ Port, Protocol string } `json:"ports"`
 			} `json:"toPorts"`
@@ -922,6 +924,69 @@ func TestCiliumNetworkPolicy(t *testing.T) {
 	}
 	if _, ok := agents["tailnet-egress"]; !ok || !agents["tailnet-ingress"] || !hasPort(3, "9080", "TCP") {
 		t.Errorf("agent scrape rule must cover egress agents and ingress agents in every namespace: %#v", agents)
+	}
+	// Default cilium render must not add a toCIDR egress — spoke clusters opt
+	// in explicitly via headscaleCIDRs; stability for hub clusters (hydra) is
+	// what makes the operator upgrade safe.
+	for i, e := range cnp.Spec.Egress {
+		if len(e.ToCIDR) != 0 {
+			t.Errorf("default cilium render leaked a toCIDR egress at index %d: %v", i, e.ToCIDR)
+		}
+	}
+}
+
+func TestCiliumNetworkPolicyRemoteHeadscale(t *testing.T) {
+	// Spoke cluster: the Headscale control plane lives outside the cluster. The
+	// in-cluster label peer is empty, Headscale is reached by IP via a toCIDR
+	// egress on the same headscalePorts. Covers the chart gap found during the
+	// prof kc-1 operator install (hand-written CiliumNetworkPolicy replaced).
+	m := render(t, `networkPolicy:
+  enabled: true
+  provider: cilium
+  headscalePorts: [443]
+  cilium:
+    headscalePeers: []
+  headscaleCIDRs: [91.98.5.30/32]
+  dnsPeers:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+`)
+	cnp := decode[ciliumPolicy](t, m.one(t, "CiliumNetworkPolicy"))
+	var cidrEgress, labelHeadscale int
+	var cidrs []string
+	for _, e := range cnp.Spec.Egress {
+		if len(e.ToCIDR) != 0 {
+			cidrEgress++
+			cidrs = append(cidrs, e.ToCIDR...)
+		}
+		for _, sel := range e.ToEndpoints {
+			if sel.MatchLabels["app.kubernetes.io/name"] == "headscale" {
+				labelHeadscale++
+			}
+		}
+	}
+	if cidrEgress != 1 || !reflect.DeepEqual(cidrs, []string{"91.98.5.30/32"}) {
+		t.Errorf("expected exactly one toCIDR egress with [91.98.5.30/32], got %d rules %v", cidrEgress, cidrs)
+	}
+	if labelHeadscale != 0 {
+		t.Error("empty cilium.headscalePeers must not render an in-cluster Headscale toEndpoints rule")
+	}
+	// Port parity: the toCIDR egress carries headscalePorts.
+	for _, e := range cnp.Spec.Egress {
+		if len(e.ToCIDR) == 0 {
+			continue
+		}
+		found := false
+		for _, tp := range e.ToPorts {
+			for _, p := range tp.Ports {
+				if p.Port == "443" && p.Protocol == "TCP" {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Errorf("toCIDR egress missing TCP/443: %#v", e.ToPorts)
+		}
 	}
 }
 

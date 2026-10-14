@@ -112,10 +112,10 @@ monitoring:
 networkPolicy:
   # -- Enable operator isolation. With provider kubernetes this requires explicit kubeAPI and Headscale CIDRs; CNI Service-DNAT behavior must be checked locally.
   enabled: false
-  # -- `kubernetes` renders a NetworkPolicy (ingress and egress, ipBlock-based). `cilium` renders an egress-only CiliumNetworkPolicy using `toEntities: kube-apiserver` and label selectors — ipBlock peers are rejected, ingress stays open, requires the cilium.io/v2 CRDs.
+  # -- `kubernetes` renders a NetworkPolicy (ingress and egress, ipBlock-based). `cilium` renders an egress-only CiliumNetworkPolicy using `toEntities: kube-apiserver`, label selectors and `toCIDR`; ipBlock peers in `dnsPeers`/`cilium.headscalePeers` are rejected, ingress stays open, requires the cilium.io/v2 CRDs. For a Headscale that lives outside the cluster (shared control plane, spoke clusters) set `cilium.headscalePeers: []` and populate `headscaleCIDRs` — the template renders a `toCIDR` egress for the Headscale IPs on `headscalePorts`.
   provider: kubernetes
   cilium:
-    # -- Headscale peers for provider cilium (namespaceSelector / podSelector; no ipBlock). Without a namespaceSelector the peer is scoped to the operator namespace.
+    # -- Headscale peers for provider cilium (namespaceSelector / podSelector; no ipBlock). Without a namespaceSelector the peer is scoped to the operator namespace. Set to `[]` when the Headscale control plane is reached by IP via `headscaleCIDRs` instead.
     headscalePeers:
       - podSelector:
           matchLabels:
@@ -124,7 +124,7 @@ networkPolicy:
   kubeAPICIDRs: []
   # -- Kubernetes API TCP ports.
   kubeAPIPorts: [443, 6443]
-  # -- Headscale API endpoint CIDRs (not hostnames). Required for provider kubernetes; update when DNS addresses change.
+  # -- Headscale API endpoint CIDRs (not hostnames). Required for provider kubernetes; optional for provider cilium (renders a `toCIDR` egress for a remote Headscale). Update when the DNS address changes; prefer the stable control-plane IPs over resolver-dependent values.
   headscaleCIDRs: []
   # -- Headscale REST API TCP ports.
   headscalePorts: [443, 8080]
