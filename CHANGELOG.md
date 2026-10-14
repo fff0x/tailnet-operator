@@ -2,6 +2,29 @@
 
 Notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.0] - 2026-10-14
+
+### Added
+
+- Chart: `networkPolicy.cilium.headscalePeers` and `networkPolicy.headscaleCIDRs` may now coexist
+  under `provider: cilium`. The template adds a `toCIDR` egress for `headscaleCIDRs` on
+  `headscalePorts`, so a cluster whose Headscale control plane lives outside the cluster
+  (shared/spoke clusters) is covered by the chart's own CiliumNetworkPolicy and no longer needs a
+  side-car CNP. A fail guard rejects `provider: cilium` with both blocks empty. Default values keep
+  the in-cluster label peer and `headscaleCIDRs: []`, so hub clusters (hydra) render byte-identical
+  specs on upgrade — verified in `test/chart`.
+
+### Fixed
+
+- Gateway metrics stay observable across an operator restart. `Metrics.Observe` is now called on
+  every reconcile (not only when the status actually changed), so after a fresh Prometheus registry
+  the `tailnet_resource_ready{kind="TailnetGateway",…}` and `tailnet_resource_condition{…}` gauges
+  reappear without waiting for the next real status event. Observe is idempotent under the Metrics
+  mutex, and suspended gateways still withdraw their series. Covered by the unit test
+  `TestGatewayMetricsSurviveRestart` and the envtest subtest
+  `TestGatewayFreshWriter/metrics survive operator restart in fresh path` (both red before, green
+  after).
+
 ## [0.15.1] - 2026-10-14
 
 ### Changed
