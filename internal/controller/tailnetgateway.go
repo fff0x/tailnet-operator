@@ -92,7 +92,13 @@ func (r *TailnetGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	// Keep last-known identity/routes and the unacknowledged debounce state.
 	// Unknown conditions make clear that these are not fresh observations.
+	// Observe even when the status is unchanged: Metrics is a process-local
+	// Prometheus registry, so after an operator restart the gauges start empty
+	// and would stay absent until the next real status change. Observe is
+	// idempotent (DeletePartialMatch + rebuild under the Metrics mutex; a
+	// suspended gateway deletes its series instead of exporting them).
 	if equality.Semantic.DeepEqual(before.Status, gw.Status) {
+		r.Metrics.Observe(&gw)
 		return ctrl.Result{}, nil
 	}
 	patch := client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})

@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -43,8 +45,52 @@ import (
 	"tsunaro.io/tailnet-operator/internal/controller"
 	"tsunaro.io/tailnet-operator/internal/gateway"
 	"tsunaro.io/tailnet-operator/internal/headscale"
+	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 	"tsunaro.io/tailnet-operator/test/internal/isolation"
 )
+
+// isolatedGatewayWriterMetrics returns a brand-new Metrics backed by a fresh
+// pedantic registry, simulating the empty state right after an operator restart.
+func isolatedGatewayWriterMetrics(t *testing.T) (*operatormetrics.Metrics, *prometheus.Registry) {
+	t.Helper()
+	reg := prometheus.NewPedanticRegistry()
+	m, err := operatormetrics.Register(reg)
+	if err != nil {
+		t.Fatalf("register metrics: %v", err)
+	}
+	return m, reg
+}
+
+// assertGatewayGaugePresent fails if tailnet_resource_ready for the named
+// TailnetGateway is absent from the registry. Value is unimportant here; the
+// restart regression is about the series existing at all.
+func assertGatewayGaugePresent(t *testing.T, reg *prometheus.Registry, name string) {
+	t.Helper()
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	for _, f := range families {
+		if f.GetName() != "tailnet_resource_ready" {
+			continue
+		}
+		for _, m := range f.Metric {
+			if labelEquals(m, "kind", "TailnetGateway") && labelEquals(m, "name", name) {
+				return
+			}
+		}
+	}
+	t.Fatalf("tailnet_resource_ready{kind=TailnetGateway,name=%s} absent after reconcile", name)
+}
+
+func labelEquals(m *dto.Metric, key, want string) bool {
+	for _, p := range m.Label {
+		if p.GetName() == key && p.GetValue() == want {
+			return true
+		}
+	}
+	return false
+}
 
 const gatewayWriterServiceCIDR = "10.0.0.0/16"
 
@@ -150,6 +196,28 @@ func TestGatewayFreshWriter(t *testing.T) {
 		f.reconcile("Provisioning")
 		f.assertUnchanged(before, writes)
 		f.assertMints(1)
+	})
+
+	t.Run("metrics survive operator restart in fresh path", func(t *testing.T) {
+		// The fresh reconcile path (reconcileFresh) hosts the same DeepEqual
+		// early return as the suspended path: a fresh Prometheus registry after
+		// an operator restart must still see the gateway's gauges even when the
+		// on-disk status is unchanged. Covered as unit test
+		// TestGatewayMetricsSurviveRestart for the suspended branch; this
+		// subtest exercises the real reconcileFresh path through envtest.
+		f := newFixture(t, false)
+		metricsA, regA := isolatedGatewayWriterMetrics(t)
+		f.r.Metrics = metricsA
+		f.reconcile("Provisioning")
+		f.assertComplete()
+		assertGatewayGaugePresent(t, regA, f.g.Name)
+		// Simulate operator restart: a new Metrics with a fresh registry.
+		metricsB, regB := isolatedGatewayWriterMetrics(t)
+		f.r.Metrics = metricsB
+		before, writes := f.snapshot(), f.writes.writes
+		f.reconcile("Provisioning")
+		f.assertUnchanged(before, writes)
+		assertGatewayGaugePresent(t, regB, f.g.Name)
 	})
 
 	t.Run("ready needs synthetic Pod identity and advertised routes", func(t *testing.T) {

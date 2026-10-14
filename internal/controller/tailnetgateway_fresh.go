@@ -88,8 +88,11 @@ func (r *TailnetGatewayReconciler) reconcileFresh(ctx context.Context, req ctrl.
 		if err := r.RuntimeClient.Status().Patch(ctx, g, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return ctrl.Result{}, &gatewayAPIError{operation: "fresh status write", cause: err}
 		}
-		r.Metrics.Observe(g)
 	}
+	// Observe every reconcile (not only on a status change): Metrics is a process-local
+	// Prometheus registry, so after an operator restart the gauges stay absent until the next
+	// real status change. Observe is idempotent (see tailnetgateway.go for the reasoning).
+	r.Metrics.Observe(g)
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 

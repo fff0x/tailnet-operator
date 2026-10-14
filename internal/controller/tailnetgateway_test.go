@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr/funcr"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
+	operatormetrics "tsunaro.io/tailnet-operator/internal/metrics"
 )
 
 const gatewayTestCanary = "synthetic-gateway-credential-do-not-emit"
@@ -468,4 +471,82 @@ func TestTailnetGatewayMessagesDoNotDependOnInput(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Before the fix, Metrics.Observe only ran on a real status change: after an
+// operator restart (fresh Prometheus registry) a reconcile that found the on-disk
+// status unchanged took the DeepEqual early return and never exported the gauge,
+// so tailnet_resource_ready for the gateway stayed absent until something changed.
+// TestGatewayMetricsSurviveRestart simulates two operator processes against the
+// same gateway: metrics A sees the gauge from the first reconcile; metrics B is
+// a brand new registry that must still see the gauge after a reconcile where the
+// status does not move.
+func TestGatewayMetricsSurviveRestart(t *testing.T) {
+	off := false
+	c, ctx, _ := gatewayTestSetup(t, gatewayTestFixture(&off))
+
+	metricsA, regA := isolatedGatewayMetrics(t)
+	rA := &TailnetGatewayReconciler{Client: c, Metrics: metricsA}
+	if _, err := rA.Reconcile(ctx, ctrl.Request{NamespacedName: c.key}); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	assertGatewayReadyGauge(t, regA, "gateway", 0)
+
+	// Fresh process: the CR status on the fake API server is unchanged, so without
+	// the fix the second Reconcile would take the DeepEqual early return and never
+	// call Observe on metricsB; the gauge would be absent until the next real patch.
+	metricsB, regB := isolatedGatewayMetrics(t)
+	rB := &TailnetGatewayReconciler{Client: c, Metrics: metricsB}
+	if _, err := rB.Reconcile(ctx, ctrl.Request{NamespacedName: c.key}); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	assertGatewayReadyGauge(t, regB, "gateway", 0)
+}
+
+func isolatedGatewayMetrics(t *testing.T) (*operatormetrics.Metrics, *prometheus.Registry) {
+	t.Helper()
+	reg := prometheus.NewPedanticRegistry()
+	m, err := operatormetrics.Register(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m, reg
+}
+
+func assertGatewayReadyGauge(t *testing.T, reg *prometheus.Registry, name string, want float64) {
+	t.Helper()
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range families {
+		if f.GetName() != "tailnet_resource_ready" {
+			continue
+		}
+		for _, m := range f.Metric {
+			if sampleHasLabels(m, map[string]string{"kind": "TailnetGateway", "name": name}) {
+				if got := m.GetGauge().GetValue(); got != want {
+					t.Fatalf("tailnet_resource_ready{kind=TailnetGateway,name=%s} = %v, want %v", name, got, want)
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("tailnet_resource_ready{kind=TailnetGateway,name=%s} absent (operator restart lost the gauge)", name)
+}
+
+func sampleHasLabels(m *dto.Metric, want map[string]string) bool {
+	for key, w := range want {
+		found := false
+		for _, p := range m.Label {
+			if p.GetName() == key && p.GetValue() == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
