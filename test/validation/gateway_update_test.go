@@ -279,8 +279,14 @@ func gatewayUpdateCases(t *testing.T, newFixture func(*testing.T, bool) *gateway
 		svc := &corev1.Service{}
 		f.get(f.g.Name, svc)
 		uid := svc.UID
+		// Pick one of the operator's own base label keys, skipping any pool key the
+		// gateway already owns (the fixture seeds one): hijacking a base key is a
+		// render-time block, hijacking a pool key is a normal, allowed update.
 		var baseKey string
 		for k := range svc.Labels {
+			if _, pool := f.g.Spec.Service.PoolLabels[k]; pool {
+				continue
+			}
 			baseKey = k
 			break
 		}
