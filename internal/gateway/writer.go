@@ -521,14 +521,15 @@ func objectReceipt(obj client.Object) freshObjectReceipt {
 			delete(spec, "template")
 		}
 	}
-	// The derived DNS zone AND Corefile are reconciled live from the Tailnet
-	// hosts source and the Gateway spec via UpdateDNSRevision. Their integrity
-	// rides on the matching annotations and the DNSReady condition, not on this
-	// immutable fingerprint. Every other key of the -coredns ConfigMap stays
-	// digest-bound.
+	// The derived DNS zone, hosts file AND Corefile are reconciled live from the
+	// Tailnet hosts source and the Gateway spec via UpdateDNSRevision. Their
+	// integrity rides on the matching annotations and the DNSReady condition,
+	// not on this immutable fingerprint. Every other key of the -coredns
+	// ConfigMap stays digest-bound.
 	if cm, ok := obj.(*corev1.ConfigMap); ok && strings.HasSuffix(cm.Name, "-coredns") {
 		if payload, ok := data["data"].(map[string]any); ok {
 			delete(payload, DNSZoneFile)
+			delete(payload, DNSHostsFile)
 			delete(payload, "Corefile")
 		}
 	}

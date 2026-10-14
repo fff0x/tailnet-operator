@@ -46,6 +46,12 @@ func freshPod(g *tnv1.TailnetGateway, server string, routes RoutePlan, configNam
 	if netip.MustParseAddr(string(g.Spec.DNS.ServiceClusterIP)).Is6() {
 		healthAddr = "[::]:8080"
 	}
+	// The hosts file is projected only when extra zones exist, so a Gateway
+	// without them keeps its pre-extraZones template (and identity digest).
+	dnsItems := []corev1.KeyToPath{{Key: "Corefile", Path: "Corefile"}, {Key: DNSZoneFile, Path: DNSZoneFile}}
+	if len(g.Spec.DNS.ExtraZones) != 0 {
+		dnsItems = append(dnsItems, corev1.KeyToPath{Key: DNSHostsFile, Path: DNSHostsFile})
+	}
 	tailscale := corev1.Container{
 		Name: "tailscale", Image: string(g.Spec.Image), ImagePullPolicy: corev1.PullIfNotPresent,
 		Command: []string{"/usr/local/bin/containerboot"}, SecurityContext: security(0, "NET_ADMIN"),
@@ -96,7 +102,7 @@ func freshPod(g *tnv1.TailnetGateway, server string, routes RoutePlan, configNam
 			{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 			{Name: "run", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 			{Name: "tun", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/net/tun", Type: ptr.To(corev1.HostPathCharDev)}}},
-			{Name: "dns-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: configName}, Items: []corev1.KeyToPath{{Key: "Corefile", Path: "Corefile"}, {Key: DNSZoneFile, Path: DNSZoneFile}}}}},
+			{Name: "dns-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: configName}, Items: dnsItems}}},
 			// Only tailscale receives this bounded, rotating token projection. No
 			// token or persistent state is shared with CoreDNS or the init container.
 			{Name: "api-access", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{DefaultMode: ptr.To(int32(0400)), Sources: []corev1.VolumeProjection{

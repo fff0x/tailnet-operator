@@ -451,8 +451,58 @@ func TestRenderedDNSIPv6(t *testing.T) {
 	assertAnswer(t, address, "v6.tail.example", dnsmessage.TypeTXT, dnsmessage.RCodeSuccess, "")
 }
 
+// dns.extraZones renders hosts+forward blocks next to the strict primary zone.
+// The renderer refuses loopback upstreams, so the owned loopback upstream is
+// swapped in textually after rendering; everything else is renderer output.
+func TestRenderedDNSExtraZones(t *testing.T) {
+	binary := coreDNSBinary(t)
+	root := t.TempDir()
+	upstreamAddress, count := upstream(t)
+	in := gateway.DNSInputs{
+		Config:        tnv1.GatewayDNS{Zone: "tail.example", ExtraZones: []tnv1.GatewayExtraZone{{Zone: "site.example", Upstreams: []tnv1.GatewayIP{"192.0.2.53"}}}},
+		ServerIP:      "192.0.2.1",
+		Serial:        1,
+		BindAddresses: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
+		Hosts:         "192.0.2.7 app.tail.example\n192.0.2.9 dyn.site.example\n",
+	}
+	plan, err := gateway.RenderDNS(in)
+	if err != nil || plan.HostsFile == "" || strings.Count(plan.Corefile, "192.0.2.53") != 1 {
+		t.Fatal("render extra-zone fixture")
+	}
+	core := strings.Replace(plan.Corefile, "192.0.2.53", upstreamAddress, 1)
+	project(t, root, "v1", map[string]string{"Corefile": core, "zone.db": plan.ZoneFile, "hosts": plan.HostsFile}, true)
+	address := start(t, binary, root, "app.tail.example", "127.0.0.1")
+	// Primary zone stays strict: known name, missing type is NODATA and never forwarded.
+	before := count.Load()
+	assertAnswer(t, address, "app.tail.example", dnsmessage.TypeA, dnsmessage.RCodeSuccess, "192.0.2.7")
+	assertAnswer(t, address, "app.tail.example", dnsmessage.TypeTXT, dnsmessage.RCodeSuccess, "")
+	assertAnswer(t, address, "missing.tail.example", dnsmessage.TypeA, dnsmessage.RCodeNameError, "")
+	// Extra zone: the hosts override answers locally without touching the upstream.
+	assertAnswer(t, address, "dyn.site.example", dnsmessage.TypeA, dnsmessage.RCodeSuccess, "192.0.2.9")
+	assertAnswer(t, address, "dyn.site.example", dnsmessage.TypeAAAA, dnsmessage.RCodeSuccess, "")
+	if count.Load() != before {
+		t.Fatal("local override or primary zone reached the upstream")
+	}
+	// Unknown names and NXDOMAIN come from the upstream.
+	assertAnswer(t, address, "other.site.example", dnsmessage.TypeA, dnsmessage.RCodeSuccess, "192.0.2.222")
+	assertAnswer(t, address, "absent.site.example", dnsmessage.TypeA, dnsmessage.RCodeNameError, "")
+	if count.Load() <= before {
+		t.Fatal("extra zone never reached the upstream")
+	}
+	// Documented weaker contract: a non-address type for an overridden name falls through.
+	m, err := exchange("udp", address, "dyn.site.example", dnsmessage.TypeTXT)
+	if err != nil || m.RCode != dnsmessage.RCodeSuccess || len(m.Answers) != 1 {
+		t.Fatal("TXT for an overridden name did not fall through to the upstream")
+	}
+	// A hosts projection update lands without a restart (hosts plugin reload).
+	project(t, root, "v2", map[string]string{"Corefile": core, "zone.db": plan.ZoneFile, "hosts": plan.HostsFile + "192.0.2.11 new.site.example\n"}, false)
+	waitAnswer(t, address, "new.site.example", "192.0.2.11")
+	assertMetricsServed(t, "127.0.0.1:9153")
+}
+
 // This is an intentionally unsafe control, not renderer output. It demonstrates
-// why hosts+forward is not accepted as the gateway's strict-locality contract.
+// the weaker hosts+forward contract that dns.extraZones opts into, as opposed
+// to the strict locality of the primary zone.
 func TestCoreDNSForwardingBoundary(t *testing.T) {
 	binary := coreDNSBinary(t)
 	root := t.TempDir()

@@ -56,7 +56,7 @@ func PlanDNSRevision(in DNSInputs, previous *DNSRevision) (DNSRevisionPlan, erro
 	if err != nil {
 		return DNSRevisionPlan{}, err
 	}
-	hash := dnsContentHash(canonical.Corefile, canonical.ZoneFile)
+	hash := dnsContentHash(canonical.Corefile, canonical.ZoneFile, canonical.HostsFile)
 	if previous == nil {
 		return DNSRevisionPlan{DNSRevision: DNSRevision{Serial: 1, ContentHash: hash}, Changed: true}, nil
 	}
@@ -75,9 +75,25 @@ func PlanDNSRevision(in DNSInputs, previous *DNSRevision) (DNSRevisionPlan, erro
 	return plan, nil
 }
 
-func dnsContentHash(corefile, zoneFile string) string {
-	b := sha256.Sum256([]byte(corefile + "\x00" + zoneFile))
+// dnsContentHash covers the rendered files. The hosts file only joins the hash
+// when present, so every pre-extraZones hash (and CAS annotation) stays valid.
+func dnsContentHash(corefile, zoneFile, hostsFile string) string {
+	payload := corefile + "\x00" + zoneFile
+	if hostsFile != "" {
+		payload += "\x00" + hostsFile
+	}
+	b := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(b[:])
+}
+
+// dnsPayload is the ConfigMap data of a rendered plan: the hosts key exists
+// only when extra zones are configured.
+func dnsPayload(dns DNSPlan) map[string]string {
+	data := map[string]string{"Corefile": dns.Corefile, DNSZoneFile: dns.ZoneFile}
+	if dns.HostsFile != "" {
+		data[DNSHostsFile] = dns.HostsFile
+	}
+	return data
 }
 
 // ReadDNSRevision validates that the persisted serial and hash describe the
@@ -87,7 +103,16 @@ func dnsContentHash(corefile, zoneFile string) string {
 // Missing annotations must NEVER be interpreted as a fresh serial 1.
 func ReadDNSRevision(cm *corev1.ConfigMap, zone string) (DNSRevision, error) {
 	if cm == nil || !dnsZone(zone) || cm.UID == "" || cm.ResourceVersion == "" ||
-		len(cm.Data) != 2 || len(cm.BinaryData) != 0 || cm.Data["Corefile"] == "" || cm.Data[DNSZoneFile] == "" {
+		len(cm.BinaryData) != 0 || cm.Data["Corefile"] == "" || cm.Data[DNSZoneFile] == "" {
+		return DNSRevision{}, ErrDNSRevisionInvalid
+	}
+	// Exactly Corefile+zone.db, or those plus a non-empty hosts file (extraZones).
+	hostsFile, hasHosts := cm.Data[DNSHostsFile]
+	wantKeys := 2
+	if hasHosts {
+		wantKeys = 3
+	}
+	if len(cm.Data) != wantKeys || (hasHosts && hostsFile == "") {
 		return DNSRevision{}, ErrDNSRevisionInvalid
 	}
 	serialText, hash := cm.Annotations[DNSSerialAnnotation], cm.Annotations[DNSHashAnnotation]
@@ -102,7 +127,7 @@ func ReadDNSRevision(cm *corev1.ConfigMap, zone string) (DNSRevision, error) {
 		return DNSRevision{}, ErrDNSRevisionInvalid
 	}
 	canonical := prefix + "1 7200 3600 1209600 30\n" + remainder
-	if dnsContentHash(cm.Data["Corefile"], canonical) != hash {
+	if dnsContentHash(cm.Data["Corefile"], canonical, hostsFile) != hash {
 		return DNSRevision{}, ErrDNSRevisionInvalid
 	}
 	return DNSRevision{Serial: uint32(serial), ContentHash: hash, ResourceVersion: cm.ResourceVersion}, nil

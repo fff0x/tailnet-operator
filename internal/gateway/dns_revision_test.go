@@ -103,6 +103,8 @@ func TestReadDNSRevisionChecksPersistedPayload(t *testing.T) {
 		"changed corefile": func(cm *corev1.ConfigMap) { cm.Data["Corefile"] += "forward . 192.0.2.53\n" },
 		"unversioned":      func(cm *corev1.ConfigMap) { cm.ResourceVersion = "" },
 		"extra payload":    func(cm *corev1.ConfigMap) { cm.Data["private"] = "unexpected" },
+		"empty hosts":      func(cm *corev1.ConfigMap) { cm.Data[DNSHostsFile] = "" },
+		"unhashed hosts":   func(cm *corev1.ConfigMap) { cm.Data[DNSHostsFile] = "10.0.0.1 x.site.example\n" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			cm := fixture()
@@ -114,6 +116,33 @@ func TestReadDNSRevisionChecksPersistedPayload(t *testing.T) {
 	}
 	if got, err := ReadDNSRevision(fixture(), "other.example"); !errors.Is(err, ErrDNSRevisionInvalid) || got != (DNSRevision{}) {
 		t.Fatal("wrong zone accepted")
+	}
+	// A three-key payload (extra zones) round-trips through the same reader, and
+	// a hosts-file edit is detected like a zone edit.
+	extra := dnsFixture()
+	extra.Config.ExtraZones = []tnv1.GatewayExtraZone{{Zone: "site.example", Upstreams: []tnv1.GatewayIP{"192.0.2.53"}}}
+	extra.Hosts = "10.0.0.1 x.site.example\n"
+	extraPlan, err := PlanDNSRevision(extra, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra.Serial = 1
+	rendered, err := RenderDNS(extra)
+	if err != nil || rendered.HostsFile == "" {
+		t.Fatal("extra zone did not render a hosts file")
+	}
+	cm = &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{UID: "config-uid", ResourceVersion: "rv-44", Annotations: map[string]string{
+		DNSSerialAnnotation: "1", DNSHashAnnotation: extraPlan.ContentHash}}, Data: dnsPayload(rendered)}
+	if got, err := ReadDNSRevision(cm, "tail.example"); err != nil || got.ContentHash != extraPlan.ContentHash || len(cm.Data) != 3 {
+		t.Fatal("three-key revision not recovered")
+	}
+	cm.Data[DNSHostsFile] += "10.0.0.2 y.site.example\n"
+	if _, err := ReadDNSRevision(cm, "tail.example"); !errors.Is(err, ErrDNSRevisionInvalid) {
+		t.Fatal("hosts edit not detected")
+	}
+	delete(cm.Data, DNSHostsFile)
+	if _, err := ReadDNSRevision(cm, "tail.example"); !errors.Is(err, ErrDNSRevisionInvalid) {
+		t.Fatal("dropped hosts key not detected")
 	}
 }
 
@@ -141,8 +170,8 @@ func TestDNSRevisionFailClosed(t *testing.T) {
 	if result, err := PlanDNSRevision(in, &last); !errors.Is(err, ErrDNSRevisionExhausted) || result != (DNSRevisionPlan{}) {
 		t.Fatal("serial wrapped or reset")
 	}
-	in.Config.ExtraZones = []tnv1.GatewayExtraZone{{Zone: "site.example", Upstreams: []tnv1.GatewayIP{"192.0.2.53"}}}
-	if result, err := PlanDNSRevision(in, nil); !errors.Is(err, ErrDNSForwardingUnsupported) || result != (DNSRevisionPlan{}) {
-		t.Fatal("unsupported zones bypassed renderer")
+	in.Config.ExtraZones = []tnv1.GatewayExtraZone{{Zone: "site.example"}}
+	if result, err := PlanDNSRevision(in, nil); !errors.Is(err, ErrDNSConfiguration) || result != (DNSRevisionPlan{}) {
+		t.Fatal("invalid extra zone bypassed renderer")
 	}
 }

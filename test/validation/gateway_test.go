@@ -214,6 +214,9 @@ func TestGatewayAdmission(t *testing.T) {
 		set(o, "spec.routes.lan", []any{"10.0.0.0/24", "2001:db8::/64"})
 		set(o, "spec.dns.serviceClusterIP", "fd00::53")
 		check(t, o, true)
+		o = fresh()
+		set(o, "spec.dns.extraZones", []any{map[string]any{"zone": "konzern.intern", "upstreams": []any{"10.0.0.1", "10.0.0.2"}}, map[string]any{"zone": "it.persona.de", "upstreams": []any{"10.0.0.3"}}})
+		check(t, o, true)
 	})
 	for _, tc := range []struct {
 		name, path string

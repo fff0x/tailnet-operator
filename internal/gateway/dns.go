@@ -3,6 +3,7 @@ package gateway
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
@@ -16,21 +17,21 @@ const (
 	// Corefile. Project the configuration directory, never an immutable subPath.
 	DNSWorkingDirectory = "/etc/coredns"
 	DNSZoneFile         = "zone.db"
-	maxDNSConfigBytes   = 1 << 20 // Combined ConfigMap data, not just source hosts.
-	maxDNSHostsBytes    = 1 << 20
-	maxDNSHostNames     = 16384
+	// DNSHostsFile is rendered only when dns.extraZones is set: the hosts-source
+	// names that fall inside those zones, served ahead of the upstream forward.
+	DNSHostsFile      = "hosts"
+	dnsHostsHeader    = "# rendered by tailnet-operator from the Tailnet hosts source for dns.extraZones; do not edit\n"
+	maxDNSConfigBytes = 1 << 20 // Combined ConfigMap data, not just source hosts.
+	maxDNSHostsBytes  = 1 << 20
+	maxDNSHostNames   = 16384
 )
 
-var (
-	ErrDNSConfiguration = errors.New("gateway DNS configuration is invalid")
-	// hosts+forward can send unsupported types for a locally known name to the
-	// upstream. Do not render that weaker contract while strict locality is open.
-	ErrDNSForwardingUnsupported = errors.New("gateway DNS forwarding is not implemented")
-)
+var ErrDNSConfiguration = errors.New("gateway DNS configuration is invalid")
 
 // DNSInputs contains public DNS configuration, never Secret contents. Hosts is
 // a snapshot of the selected Tailnet's owned hosts ConfigMap; ownership and scope
-// must be checked by the caller. Names outside the primary zone are not served.
+// must be checked by the caller. Names outside the primary zone are served only
+// when they fall inside a dns.extraZones entry (as hosts overrides of that zone).
 // Serial must advance for every zone-data change, including hosts-only changes;
 // gateway generation alone is not sufficient. This renderer has no clock or I/O.
 // BindAddresses must be chosen explicitly. CoreDNS's -dns.port flag selects the
@@ -45,20 +46,30 @@ type DNSInputs struct {
 	BindAddresses []netip.Addr
 }
 
-// DNSPlan describes two files for a fresh gateway's configuration ConfigMap.
+// DNSPlan describes the files for a fresh gateway's configuration ConfigMap.
 // It is not an adoption projection, apply document or evidence of DNS health.
 // Dynamic records replace a static record's entire RRset, not only its family.
 // The original hosts ConfigMap remains owned by the Tailnet DNS reconciler.
+// HostsFile is empty (and no ConfigMap key is written) unless dns.extraZones
+// is set, so a Gateway without extra zones renders exactly as before.
 type DNSPlan struct {
-	Corefile string
-	ZoneFile string
+	Corefile  string
+	ZoneFile  string
+	HostsFile string
 }
 
 // RenderDNS compiles one authoritative file zone. Keeping all known names in the
 // same zone gives NODATA for missing types and prevents upstream/wildcard leaks.
 // Wildcards use DNS file semantics, not the template plugin. Unknown zones are
-// refused; no system resolver is used. Extra forwarding zones are fail-closed
-// until strict known-name locality can be implemented and tested for them.
+// refused; no system resolver is used.
+//
+// Each dns.extraZones entry becomes a forwarding server block: hosts-source
+// names inside that zone are answered locally (hosts plugin, A/AAAA only),
+// everything else in the zone is forwarded to the listed upstreams. This is the
+// weaker hosts+forward contract by design: a non-address query type for a
+// locally known name falls through to the upstream. Extra zones never overlap
+// the primary zone or each other, and an upstream is never the gateway itself.
+//
 // The Corefile exposes Prometheus metrics on :9153 and enables the global reload
 // plugin so a Corefile change (e.g. a new static record targeting CNAME) takes
 // effect on the running Pod without a restart; zone-file changes are picked up
@@ -66,12 +77,13 @@ type DNSPlan struct {
 // reachability are caller checks.
 func RenderDNS(in DNSInputs) (DNSPlan, error) {
 	cfg := in.Config
-	if len(cfg.ExtraZones) != 0 {
-		return DNSPlan{}, ErrDNSForwardingUnsupported
-	}
 	server, ok := dnsAddress(in.ServerIP)
 	if !ok || !dnsZone(string(cfg.Zone)) || in.Serial == 0 || len(in.BindAddresses) == 0 || len(in.BindAddresses) > 2 || len(cfg.StaticRecords) > 128 || len(in.Hosts) > maxDNSHostsBytes {
 		return DNSPlan{}, ErrDNSConfiguration
+	}
+	extraZones, err := dnsExtraZones(cfg, server)
+	if err != nil {
+		return DNSPlan{}, err
 	}
 	binds := make([]string, 0, len(in.BindAddresses))
 	for _, addr := range in.BindAddresses {
@@ -123,6 +135,7 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 	if err != nil {
 		return DNSPlan{}, err
 	}
+	extraHosts := make(map[string][]netip.Addr)
 	for name, addresses := range hosts {
 		if name == string(cfg.Zone) {
 			// Keep the authoritative apex/nameserver tied to the gateway Service.
@@ -133,6 +146,13 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 			// hosts data is authoritative over the configured alias.
 			records[name] = addresses
 			delete(cnames, name)
+			continue
+		}
+		for _, extra := range extraZones {
+			if name == extra.zone || strings.HasSuffix(name, "."+extra.zone) {
+				extraHosts[name] = addresses
+				break
+			}
 		}
 	}
 	records[string(cfg.Zone)] = []netip.Addr{server}
@@ -170,11 +190,68 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 	// global `reload` plugin picks up Corefile changes (e.g. a newly rendered
 	// static record) without restarting the Pod. Per-zone `file` reload stays at
 	// 1s so zone.db changes still land fast.
-	core := fmt.Sprintf("%s {\n    bind %s\n    errors\n    prometheus :9153\n    file %s %s {\n        reload 1s\n    }\n    reload\n}\n", cfg.Zone, strings.Join(binds, " "), DNSZoneFile, cfg.Zone)
-	if len(core)+zone.Len() > maxDNSConfigBytes {
+	bind := strings.Join(binds, " ")
+	core := fmt.Sprintf("%s {\n    bind %s\n    errors\n    prometheus :9153\n    file %s %s {\n        reload 1s\n    }\n    reload\n}\n", cfg.Zone, bind, DNSZoneFile, cfg.Zone)
+	var hostsFile strings.Builder
+	if len(extraZones) != 0 {
+		// One server block per extra zone. `prometheus` and `reload` are shared
+		// across blocks by CoreDNS; `cache 30` matches the forwarded TTL ceiling
+		// of the legacy sidecars this replaces. The hosts file is one file for
+		// all extra zones; each block only serves its own zone from it.
+		hostsFile.WriteString(dnsHostsHeader)
+		for _, name := range slices.Sorted(maps.Keys(extraHosts)) {
+			addresses := extraHosts[name]
+			slices.SortFunc(addresses, func(a, b netip.Addr) int { return a.Compare(b) })
+			for _, addr := range slices.Compact(addresses) {
+				fmt.Fprintf(&hostsFile, "%s %s\n", addr, name)
+			}
+		}
+		for _, extra := range extraZones {
+			core += fmt.Sprintf("%s {\n    bind %s\n    errors\n    prometheus :9153\n    hosts %s %s {\n        fallthrough\n    }\n    cache 30\n    forward . %s {\n        max_concurrent 1000\n    }\n    reload\n}\n",
+				extra.zone, bind, DNSHostsFile, extra.zone, strings.Join(extra.upstreams, " "))
+		}
+	}
+	if len(core)+zone.Len()+hostsFile.Len() > maxDNSConfigBytes {
 		return DNSPlan{}, ErrDNSConfiguration
 	}
-	return DNSPlan{Corefile: core, ZoneFile: zone.String()}, nil
+	return DNSPlan{Corefile: core, ZoneFile: zone.String(), HostsFile: hostsFile.String()}, nil
+}
+
+type dnsExtraZone struct {
+	zone      string
+	upstreams []string
+}
+
+// dnsExtraZones validates dns.extraZones against the primary zone and the
+// gateway address and returns them in spec order with canonical upstreams.
+func dnsExtraZones(cfg tnv1.GatewayDNS, server netip.Addr) ([]dnsExtraZone, error) {
+	if len(cfg.ExtraZones) > 16 {
+		return nil, ErrDNSConfiguration
+	}
+	zones := []string{string(cfg.Zone)}
+	out := make([]dnsExtraZone, 0, len(cfg.ExtraZones))
+	for _, extra := range cfg.ExtraZones {
+		zone := string(extra.Zone)
+		if !dnsZone(zone) || len(extra.Upstreams) == 0 || len(extra.Upstreams) > 8 {
+			return nil, ErrDNSConfiguration
+		}
+		for _, known := range zones {
+			if zone == known || strings.HasSuffix(zone, "."+known) || strings.HasSuffix(known, "."+zone) {
+				return nil, ErrDNSConfiguration
+			}
+		}
+		zones = append(zones, zone)
+		upstreams := make([]string, 0, len(extra.Upstreams))
+		for _, raw := range extra.Upstreams {
+			addr, ok := dnsAddress(string(raw))
+			if !ok || addr == server || slices.Contains(upstreams, addr.String()) {
+				return nil, ErrDNSConfiguration
+			}
+			upstreams = append(upstreams, addr.String())
+		}
+		out = append(out, dnsExtraZone{zone: zone, upstreams: upstreams})
+	}
+	return out, nil
 }
 
 func parseDNSHosts(raw string) (map[string][]netip.Addr, error) {

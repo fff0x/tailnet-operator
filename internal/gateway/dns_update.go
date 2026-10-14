@@ -97,7 +97,7 @@ func UpdateDNSRevision(ctx context.Context, c client.Client, gatewayName, namesp
 			continue
 		}
 		updated := target.DeepCopy()
-		updated.Data = map[string]string{"Corefile": dns.Corefile, DNSZoneFile: dns.ZoneFile}
+		updated.Data = dnsPayload(dns)
 		if updated.Annotations == nil {
 			updated.Annotations = make(map[string]string)
 		}

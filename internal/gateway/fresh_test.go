@@ -83,8 +83,11 @@ func TestRenderFresh(t *testing.T) {
 			if obj.Annotations[DNSSerialAnnotation] != "1" || !dnsRevisionHash.MatchString(obj.Annotations[DNSHashAnnotation]) {
 				t.Fatal("derived DNS CAS annotations missing or malformed")
 			}
-			if obj.Annotations[DNSHashAnnotation] != dnsContentHash(obj.Data["Corefile"], obj.Data[DNSZoneFile]) {
+			if obj.Annotations[DNSHashAnnotation] != dnsContentHash(obj.Data["Corefile"], obj.Data[DNSZoneFile], obj.Data[DNSHostsFile]) {
 				t.Fatal("CAS hash does not describe the initial payload")
+			}
+			if _, ok := obj.Data[DNSHostsFile]; ok || len(obj.Data) != 2 {
+				t.Fatal("hosts key rendered without extra zones")
 			}
 		case *corev1.Service:
 			if len(obj.Spec.Ports) != 2 || obj.Spec.Ports[0].Port != 53 || obj.Spec.Ports[1].Port != 53 || obj.Spec.Ports[0].Protocol != corev1.ProtocolUDP || obj.Spec.Ports[1].Protocol != corev1.ProtocolTCP {
@@ -243,8 +246,31 @@ func TestRenderFreshRejectsUnsupported(t *testing.T) {
 	}
 	in = freshFixture()
 	in.Gateway.Spec.DNS.ExtraZones = []tnv1.GatewayExtraZone{{Zone: "site.example"}}
-	if p, err := RenderFresh(in); !errors.Is(err, ErrDNSForwardingUnsupported) || len(p.Objects) != 0 {
-		t.Fatal("extra-zone gate bypassed")
+	if p, err := RenderFresh(in); !errors.Is(err, ErrDNSConfiguration) || len(p.Objects) != 0 {
+		t.Fatal("extra zone without upstreams rendered")
+	}
+	// With extra zones the ConfigMap carries the hosts key and the Pod projects it.
+	in = freshFixture()
+	in.Gateway.Spec.DNS.ExtraZones = []tnv1.GatewayExtraZone{{Zone: "site.example", Upstreams: []tnv1.GatewayIP{"192.0.2.53"}}}
+	p, err := RenderFresh(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projected, keyed bool
+	for _, obj := range p.Objects {
+		switch obj := obj.(type) {
+		case *corev1.ConfigMap:
+			keyed = obj.Data[DNSHostsFile] != "" && len(obj.Data) == 3 && obj.Annotations[DNSHashAnnotation] == dnsContentHash(obj.Data["Corefile"], obj.Data[DNSZoneFile], obj.Data[DNSHostsFile])
+		case *appsv1.StatefulSet:
+			for _, v := range obj.Spec.Template.Spec.Volumes {
+				if v.ConfigMap != nil {
+					projected = len(v.ConfigMap.Items) == 3 && v.ConfigMap.Items[2].Key == DNSHostsFile
+				}
+			}
+		}
+	}
+	if !projected || !keyed {
+		t.Fatal("extra zones must add the hosts key and its projection")
 	}
 }
 

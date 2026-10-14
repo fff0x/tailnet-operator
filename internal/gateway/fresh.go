@@ -158,12 +158,12 @@ func RenderFresh(in FreshInputs) (FreshPlan, error) {
 	if in.DNSSerial != 1 {
 		return FreshPlan{}, ErrFreshConfiguration
 	}
-	// The derived zone is reconciled live (see UpdateDNSRevision); the writer
-	// receipt excludes zone.db from the digest. The annotations are the CAS
-	// precondition for every later update and must match the initial payload.
+	// The derived zone and hosts file are reconciled live (see UpdateDNSRevision);
+	// the writer receipt excludes them from the digest. The annotations are the
+	// CAS precondition for every later update and must match the initial payload.
 	configMeta := metadata(configName)
-	configMeta.Annotations = map[string]string{DNSSerialAnnotation: "1", DNSHashAnnotation: dnsContentHash(dns.Corefile, dns.ZoneFile)}
-	config := &corev1.ConfigMap{ObjectMeta: configMeta, Data: map[string]string{"Corefile": dns.Corefile, DNSZoneFile: dns.ZoneFile}}
+	configMeta.Annotations = map[string]string{DNSSerialAnnotation: "1", DNSHashAnnotation: dnsContentHash(dns.Corefile, dns.ZoneFile, dns.HostsFile)}
+	config := &corev1.ConfigMap{ObjectMeta: configMeta, Data: dnsPayload(dns)}
 	account := &corev1.ServiceAccount{ObjectMeta: metadata(g.Name), AutomountServiceAccountToken: ptr.To(false)}
 	role := &rbacv1.Role{ObjectMeta: metadata(g.Name), Rules: []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"secrets"}, ResourceNames: []string{state}, Verbs: []string{"get", "update", "patch"}}}}
 	binding := &rbacv1.RoleBinding{ObjectMeta: metadata(g.Name), RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: g.Name}, Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: g.Name, Namespace: in.Namespace}}}

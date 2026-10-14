@@ -182,14 +182,91 @@ func TestRenderDNSRejectsUnsafeInput(t *testing.T) {
 	}
 }
 
-func TestRenderDNSForwardingIsBlocked(t *testing.T) {
-	for _, name := range []tnv1.GatewayName{"site.example", "injected\nprivate-value"} {
-		in := dnsFixture()
-		in.Config.ExtraZones = []tnv1.GatewayExtraZone{{Zone: name, Upstreams: []tnv1.GatewayIP{"192.0.2.53"}}}
-		got, err := RenderDNS(in)
-		if !errors.Is(err, ErrDNSForwardingUnsupported) || err.Error() != ErrDNSForwardingUnsupported.Error() || got != (DNSPlan{}) {
-			t.Fatal("forwarding was not rejected without partial output")
+// The renderer output for a Gateway without extra zones is frozen: hydra and
+// every other pre-v0.15 gateway must keep its content hash (CAS annotation)
+// and ConfigMap keys byte for byte, or the next reconcile would bump serials
+// and rewrite running DNS for a no-op upgrade.
+func TestRenderDNSGoldenWithoutExtraZones(t *testing.T) {
+	in := dnsFixture()
+	in.Hosts = "192.0.2.7 alias.tail.example\n10.0.0.5 lolek.konzern.intern\n"
+	got, err := RenderDNS(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const goldenCorefile = "tail.example {\n    bind 0.0.0.0 ::\n    errors\n    prometheus :9153\n    file zone.db tail.example {\n        reload 1s\n    }\n    reload\n}\n"
+	const goldenHash = "b71fe9035e2e3887789631c3784e24b1f2287a478ee4cce8f9c80f248eb4d669" // v0.14.2 renderer
+	if got.Corefile != goldenCorefile || got.HostsFile != "" || dnsContentHash(got.Corefile, got.ZoneFile, got.HostsFile) != goldenHash {
+		t.Fatalf("pre-extraZones rendering drifted: hash %s corefile %q hosts %q", dnsContentHash(got.Corefile, got.ZoneFile, got.HostsFile), got.Corefile, got.HostsFile)
+	}
+	if len(dnsPayload(got)) != 2 {
+		t.Fatal("hosts key rendered without extra zones")
+	}
+}
+
+func TestRenderDNSExtraZones(t *testing.T) {
+	in := dnsFixture()
+	in.Config.ExtraZones = []tnv1.GatewayExtraZone{
+		{Zone: "konzern.intern", Upstreams: []tnv1.GatewayIP{"10.0.0.2", "10.0.0.1"}},
+		{Zone: "it.persona.de", Upstreams: []tnv1.GatewayIP{"2001:db8::53"}},
+	}
+	in.Hosts = "192.0.2.7 alias.tail.example\n10.0.0.5 lolek.konzern.intern zulu.konzern.intern\n10.0.0.6 lolek.konzern.intern\n10.0.0.9 konzern.intern\n10.0.0.7 ipam.it.persona.de\n10.0.0.8 other.example\n"
+	got, err := RenderDNS(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHosts := dnsHostsHeader + "10.0.0.7 ipam.it.persona.de\n10.0.0.9 konzern.intern\n10.0.0.5 lolek.konzern.intern\n10.0.0.6 lolek.konzern.intern\n10.0.0.5 zulu.konzern.intern\n"
+	if got.HostsFile != wantHosts {
+		t.Fatalf("hosts file %q", got.HostsFile)
+	}
+	wantBlock := "konzern.intern {\n    bind 0.0.0.0 ::\n    errors\n    prometheus :9153\n    hosts hosts konzern.intern {\n        fallthrough\n    }\n    cache 30\n    forward . 10.0.0.2 10.0.0.1 {\n        max_concurrent 1000\n    }\n    reload\n}\n"
+	if !strings.HasPrefix(got.Corefile, "tail.example {\n") || !strings.Contains(got.Corefile, wantBlock) || !strings.Contains(got.Corefile, "it.persona.de {\n") || !strings.Contains(got.Corefile, "forward . 2001:db8::53 {") {
+		t.Fatalf("corefile %q", got.Corefile)
+	}
+	for _, leaked := range []string{"konzern.intern", "persona", "other.example"} {
+		if strings.Contains(got.ZoneFile, leaked) {
+			t.Fatal("extra-zone or foreign name leaked into the primary zone")
 		}
+	}
+	if len(dnsPayload(got)) != 3 || dnsPayload(got)[DNSHostsFile] != wantHosts {
+		t.Fatal("hosts key missing from payload")
+	}
+	// Hosts changes inside an extra zone are semantic: they advance the serial.
+	base, err := PlanDNSRevision(in, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Hosts += "10.0.0.10 new.konzern.intern\n"
+	next, err := PlanDNSRevision(in, &DNSRevision{Serial: 1, ContentHash: base.ContentHash, ResourceVersion: "rv"})
+	if err != nil || !next.Changed || next.Serial != 2 {
+		t.Fatal("extra-zone hosts change did not advance the serial")
+	}
+	for name, mutate := range map[string]func(*DNSInputs){
+		"no upstream":     func(i *DNSInputs) { i.Config.ExtraZones[0].Upstreams = nil },
+		"nine upstreams":  func(i *DNSInputs) { i.Config.ExtraZones[0].Upstreams = make([]tnv1.GatewayIP, 9) },
+		"bad upstream":    func(i *DNSInputs) { i.Config.ExtraZones[0].Upstreams = []tnv1.GatewayIP{"10.0.0.1 10.0.0.2"} },
+		"loopback":        func(i *DNSInputs) { i.Config.ExtraZones[0].Upstreams = []tnv1.GatewayIP{"127.0.0.1"} },
+		"self upstream":   func(i *DNSInputs) { i.Config.ExtraZones[0].Upstreams = []tnv1.GatewayIP{"192.0.2.1"} },
+		"dup upstream":    func(i *DNSInputs) { i.Config.ExtraZones[0].Upstreams = []tnv1.GatewayIP{"10.0.0.1", "10.0.0.1"} },
+		"injected zone":   func(i *DNSInputs) { i.Config.ExtraZones[0].Zone = "injected\nprivate-value" },
+		"primary zone":    func(i *DNSInputs) { i.Config.ExtraZones[0].Zone = "tail.example" },
+		"under primary":   func(i *DNSInputs) { i.Config.ExtraZones[0].Zone = "sub.tail.example" },
+		"over primary":    func(i *DNSInputs) { i.Config.ExtraZones[0].Zone = "example" },
+		"duplicate zone":  func(i *DNSInputs) { i.Config.ExtraZones[1].Zone = "konzern.intern" },
+		"nested extra":    func(i *DNSInputs) { i.Config.ExtraZones[1].Zone = "it.konzern.intern" },
+		"too many zones":  func(i *DNSInputs) { i.Config.ExtraZones = make([]tnv1.GatewayExtraZone, 17) },
+		"hosts host apex": func(i *DNSInputs) { i.Hosts = "10.0.0.1 tail.example\n" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := dnsFixture()
+			in.Config.ExtraZones = []tnv1.GatewayExtraZone{
+				{Zone: "konzern.intern", Upstreams: []tnv1.GatewayIP{"10.0.0.1"}},
+				{Zone: "it.persona.de", Upstreams: []tnv1.GatewayIP{"10.0.0.2"}},
+			}
+			mutate(&in)
+			if got, err := RenderDNS(in); !errors.Is(err, ErrDNSConfiguration) || got != (DNSPlan{}) {
+				t.Fatal("invalid extra zone accepted or partial output returned")
+			}
+		})
 	}
 }
 
