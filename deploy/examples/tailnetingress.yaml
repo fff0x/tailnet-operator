@@ -1,11 +1,13 @@
 ---
-# One ingress identity. Lives in the tenant namespace and exposes in-cluster Services on the tailnet
-# as a single userspace node with a MagicDNS name (here: ingress-shop). Each expose is a plain-TCP
-# listener on the node — L4, any protocol — forwarded to a Service in this same namespace. Who may
-# reach it is a policy grant with dst = the tag: with Tailnet.spec.policy the operator generates it
-# from allowFrom (every entry must match the admin's ingressSourceAllowlist, else PolicyDenied);
-# without it an admin declares tag and grant by hand and the operator only reports what is missing.
-# A tailnet peer then dials e.g. ingress-shop:5432 (node MagicDNS name + the expose port).
+# One ingress identity in the tenant namespace: a single userspace node
+# (MagicDNS name ingress-shop) exposing in-cluster Services on the
+# tailnet. Each expose is a plain-TCP listener (L4, any protocol)
+# forwarded to a Service in this namespace. Who may reach it is a
+# policy grant with dst = the tag: with Tailnet.spec.policy the operator
+# generates it from allowFrom (each entry must match the admin's
+# ingressSourceAllowlist, else PolicyDenied); otherwise an admin writes
+# tag and grant and the operator only reports what is missing.
+# A tailnet peer then dials e.g. ingress-shop:5432.
 apiVersion: tsunaro.io/v1alpha1
 kind: TailnetIngress
 metadata:
@@ -14,9 +16,9 @@ metadata:
 spec:
   tailnetRef:
     name: corp
-  # tag: tag:ingress-shop      # default: tag:ingress-{name} from the Tailnet template
-  # hostname: ingress-shop     # default: ingress-{name} (the node's MagicDNS label)
-  allowFrom: [group:shop]      # policy grant src (operator-owned policy only)
+  # tag: tag:ingress-shop      # default: tag:ingress-{name}
+  # hostname: ingress-shop     # default: ingress-{name}
+  allowFrom: [group:shop]      # grant src (operator-owned policy only)
   exposes:
     - name: postgres
       port: 5432               # port the tailnet node listens on
@@ -28,10 +30,11 @@ spec:
       backend:
         service: shop-redis
         port: 6379
-    # HTTPS funnel: TLS still terminates at the shared Envoy gateway (wildcard cert, HTTPRoute by
-    # Host), but the tailnet identity — and therefore the policy grant — is this app's own node.
-    # Requires Tailnet.spec.dns.ingressNameTemplate; the rendered status.dnsName resolves to this
-    # node and is the hostname the tenant puts on its HTTPRoute.
+    # HTTPS funnel: TLS still terminates at the shared Envoy gateway
+    # (wildcard cert, HTTPRoute by Host), but the tailnet identity — and
+    # so the grant — is this app's own node. Needs
+    # Tailnet.spec.dns.ingressNameTemplate; status.dnsName resolves to
+    # this node and is the hostname the tenant puts on its HTTPRoute.
     # - name: https
     #   port: 443
     #   backend:

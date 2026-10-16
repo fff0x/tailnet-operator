@@ -1,9 +1,12 @@
 ---
-# The gateway of USAGE §9b: subnet router for the prod-1 LAN and the tailnet LB range, plus the
-# split-DNS zone served from the operator's hosts file. Shipped with suspend: true so the fixture
-# admits without creating anything; set suspend: false once INSTALL §7a is in place (kernel
-# prerequisites, LB pool matching poolLabels, policy Apply, Headscale split-DNS). The zone is
-# prod.example.internal here (the envtest DNS fixtures pin it); USAGE uses prod-1.tailnet.example.internal.
+# The gateway of docs/how-to/gateway.md: subnet router for the prod-1
+# LAN and the tailnet LB range, plus the split-DNS zone served from the
+# operator's hosts file. Shipped with suspend: true so the fixture
+# admits without creating anything; set suspend: false once the
+# prerequisites are in place (kernel, LB pool matching poolLabels,
+# policy Apply, Headscale split-DNS). The zone is prod.example.internal
+# here (the envtest DNS fixtures pin it); the how-to uses
+# prod-1.tailnet.example.internal.
 apiVersion: tsunaro.io/v1alpha1
 kind: TailnetGateway
 metadata:
@@ -17,7 +20,7 @@ spec:
   tags: [tag:fabric]
   stateSecretRef:
     name: router-state
-  # Version tag or digest; a digest is preferable for production, a tag reads better here.
+  # Version tag or digest; prefer a digest in production.
   image: ghcr.io/tailscale/tailscale:v1.102.4
   routes:
     lan: [192.0.2.0/24]

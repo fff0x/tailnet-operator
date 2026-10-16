@@ -1,9 +1,10 @@
 ---
-# One egress identity. Lives in the operator's namespace; consumerNamespaces decides who may reach
-# its Services. The tag needs tagOwners, a /32 route approval and a grant per target in the tailnet
-# policy: with Tailnet.spec.policy the operator generates them; without it an admin writes them and
-# the operator only reports what is missing. Each target becomes a Service named after it, so
-# a consumer dials <target>.<operator-namespace>:<port>.
+# One egress identity in the operator's namespace; consumerNamespaces
+# decides who may reach its Services. The tag needs tagOwners, a /32
+# route approval and a grant per target: with Tailnet.spec.policy the
+# operator generates them, otherwise an admin writes them and the
+# operator only reports what is missing. Each target becomes a Service
+# named after it: <target>.<operator-namespace>:<port>.
 apiVersion: tsunaro.io/v1alpha1
 kind: TailnetEgress
 metadata:
@@ -12,7 +13,7 @@ metadata:
 spec:
   tailnetRef:
     name: corp
-  # tag: tag:ns-billing-dev      # default: tag:egress-{name} from the Tailnet template
+  # tag: tag:ns-billing-dev      # default: tag:egress-{name}
   # hostname: egress-billing-dev # default: egress-{name}
   consumerNamespaces:
     - billing-dev
@@ -26,9 +27,10 @@ spec:
     - name: broker-1
       address: 10.0.20.10
       port: 5672
-    # A target that routes by name (TLS SNI / HTTP Host) behind a reverse proxy at the far site:
-    # consumers must dial the real hostname, so publish it as an alias of the Service ClusterIP via
-    # Tailnet.spec.dns.hostsConfigMap. The L4 tunnel passes the SNI through untouched.
+    # A target routed by name (TLS SNI / HTTP Host) behind a reverse
+    # proxy at the far site: consumers must dial the real hostname, so
+    # publish it as an alias of the Service ClusterIP via
+    # Tailnet.spec.dns.hostsConfigMap. The L4 tunnel passes SNI through.
     - name: api-corp
       address: 10.0.30.10
       port: 443

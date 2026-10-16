@@ -1,7 +1,8 @@
 ---
-# A control server the cluster talks to. Cluster-scoped: one per Headscale, shared by every
-# TailnetEgress. The bootstrap API key is read-only; the operator mints and rotates its own working
-# key from it into <name>-apikey, which is not managed by GitOps.
+# A control server the cluster talks to. Cluster-scoped: one per
+# Headscale, shared by every CR. The bootstrap API key is read-only; the
+# operator mints and rotates its own working key from it into
+# <name>-apikey, which is not managed by GitOps.
 apiVersion: tsunaro.io/v1alpha1
 kind: Tailnet
 metadata:
@@ -16,34 +17,39 @@ spec:
   # apiKeyLifetime: 720h   # working key, rotated at half-life
   # authKeyLifetime: 168h  # per-CR pre-auth key, rotated at half-life
   proxy:
-    # Optional registry Secret names; must exist in EVERY agent namespace. Omit to inherit
-    # AGENT_IMAGE_PULL_SECRETS from the operator; [] clears that default (SA admission may add its own).
+    # Optional registry Secret names; must exist in EVERY agent
+    # namespace. Omit to inherit AGENT_IMAGE_PULL_SECRETS from the
+    # operator; [] clears that default.
     # imagePullSecrets: [dockerconfig]
     mtu: 1200
     probeInterval: 5m
-  # DNS names (optional). The operator renders a CoreDNS `hosts` file into this ConfigMap (operator
-  # namespace, key "hosts"): every TailnetEgress target alias -> its Service ClusterIP, every
-  # TailnetIngress dnsName -> the node's tailnet IPs. Mount it into a resolver that is authoritative
-  # for the zones (README "DNS names"). Keep the ingress name ONE label below your gateway's
-  # wildcard certificate, e.g. *.prod-1.tailnet.example.internal.
+  # DNS names (optional). The operator renders a CoreDNS `hosts` file
+  # into this ConfigMap (operator namespace, key "hosts"): egress target
+  # aliases -> Service ClusterIP, ingress dnsNames -> node tailnet IPs.
+  # Mount it into a resolver authoritative for the zones
+  # (docs/how-to/dns-coredns.md). Keep the ingress name ONE label below
+  # the gateway's wildcard cert, e.g. *.prod-1.tailnet.example.internal.
   dns:
     hostsConfigMap: tailnet-dns-hosts
     ingressNameTemplate: "{name}-{namespace}.prod-1.tailnet.example.internal"
-    # Optional short alias for HTTP exposes that set `alias: true`. Must end in the SAME zone as
-    # ingressNameTemplate so it resolves over the tailnet.
+    # Optional short alias for HTTP exposes with `alias: true`. Must end
+    # in the SAME zone as ingressNameTemplate.
     # ingressAliasTemplate: "{name}.prod-1.tailnet.example.internal"
-  # Operator-owned policy (optional; needs Headscale policy mode "database", docs/how-to/policy.md).
-  # The base document (policy-base.jsonc) lives in Git -> ConfigMap; the operator appends tagOwners,
-  # /32 route approvals and grants derived from the CRs and writes the union. Start in DryRun, read
-  # <baseConfigMap>-rendered, then switch to Apply.
+  # Operator-owned policy (optional; needs Headscale policy mode
+  # "database", docs/how-to/policy.md). The base document
+  # (policy-base.jsonc) lives in Git -> ConfigMap; the operator appends
+  # tagOwners, /32 route approvals and grants derived from the CRs and
+  # writes the union. Start in DryRun, read <baseConfigMap>-rendered,
+  # then switch to Apply.
   policy:
     baseConfigMap: headscale-policy
     mode: DryRun
     tagOwners: [group:operator]
     routeApprovers: [tag:fabric]
     ingressSourceAllowlist: ["group:*"]
-  # Address space no TailnetSite may claim (optional; only consulted for TailnetSite CRs): the
-  # node prefix of this control server and, per cluster on it, LAN/pod/service/tailnet-LB ranges.
+  # Address space no TailnetSite may claim (optional): the node prefix
+  # of this control server and, per cluster, LAN/pod/service/tailnet-LB
+  # ranges.
   reservedNetworks:
     - name: nodes
       prefixes: [100.64.0.0/16]
