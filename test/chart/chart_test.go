@@ -310,6 +310,9 @@ func TestDefaultRender(t *testing.T) {
 	equal(t, "default agent pull secrets", envVar(t, c, "AGENT_IMAGE_PULL_SECRETS").Value, "[]")
 	equal(t, "default agent resources", envVar(t, c, "AGENT_RESOURCES").Value, `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}`)
 	equal(t, "default scrape peers", envVar(t, c, "AGENT_SCRAPE_PEERS").Value, "[]")
+	// Go's soft memory limit tracks the container limit through the Downward API.
+	equal(t, "GOMEMLIMIT source", envVar(t, c, "GOMEMLIMIT").ValueFrom, &corev1.EnvVarSource{ResourceFieldRef: &corev1.ResourceFieldSelector{ContainerName: "operator", Resource: "limits.memory"}})
+	equal(t, "default operator memory limit", c.Resources.Limits.Memory().String(), "192Mi")
 	_, c = operator(t, render(t, "monitoring: {podMonitor: {scrapeFrom: [{podSelector: {matchLabels: {app: prometheus}}}]}}"))
 	equal(t, "scrape peers", envVar(t, c, "AGENT_SCRAPE_PEERS").Value, `[{"podSelector":{"matchLabels":{"app":"prometheus"}}}]`)
 }

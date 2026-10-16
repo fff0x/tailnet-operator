@@ -118,7 +118,7 @@ See [compatibility](../../docs/reference/compatibility.md#http-extension-compati
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | agent.imagePullSecrets | list | `[]` | Default agent pull-secret names, e.g. [dockerconfig]. Tailnet.spec.proxy.imagePullSecrets overrides these. Secrets must exist in each agent namespace. |
-| agent.resources | object | `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}` | Default agent resource block, below CR spec.resources and Tailnet.spec.proxy.resources (no per-key merging). Set null to disable chart defaults; {} does not clear Helm defaults. Changes restart agents that inherit them. |
+| agent.resources | object | `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}` | Default agent resource block, below CR spec.resources and Tailnet.spec.proxy.resources (no per-key merging). Set null to disable chart defaults; {} does not clear Helm defaults. Changes restart agents that inherit them. Tenant LimitRanges must admit these values. |
 | agentImage.digest | string | `""` | Agent digest. An entirely empty agentImage inherits the complete operator image, including its digest. |
 | agentImage.repository | string | `""` | Agent repository; empty inherits image.repository. |
 | agentImage.tag | string | `""` | Agent tag. With an explicit repository, empty uses Chart.appVersion; otherwise inherits image.tag. |
@@ -162,6 +162,6 @@ See [compatibility](../../docs/reference/compatibility.md#http-extension-compati
 | networkPolicy.provider | string | `"kubernetes"` | `kubernetes` renders a NetworkPolicy (ingress and egress, ipBlock-based). `cilium` renders an egress-only CiliumNetworkPolicy using `toEntities: kube-apiserver`, label selectors and `toCIDR`; ipBlock peers in `dnsPeers`/`cilium.headscalePeers` are rejected, ingress stays open, requires the cilium.io/v2 CRDs. For a Headscale that lives outside the cluster (shared control plane, spoke clusters) set `cilium.headscalePeers: []` and populate `headscaleCIDRs` — the template renders a `toCIDR` egress for the Headscale IPs on `headscalePorts`. |
 | podSecurityContext | object | `{"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod security context; the scratch image requires a numeric non-root UID. |
 | replicas | int | `1` | Operator replicas; more than one requires leaderElection.enabled. A PDB with minAvailable=1 is rendered for multiple replicas. |
-| resources | object | `{"limits":{"memory":"128Mi"},"requests":{"cpu":"25m","memory":"64Mi"}}` | Operator resource requests and limits. |
+| resources | object | `{"limits":{"memory":"192Mi"},"requests":{"cpu":"25m","memory":"64Mi"}}` | Operator resource requests and limits. GOMEMLIMIT follows limits.memory. |
 | securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Operator container hardening. Agents are configured separately by the controller. |
 | topologySpreadConstraints | list | `[]` | Optional operator pod topology spread constraints. Supply a labelSelector matching app.kubernetes.io/name: tailnet-operator. |

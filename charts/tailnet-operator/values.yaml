@@ -30,20 +30,20 @@ imagePullSecrets: []
 agent:
   # -- Default agent pull-secret names, e.g. [dockerconfig]. Tailnet.spec.proxy.imagePullSecrets overrides these. Secrets must exist in each agent namespace.
   imagePullSecrets: []
-  # -- Default agent resource block, below CR spec.resources and Tailnet.spec.proxy.resources (no per-key merging). Set null to disable chart defaults; {} does not clear Helm defaults. Changes restart agents that inherit them.
+  # -- Default agent resource block, below CR spec.resources and Tailnet.spec.proxy.resources (no per-key merging). Set null to disable chart defaults; {} does not clear Helm defaults. Changes restart agents that inherit them. Tenant LimitRanges must admit these values.
   resources:
     requests:
       cpu: 10m
       memory: 32Mi
     limits:
       memory: 128Mi
-# -- Operator resource requests and limits.
+# -- Operator resource requests and limits. GOMEMLIMIT follows limits.memory.
 resources:
   requests:
     cpu: 25m
     memory: 64Mi
   limits:
-    memory: 128Mi
+    memory: 192Mi
 # -- Pod security context; the scratch image requires a numeric non-root UID.
 podSecurityContext:
   runAsNonRoot: true
