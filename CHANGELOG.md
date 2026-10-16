@@ -4,6 +4,36 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-17
+
+### Added
+
+- Chart: the operator Deployment sets `GOMEMLIMIT` from its own `resources.limits.memory` through
+  the Downward API, so the Go runtime collects before the cgroup limit instead of being OOM-killed
+  at it. Asserted in `test/chart`.
+
+### Changed
+
+- Chart: default operator `resources.limits.memory` 128Mi → 192Mi (requests unchanged). Operators
+  with a few dozen CRs settled a few MiB below the old limit. The agent default block is unchanged;
+  its comment states that tenant LimitRanges must admit these values.
+- Docs, examples and test fixtures use RFC 2606/5737 names and addresses throughout
+  (`corp.example`, `partner.example`, `prod-1.tailnet.example.internal`, `198.51.100.0/24`, …).
+  The gateway reference drops the "Verified platforms" table; `compatibility.md` lists
+  `linux/amd64` and `linux/arm64`, and the preflight note states that the image is multi-arch.
+- Docs describe the `TailnetGateway` as the operator-managed router and resolver; "bring your own
+  resolver" ([Serve DNS names with CoreDNS](docs/how-to/dns-coredns.md#serve-the-file)) remains a
+  documented option. `TailnetSite.spec.advertisedBy` is described as "any tagged router" — CRD
+  description only, no schema change.
+
+### Known issues
+
+- Ingress agents take a new tailnet identity on every restart (new IP, stale client DNS until the
+  30 s record TTL expires); tracked as issue `6929f01`.
+
+The `docs/{INSTALL,USAGE,SECURITY,COMPATIBILITY}.md` redirect stubs are removed in 0.19.0, as
+announced in 0.17.0.
+
 ## [0.17.0] - 2026-10-16
 
 ### Changed
