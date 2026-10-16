@@ -171,8 +171,8 @@ func TestRenderGateways(t *testing.T) {
 	in := Inputs{
 		TagOwners: []string{"group:operator"}, RouteApprovers: []string{"tag:fabric"},
 		Gateways: []Gateway{
-			{Tags: []string{"tag:site", "tag:fabric"}, Routes: []string{"10.0.0.0/24", "10.103.0.16/28", "10.0.10.20/32"}},
-			{Tags: []string{"tag:fabric"}, Routes: []string{"10.103.0.16/28"}}, // same prefix, same tag: no change
+			{Tags: []string{"tag:site", "tag:fabric"}, Routes: []string{"10.0.0.0/24", "198.51.100.0/28", "10.0.10.20/32"}},
+			{Tags: []string{"tag:fabric"}, Routes: []string{"198.51.100.0/28"}}, // same prefix, same tag: no change
 		},
 	}
 	out, sum, err := Render([]byte(base), in)
@@ -196,7 +196,7 @@ func TestRenderGateways(t *testing.T) {
 		return strings.Join(s, ",")
 	}
 	// base approver kept first, gateway tags merged in; new prefixes get only the gateway tags.
-	if approvers("10.0.0.0/24") != "tag:fabric,tag:site" || approvers("10.103.0.16/28") != "tag:fabric,tag:site" || approvers("10.0.10.20/32") != "tag:other,tag:fabric,tag:site" {
+	if approvers("10.0.0.0/24") != "tag:fabric,tag:site" || approvers("198.51.100.0/28") != "tag:fabric,tag:site" || approvers("10.0.10.20/32") != "tag:other,tag:fabric,tag:site" {
 		t.Fatalf("gateway approvers = %v", routes)
 	}
 	if sum.Routes != 3 {

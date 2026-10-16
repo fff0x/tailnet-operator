@@ -330,7 +330,7 @@ TailnetSiteSpec declares a remote network (a branch, a management net, a single 
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `advertisedBy` | object | no | SiteAdvertiser names the subnet routers that carry a site's prefixes by tag. A router is any Headscale node with one of these tags — an operator-managed TailnetGateway as well as a hand-built router in another cluster. Empty → Tailnet.spec.policy.routeApprovers. |
+| `advertisedBy` | object | no | SiteAdvertiser names the subnet routers that carry a site's prefixes by tag. A router is any Headscale node with one of these tags — an operator-managed TailnetGateway as well as any tagged router in another cluster. Empty → Tailnet.spec.policy.routeApprovers. |
 | `advertisedBy.tags[]` | []string | no | Items ≤ 16. |
 | `description` | string | no | Max length 253. |
 | `owner` | string | yes | Team or person accountable for the network; named in conflict messages. Max length 63. |

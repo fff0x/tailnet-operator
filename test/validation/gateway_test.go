@@ -216,7 +216,7 @@ func TestGatewayAdmission(t *testing.T) {
 		set(o, "spec.dns.serviceClusterIP", "fd00::53")
 		check(t, o, true)
 		o = fresh()
-		set(o, "spec.dns.extraZones", []any{map[string]any{"zone": "konzern.intern", "upstreams": []any{"10.0.0.1", "10.0.0.2"}}, map[string]any{"zone": "it.persona.de", "upstreams": []any{"10.0.0.3"}}})
+		set(o, "spec.dns.extraZones", []any{map[string]any{"zone": "corp.example", "upstreams": []any{"10.0.0.1", "10.0.0.2"}}, map[string]any{"zone": "partner.example", "upstreams": []any{"10.0.0.3"}}})
 		check(t, o, true)
 	})
 	t.Run("route-count-limit", func(t *testing.T) {

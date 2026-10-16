@@ -36,7 +36,7 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
   or explicitly verified HTTPS to the app, routed by SNI — no shared gateway needed.
 - **`TailnetSite`** (cluster-scoped) — a remote network behind a subnet router: a branch `/24`, a
   management range, a single host as `/32`. Declared once in the policy-owning cluster; the router
-  is identified **by tag**, so a hand-built router in another cluster qualifies. The operator renders
+  is identified **by tag**, so any tagged router, in this or another cluster, qualifies. The operator renders
   the `autoApprovers`, replays approvals, blocks overlaps with `reservedNetworks` or older sites and
   reports `Advertised`/`Approved`/`Ready`. Who may *reach* the site stays a grant in the base policy.
 - **`TailnetGateway`** (cluster-scoped) — the subnet router and split-DNS resolver as a CR: one
@@ -121,8 +121,8 @@ Every `spec` and `status` field of the five kinds, with types, defaults and cons
 [how-to guides](docs/how-to/README.md). Condition types and reasons per kind, as shown by
 `kubectl get` and `describe`: [Conditions and reasons](docs/reference/reasons.md).
 
-The `TailnetGateway` is fresh-only and suspended by default; it runs in production on arm64 and
-amd64 ([verified platforms](docs/reference/gateway.md#verified-platforms)) — wiring in
+The `TailnetGateway` is fresh-only and suspended by default; the image is multi-arch
+(`linux/amd64`, `linux/arm64`, [compatibility](docs/reference/compatibility.md)) — wiring in
 [Run the gateway](docs/how-to/gateway.md), scope and migration boundary in
 [Compatibility](docs/reference/compatibility.md#gateway-api-scope). Kubernetes ≥1.31 is required;
 CR names, addresses, ports, list sizes and policy inputs are checked at admission

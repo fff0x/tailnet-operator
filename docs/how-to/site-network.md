@@ -5,12 +5,12 @@ description: "Declare a remote network behind a subnet router once, let the oper
 ---
 
 *A branch office (or a management range, or a lone printer) sits behind a subnet router, and
-people as well as workloads must reach it. Today its prefixes are hand-written `autoApprovers`
-lines that must stay identical to the router's advertised routes.*
+people as well as workloads must reach it. Today its prefixes are `autoApprovers` lines in the
+base policy that must stay identical to the router's advertised routes.*
 
 A `TailnetSite` declares the network once, in the cluster whose operator owns the policy
 (`policy.mode: Apply`). The router can be an operator-managed `TailnetGateway` ([the worked example](gateway.md#worked-example))
-**or a hand-built router in another cluster** — the operator identifies it by tag, not by CR
+**or any router carrying the tag, in this or another cluster** — the operator identifies it by tag, not by CR
 (fixture: [`deploy/examples/tailnetsite.yaml`](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/deploy/examples/tailnetsite.yaml)):
 
 ```yaml
@@ -43,7 +43,7 @@ would be approved onto the routers:
 spec:
   reservedNetworks:
     - {name: nodes,  prefixes: [100.64.0.0/16]}
-    - {name: prod-1, prefixes: [10.210.1.0/24, 10.244.0.0/16, 10.96.0.0/12, 10.103.2.16/28]}
+    - {name: prod-1, prefixes: [192.0.2.0/24, 10.244.0.0/16, 10.96.0.0/12, 198.51.100.0/24]}
 ```
 
 Check:
@@ -65,7 +65,7 @@ kubectl describe tailnetsite branch-south | grep -A1 -E 'Advertised|Approved|Rou
 | `UnmanagedOverlap` | `Unmanaged` | A node *without* an advertiser tag advertises an overlapping route (named in the message). Report only. |
 | `Ready` | `NotObserved` | The control server was not queried in this reconcile (DryRun without a working key, API failure). |
 
-Migrating hand-written lines: create the sites, keep the old `autoApprovers` entries until
+Migrating existing `autoApprovers` lines: create the sites, keep the old entries until
 `renderedHash` equals today's live policy (the render is a set union, so the document does not
 change), then delete the base lines in Git. Rollback is deleting the `TailnetSite` CRs — approvals
 already granted stay, because the operator never de-approves.

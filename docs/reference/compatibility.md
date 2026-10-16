@@ -15,7 +15,7 @@ description: "Supported Kubernetes, Headscale, cert-manager, CNI and Helm versio
 | cert-manager | any release serving `cert-manager.io/v1` | Only needed for `TailnetIngress.spec.tls.issuerRef`; `Issuer` and `ClusterIssuer` |
 | CNI | NetworkPolicy support | `consumerNamespaces` isolation is a NetworkPolicy; ICMP handling is CNI-specific |
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
-| Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator and agent; the gateway runs in production on arm64 Talos ([gateway reference](gateway.md#verified-platforms)) |
+| Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
 ## HTTP extension compatibility (v0.5.0)
 

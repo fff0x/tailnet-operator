@@ -32,7 +32,7 @@ func siteCond(s *tnv1.TailnetSite, typ string, status metav1.ConditionStatus, re
 }
 
 // TestSiteApprovalReplay: a TailnetSite advertised by a tagged node that is NOT operator-managed
-// (white-box route fixture, like a hand-built router in another cluster) gets its prefix rendered
+// (white-box route fixture, like a tagged router in another cluster) gets its prefix rendered
 // into autoApprovers and approved on that node; the site reports Ready. A younger overlapping
 // site is blocked (RouteConflict) and never rendered; a node without the advertiser tag that
 // advertises an overlapping route is reported, not blocked, and gets no approval.

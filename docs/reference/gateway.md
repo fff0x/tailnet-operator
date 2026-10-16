@@ -4,7 +4,7 @@ weight: 50
 description: "Fresh-only writer: bootstrap chain, receipts, immutable identity, deletion, spec updates, key lifecycle, rollback and verified platforms."
 ---
 
-Status: in production ([verified platforms](#verified-platforms)); scope is deliberately narrow —
+Status: stable; scope is deliberately narrow —
 fresh IPv4 gateways only, no adoption of existing nodes ([adoption and retention](#adoption-and-retention)),
 no IPv6. The contract below (receipts, immutable identity, `OnDelete` StatefulSet) is stable since v0.11.0.
 This page is the contract; the operator-facing path is [Run the gateway](../how-to/gateway.md)
@@ -281,6 +281,9 @@ when forwarding is already enabled, so the pod network namespace must already ha
 does not forward, a node that allows the namespaced `net.ipv4.ip_forward` unsafe
 sysctl lets the pod set it through `securityContext.sysctls` with no added capability.
 The operator must not relax node or namespace security to bypass a failed check.
+The kernel preflight (tun, forwarding, sysctls) is architecture-independent; the image is
+multi-arch (`linux/amd64`, `linux/arm64`) and a new OS image is qualified by the preflight
+result, not by the CPU.
 A later route update that adds a family needs a new runtime prerequisite check.
 
 For fresh state, bootstrap uses `TS_AUTH_ONCE=false`, `--reset` and explicit
@@ -693,7 +696,7 @@ A/NXDOMAIN, the documented TXT fallthrough, a `hosts` projection update landing
 without restart, and the primary zone staying strict. An intentionally unsafe
 hosts+forward control reproduces the same TXT fallthrough in isolation.
 
-This does not verify the lab's CoreDNS 1.14.7 image, a running Kubernetes sidecar,
+This does not verify a specific CoreDNS image, a running Kubernetes sidecar,
 external forwarding support, kernel subnet routing or interruption-free adoption.
 The fresh resource model above includes a StatefulSet and Services, but source
 watches and update serial persistence remain pending. The active controller creates
@@ -775,16 +778,6 @@ Headscale node. The read-only planner also does not implement transactional
 multi-object takeover. A future writer must revalidate snapshots, use UID/resource-
 version preconditions, preserve externally owned credentials, and coordinate with
 GitOps. Ephemeral-agent duplicate deletion and node renaming must not be reused.
-
-## Verified platforms
-
-| Platform | Evidence |
-|---|---|
-| Linux amd64 | the kind suites and the isolated bootstrap gate run on amd64 ([above](#isolated-fresh-pod-bootstrap-gate)) |
-| Linux arm64 | production gateway on an all-arm64 Talos cluster (Talos v1.13.10, kernel 6.18, containerd 2.2): Pod running since 2026-10-06, node online, routes advertised and approved; the pinned `tailscale` and `coredns` digests are multi-arch indexes carrying `linux/arm64` (`skopeo inspect --raw docker://<image>@<digest> \| jq '[.manifests[].platform.architecture]'`) |
-
-The kernel preflight (tun, forwarding, sysctls) is architecture-independent; a new OS image is
-qualified by the preflight result, not by the CPU.
 
 ## Status
 

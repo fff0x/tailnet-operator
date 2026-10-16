@@ -3,8 +3,8 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // SiteAdvertiser names the subnet routers that carry a site's prefixes by tag. A router is any
-// Headscale node with one of these tags — an operator-managed TailnetGateway as well as a
-// hand-built router in another cluster. Empty → Tailnet.spec.policy.routeApprovers.
+// Headscale node with one of these tags — an operator-managed TailnetGateway as well as any
+// tagged router in another cluster. Empty → Tailnet.spec.policy.routeApprovers.
 type SiteAdvertiser struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=16

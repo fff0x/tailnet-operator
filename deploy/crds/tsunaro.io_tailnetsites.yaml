@@ -62,8 +62,8 @@ spec:
               advertisedBy:
                 description: |-
                   SiteAdvertiser names the subnet routers that carry a site's prefixes by tag. A router is any
-                  Headscale node with one of these tags — an operator-managed TailnetGateway as well as a
-                  hand-built router in another cluster. Empty → Tailnet.spec.policy.routeApprovers.
+                  Headscale node with one of these tags — an operator-managed TailnetGateway as well as any
+                  tagged router in another cluster. Empty → Tailnet.spec.policy.routeApprovers.
                 properties:
                   tags:
                     items:

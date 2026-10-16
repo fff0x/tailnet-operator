@@ -12,7 +12,7 @@ description: "Prerequisites, Helm and kustomize installation, images and private
 | Kubernetes | ≥ 1.31 | CRD admission uses the CEL IP library (`isIP`) |
 | CNI | NetworkPolicy support | `consumerNamespaces` isolation is a NetworkPolicy |
 | Headscale | 0.29.x, reachable from the cluster over HTTP(S) | REST API for nodes, keys and (optionally) the policy |
-| Subnet router | a node tagged e.g. `tag:fabric` advertising the site routes — hand-built, or the operator-managed `TailnetGateway` ([Run the gateway](gateway.md)) | egress targets are reached through it |
+| Subnet router | a node tagged e.g. `tag:fabric` advertising the site routes — the operator-managed `TailnetGateway` ([Run the gateway](gateway.md)), or any node you tag yourself | egress targets are reached through it |
 | CoreDNS | the cluster's, plus (optionally) a resolver you control for your tailnet zone | DNS aliases and ingress names ([DNS with CoreDNS](dns-coredns.md)) |
 | cert-manager | optional | issues the certificate for a `mode: http` ingress ([Ingress over HTTPS](ingress-https.md)) |
 | Gateway | optional: Envoy/Gateway API with a wildcard certificate for `*.prod-1.tailnet.example.internal` | HTTPS through a shared gateway instead ([Ingress over HTTPS](ingress-https.md)) |

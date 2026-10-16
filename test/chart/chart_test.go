@@ -938,8 +938,8 @@ func TestCiliumNetworkPolicy(t *testing.T) {
 func TestCiliumNetworkPolicyRemoteHeadscale(t *testing.T) {
 	// Spoke cluster: the Headscale control plane lives outside the cluster. The
 	// in-cluster label peer is empty, Headscale is reached by IP via a toCIDR
-	// egress on the same headscalePorts. Covers the chart gap found during the
-	// prof kc-1 operator install (hand-written CiliumNetworkPolicy replaced).
+	// egress on the same headscalePorts. Covers the spoke-cluster gap closed in
+	// v0.16.0 (a separately maintained CiliumNetworkPolicy was needed before).
 	m := render(t, `networkPolicy:
   enabled: true
   provider: cilium

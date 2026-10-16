@@ -12,8 +12,8 @@ import (
 // certificate policy, unique across names, and never appear on L4 or pre-v3 configurations.
 func TestV3DNSAliases(t *testing.T) {
 	a := validHTTPTarget(t)
-	a.Name, a.Mode, a.DNSName = "web", "http", "web.ns.hydra.tif.internal"
-	alias := "web.hydra.tif.internal"
+	a.Name, a.Mode, a.DNSName = "web", "http", "web.ns.prod-1.tailnet.example.internal"
+	alias := "web.prod-1.tailnet.example.internal"
 	path := filepath.Join(t.TempDir(), "targets.json")
 
 	record := func(tgt target, mode string, aliases []string) map[string]any {

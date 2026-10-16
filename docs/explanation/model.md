@@ -20,7 +20,7 @@ description: "The five kinds, why the tag is the authorization, and what each re
   or explicitly verified HTTPS to the app, routed by SNI — no shared gateway needed.
 - **`TailnetSite`** (cluster-scoped) — a remote network behind a subnet router: a branch `/24`, a
   management range, a single host as `/32`. Declared once in the policy-owning cluster; the router
-  is identified **by tag**, so a hand-built router in another cluster qualifies. The operator renders
+  is identified **by tag**, so any tagged router, in this or another cluster, qualifies. The operator renders
   the `autoApprovers`, replays approvals, blocks overlaps with `reservedNetworks` or older sites and
   reports `Advertised`/`Approved`/`Ready`. Who may *reach* the site stays a grant in the base policy.
 - **`TailnetGateway`** (cluster-scoped) — the subnet router and split-DNS resolver as a CR: one
@@ -45,7 +45,7 @@ restart to add or remove a target:
   deleted CR's node ages out),
   one agent Deployment, one Service per target, a NetworkPolicy scoped to `consumerNamespaces`, and a
   status that classifies every target route (`NotAdvertised` / `NotApproved` / `NoGrant`) from the
-  node's netmap and the router's advertised/approved sets — the two silent failures of a hand-built
+  node's netmap and the router's advertised/approved sets — the two silent failures of a plain
   proxy, named.
 - **Gateway** — creates the subnet-router StatefulSet, its Services and CoreDNS zone exactly once
   (immutable receipts pin the identity), then only follows image/route changes into the template and

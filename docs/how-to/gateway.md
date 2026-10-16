@@ -4,8 +4,7 @@ weight: 90
 description: "One-time wiring (kernel prerequisites, LB pool, split-DNS, CoreDNS forward) and the complete worked example of a TailnetGateway with LB pool, iBGP, split-DNS and site."
 ---
 
-Optional. A `TailnetGateway` replaces the hand-built subnet router and the hand-built resolver of
-[Serve the file](dns-coredns.md#serve-the-file) with one operator-managed Pod: kernel Tailscale advertising
+Optional. A `TailnetGateway` is the operator-managed subnet router and resolver in one Pod: kernel Tailscale advertising
 `routes.lan ∪ service.tailnetLBCIDR ∪ {egress targets}/32`, and a CoreDNS serving the hosts file of
 [DNS with CoreDNS](dns-coredns.md) as the authoritative zone. It is fresh-only — a new node with a persistent identity; an existing
 router is never adopted. The complete worked example (manifest, LB pool, iBGP, split-DNS, site) is
@@ -55,7 +54,7 @@ resources; `Delete` is the explicit teardown ([deletion](../reference/gateway.md
 
 *`prod-1` sits in a datacenter LAN `192.0.2.0/24` (router `192.0.2.1`). Tailnet peers must reach
 that LAN, the cluster's tailnet-facing LoadBalancer IPs, and every egress target the operator
-manages — and resolve `*.prod-1.tailnet.example.internal` without a hand-built resolver. The
+manages — and resolve `*.prod-1.tailnet.example.internal` from the gateway. The
 cluster already runs Cilium with an IP pool and iBGP to the LAN router.*
 
 A `TailnetGateway` is one kernel-mode Tailscale Pod (subnet router, `NET_ADMIN`, no host
@@ -190,7 +189,7 @@ dns:
 ```
 
 **Cluster CoreDNS.** Pods ask `kube-system` CoreDNS; forward the zone to the gateway's ClusterIP
-Service (replaces the hand-built resolver of [Serve the file](dns-coredns.md#serve-the-file)):
+Service (or to the resolver from [Bring your own resolver](dns-coredns.md#serve-the-file)):
 
 ```corefile
 prod-1.tailnet.example.internal:53 {
@@ -258,10 +257,10 @@ kubectl get tailnetsite prod-1-lan                                              
 | `deletionPolicy`, `suspend` | lifecycle only; a suspend/resume cycle keeps the identity |
 | `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `service.loadBalancerIP`, `service.loadBalancerClass`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP`, `dns.extraZones` | identity — admission rejects most, the rest report `IdentityChanged`; recreate with `deletionPolicy: Delete` |
 
-## Extra zones for legacy networks
+## Extra zones for corporate resolvers
 
-When peers must also resolve corporate zones whose internal resolvers carry
-authoritative overrides (an SNI-routing proxy under `lolek.konzern.intern`, say),
+When peers must also resolve corporate zones whose resolvers carry
+authoritative overrides (an SNI-routing proxy under `proxy.corp.example`, say),
 add them as `dns.extraZones`. Names inside such a zone that appear in the Tailnet
 hosts source are answered by the gateway; everything else is forwarded to the
 listed upstreams. Add the zone to the Headscale split-DNS (`nameservers.split`)
@@ -270,17 +269,17 @@ pointing at the gateway LB IP, like the primary zone.
 ```yaml
 spec:
   dns:
-    zone: hydra.tailnet.example.internal
+    zone: prod-1.tailnet.example.internal
     extraZones:
-      - zone: konzern.intern
-        upstreams: ["10.90.200.1", "10.90.200.2"]
-      - zone: it.persona.de
-        upstreams: ["10.90.200.1"]
+      - zone: corp.example
+        upstreams: ["198.51.100.53", "198.51.100.54"]
+      - zone: partner.example
+        upstreams: ["198.51.100.53"]
 ```
 
 Overrides come from the hosts source (`spec.dns.hostsConfigMap` of the Tailnet, i.e.
 `TailnetEgress` DNS aliases and `TailnetIngress` names): an alias such as
-`lolek.konzern.intern` on an egress makes the gateway answer it with the egress
+`proxy.corp.example` on an egress makes the gateway answer it with the egress
 address instead of forwarding. Only A/AAAA are served locally; other record types for
 an overridden name reach the upstream. Zones must not overlap each other or the
 primary zone; `dns.extraZones` is immutable after creation.

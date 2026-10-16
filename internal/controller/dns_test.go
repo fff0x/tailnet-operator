@@ -48,8 +48,8 @@ func TestRenderHosts(t *testing.T) {
 func dnsTailnet() *tnv1.Tailnet {
 	tn := &tnv1.Tailnet{ObjectMeta: metav1.ObjectMeta{Name: "corp", UID: "tn-uid"}}
 	tn.Spec.DNS.HostsConfigMap = "tailnet-dns-hosts"
-	tn.Spec.DNS.IngressNameTemplate = "{name}.{namespace}.hydra.tif.internal"
-	tn.Spec.DNS.IngressAliasTemplate = "{name}.hydra.tif.internal"
+	tn.Spec.DNS.IngressNameTemplate = "{name}.{namespace}.prod-1.tailnet.example.internal"
+	tn.Spec.DNS.IngressAliasTemplate = "{name}.prod-1.tailnet.example.internal"
 	return tn
 }
 
@@ -79,7 +79,7 @@ func TestCollectIngressIPv4Only(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].IP != "100.64.0.42" || got[0].Name != "shop.shop-dev.hydra.tif.internal" {
+	if len(got) != 1 || got[0].IP != "100.64.0.42" || got[0].Name != "shop.shop-dev.prod-1.tailnet.example.internal" {
 		t.Fatalf("entries = %+v, want only the IPv4 base name", got)
 	}
 }
@@ -108,7 +108,7 @@ func TestCollectVirtualHostsAndAliases(t *testing.T) {
 		}
 		names[e.Name] = true
 	}
-	want := []string{"apps.ns1.hydra.tif.internal", "grafana.ns1.hydra.tif.internal", "apps.hydra.tif.internal"}
+	want := []string{"apps.ns1.prod-1.tailnet.example.internal", "grafana.ns1.prod-1.tailnet.example.internal", "apps.prod-1.tailnet.example.internal"}
 	for _, n := range want {
 		if !names[n] {
 			t.Fatalf("missing %q in %+v", n, got)
@@ -127,7 +127,7 @@ func TestCollectConflictLoserNotPublished(t *testing.T) {
 	older.Spec.TailnetRef = tnv1.TailnetRef{Name: "corp"}
 	older.Spec.Exposes = []tnv1.Expose{{Name: "web", Mode: "http", Port: 443, Alias: true, Backend: tnv1.Backend{Service: "web", Port: 80}}}
 	older.Status.TailnetIPs = []string{"100.64.0.1"}
-	// Different namespace, but the SAME alias web.hydra.tif.internal.
+	// Different namespace, but the SAME alias web.prod-1.tailnet.example.internal.
 	younger := &tnv1.TailnetIngress{ObjectMeta: metav1.ObjectMeta{
 		Name: "web", Namespace: "b", UID: "younger", CreationTimestamp: metav1.NewTime(time.Unix(2000, 0))}}
 	younger.Spec.TailnetRef = tnv1.TailnetRef{Name: "corp"}
@@ -139,7 +139,7 @@ func TestCollectConflictLoserNotPublished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	alias := "web.hydra.tif.internal"
+	alias := "web.prod-1.tailnet.example.internal"
 	var ips []string
 	for _, e := range got {
 		if e.Name == alias {

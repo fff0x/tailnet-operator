@@ -123,8 +123,8 @@ func TestBuildLegacySiteShapeHasNoConflicts(t *testing.T) {
 	)
 	reserved := []Reserved{
 		{Name: "nodes", Prefixes: []string{"100.64.0.0/16"}},
-		{Name: "cluster-a", Prefixes: []string{"10.200.19.0/24", "172.20.0.0/16", "172.21.0.0/16", "10.103.0.16/28"}},
-		{Name: "cluster-b", Prefixes: []string{"10.210.1.0/24", "10.244.0.0/16", "10.96.0.0/12", "10.103.2.16/28"}},
+		{Name: "cluster-a", Prefixes: []string{"10.20.0.0/24", "172.30.0.0/16", "172.31.0.0/16", "198.51.100.0/28"}},
+		{Name: "cluster-b", Prefixes: []string{"192.0.2.0/24", "10.244.0.0/16", "10.96.0.0/12", "198.51.100.16/28"}},
 	}
 	res := Build(sites, reserved, nil)
 	if len(res.Shipped) != len(sites) {
