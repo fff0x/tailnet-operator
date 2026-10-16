@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-16
+
 ### Changed
 
 - Docs restructured along [Diátaxis](https://diataxis.fr/): `docs/tutorials` (getting started),
@@ -15,6 +17,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   field tables moved to `docs/reference/crds.md`. `docs/{INSTALL,USAGE,SECURITY,COMPATIBILITY}.md`
   remain as redirect stubs and are removed in the release after next. Documentation is licensed
   CC BY 4.0 (`docs/LICENSE`); the code stays Apache-2.0.
+- `deploy/examples/*.yaml`: comments wrapped to 72 columns and their `USAGE §`/`INSTALL §`/README
+  pointers replaced by the Diátaxis how-to pages. The YAML documents are unchanged.
 
 ## [0.16.0] - 2026-10-14
 
