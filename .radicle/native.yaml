@@ -44,7 +44,7 @@ shell: |
   trap 'exit 130' INT
   trap 'exit 143' TERM
   mkdir "$test_tmp/context"
-  git ls-files -z -- Dockerfile go.mod go.sum cmd internal api test charts deploy hack docs/OPERATIONS.md docs/reference/rbac.md .radicle/native.yaml |
+  git ls-files -z -- Dockerfile go.mod go.sum cmd internal api test charts deploy hack docs/OPERATIONS.md docs/reference/rbac.md docs/reference/crds.md .radicle/native.yaml |
     tar --null -T - -cf - | tar -xf - -C "$test_tmp/context"
   case "$(uname -m)" in
     x86_64) test_arch=amd64 ;;

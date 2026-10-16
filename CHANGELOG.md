@@ -2,6 +2,20 @@
 
 Notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Docs restructured along [Diátaxis](https://diataxis.fr/): `docs/tutorials` (getting started),
+  `docs/how-to` (one task per page, split from `INSTALL.md`/`USAGE.md`), `docs/reference`
+  (generated `crds.md` and `values.md` via `task docs`, `rbac.md`, `compatibility.md`, `gateway.md`,
+  curated `metrics.md`/`alerts.md`/`reasons.md`), `docs/explanation` (`model.md`,
+  `security-model.md`), `docs/operations` (keys, state and backup, validation). `docs/OPERATIONS.md`
+  keeps the alert runbooks under unchanged anchors (alert `runbook_url`s stay valid). The README CRD
+  field tables moved to `docs/reference/crds.md`. `docs/{INSTALL,USAGE,SECURITY,COMPATIBILITY}.md`
+  remain as redirect stubs and are removed in the release after next. Documentation is licensed
+  CC BY 4.0 (`docs/LICENSE`); the code stays Apache-2.0.
+
 ## [0.16.0] - 2026-10-14
 
 ### Added

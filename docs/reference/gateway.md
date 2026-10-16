@@ -1,11 +1,15 @@
-# TailnetGateway: fresh-only writer
+---
+title: "TailnetGateway contract"
+weight: 50
+description: "Fresh-only writer: bootstrap chain, receipts, immutable identity, deletion, spec updates, key lifecycle, rollback and verified platforms."
+---
 
 Status: in production ([verified platforms](#verified-platforms)); scope is deliberately narrow —
 fresh IPv4 gateways only, no adoption of existing nodes ([adoption and retention](#adoption-and-retention)),
 no IPv6. The contract below (receipts, immutable identity, `OnDelete` StatefulSet) is stable since v0.11.0.
-This page is the contract; the operator-facing path is [INSTALL §7a](../INSTALL.md#7a-gateway-subnet-router--split-dns)
-(wiring) and [USAGE §9b](../USAGE.md#9b-gateway-run-the-subnet-router-and-split-dns-as-a-cr) (worked example),
-field summary in the [README](../../README.md#tailnetgateway-cluster-scoped).
+This page is the contract; the operator-facing path is [Run the gateway](../how-to/gateway.md)
+(wiring) and [the worked example](../how-to/gateway.md#worked-example) (worked example),
+field summary in the [README](crds.md#tailnetgateway).
 
 **`spec.suspend` defaults to `true`. Setting it to `false` opts into fresh IPv4 creation.**
 The cluster-scoped `tsunaro.io/v1alpha1` resource does not adopt existing gateways.
@@ -24,7 +28,7 @@ RoleBindings, and `patch` on `tailnetgateways` for the teardown finalizer. `dele
 used only by the teardown and always with a UID precondition. There are no update,
 escalation, binding or CR-spec grants.
 Do not remove an existing gateway, move its Secret, or change Headscale split-DNS
-because this CRD is installed. See [compatibility](../COMPATIBILITY.md#gateway-api-scope).
+because this CRD is installed. See [compatibility](compatibility.md#gateway-api-scope).
 
 ## Minimal fresh lifecycle
 
@@ -358,7 +362,7 @@ systemd-run --user --scope -p Delegate=yes -- \
 
 This opt-in selection has a 10-minute test budget, plus setup and cleanup. It
 requires the runner's existing assets and the pinned gateway OCI archives
-listed in the [Kind suite requirements](../../test/e2e-kind/README.md#requirements).
+listed in the [Kind suite requirements](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/test/e2e-kind/README.md#requirements).
 The runner verifies archive contents, platform/config digests and imported CRI
 references before creating the Pod. A containerd archive-index alias is accepted
 only when it belongs to that same verified image configuration.
@@ -817,6 +821,6 @@ Isolated API-server tests exercise the production manager with generated RBAC,
 status events and deletion without state mutation. No kubelet or garbage collector
 runs there: these tests do not prove live pod retention or interruption-free adoption.
 
-The [example](../../deploy/examples/tailnetgateway.yaml) is the USAGE §9b manifest with
+The [example](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/deploy/examples/tailnetgateway.yaml) is the manifest of the [worked example](../how-to/gateway.md#worked-example) with
 `suspend: true`: it admits as a fixture without creating anything and becomes a live gateway when
-`suspend` is set to `false` after the INSTALL §7a prerequisites are in place.
+`suspend` is set to `false` after the [gateway prerequisites](../how-to/gateway.md#prerequisites) are in place.

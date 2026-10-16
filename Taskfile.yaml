@@ -81,11 +81,22 @@ tasks:
       - go tool controller-gen object crd paths=./api/... output:crd:dir=deploy/crds
       - mkdir -p charts/tailnet-operator/crds
       - cp deploy/crds/*.yaml charts/tailnet-operator/crds/
+      - task: docs
+
+  docs:
+    desc: Regenerate docs/reference/crds.md (from deploy/crds) and values.md (helm-docs); no cluster
+    cmds:
+      # The golden test in hack/gendocs fails CI when crds.md drifts from the CRDs.
+      - go run ./hack/gendocs
+      - helm-docs --chart-search-root charts --template-files "{{.ROOT_DIR}}/docs/reference/values.md.gotmpl" --output-file ../../docs/reference/values.md --log-level error
+      # ponytail: reference/{metrics,alerts,reasons}.md are curated by hand — reason constants are
+      # spread over several packages and a generator for them is its own piece of work.
 
   chart:
     desc: Generate chart docs, lint/render/validate, check generated files and run chart contracts (no cluster)
     cmds:
       - helm-docs --chart-search-root charts --log-level error
+      - task: docs
       - bash hack/chart-check.sh
       - bash hack/rbac-diff.sh --check
       - go test -tags=chart ./test/chart -count=1

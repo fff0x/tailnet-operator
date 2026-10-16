@@ -10,13 +10,14 @@ from those CRs — without a per-workload `tailscale`+`socat` sidecar, without `
 `/dev/net/tun`, and without hand-editing the policy for every target.
 
 Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime) ·
-[tsnet](https://tailscale.com/kb/1244/tsnet) · [Apache-2.0](LICENSE) · © 2026 Max 'ff0x' Reineke
+[tsnet](https://tailscale.com/kb/1244/tsnet) · [Apache-2.0](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/LICENSE) · © 2026 Max 'ff0x' Reineke
 
 | | |
 | --- | --- |
-| **Install** — Headscale, operator, CoreDNS, gateway, policy mode, upgrade, rollback | [docs/INSTALL.md](docs/INSTALL.md) |
-| **Use & operate** — recipes for egress, ingress, policy, keys, diagnosis | [docs/USAGE.md](docs/USAGE.md) |
-| **Reference** — CRD fields, conditions, metrics | [below](#crd-reference) |
+| **Tutorial** — Headscale to first egress and ingress in about thirty minutes | [docs/tutorials](docs/tutorials/getting-started.md) |
+| **How-to guides** — install, egress, ingress, DNS, policy, site, gateway, upgrade, troubleshoot | [docs/how-to](docs/how-to/README.md) |
+| **Reference** — CRD fields, chart values, RBAC, metrics, alerts, conditions and reasons | [docs/reference](docs/reference/README.md) |
+| **Explanation & operations** — model, security model; keys, state, validation, runbooks | [docs/explanation](docs/explanation/README.md) · [docs/operations](docs/operations/README.md) |
 | **All docs by role** — evaluator, installer, SRE, tenant, policy admin, auditor, contributor | [docs/README.md](docs/README.md) |
 
 ## Model
@@ -51,7 +52,7 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
 ## Quickstart
 
 Installation (Helm chart, Headscale key, CoreDNS; `kubectl apply -k deploy` alternative) is in
-[docs/INSTALL.md](docs/INSTALL.md); chart values in the [chart README](charts/tailnet-operator/README.md).
+[docs/how-to](docs/how-to/README.md); chart values in the [chart README](docs/reference/values.md).
 With that in place, three manifests:
 
 ```yaml
@@ -115,165 +116,29 @@ it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
 
 ## CRD reference
 
-Worked examples for every kind: [USAGE](docs/USAGE.md). The `TailnetGateway` is fresh-only and
-suspended by default; it runs in production on arm64 and amd64 ([verified
-platforms](docs/reference/gateway.md#verified-platforms)) — wiring in
-[INSTALL §7a](docs/INSTALL.md#7a-gateway-subnet-router--split-dns), scope and migration boundary
-in [COMPATIBILITY](docs/COMPATIBILITY.md#gateway-api-scope).
+Every `spec` and `status` field of the five kinds, with types, defaults and constraints:
+[CRD reference](docs/reference/crds.md) (generated from the CRDs). Worked examples for every kind:
+[how-to guides](docs/how-to/README.md). Condition types and reasons per kind, as shown by
+`kubectl get` and `describe`: [Conditions and reasons](docs/reference/reasons.md).
 
-### Tailnet
+The `TailnetGateway` is fresh-only and suspended by default; it runs in production on arm64 and
+amd64 ([verified platforms](docs/reference/gateway.md#verified-platforms)) — wiring in
+[Run the gateway](docs/how-to/gateway.md), scope and migration boundary in
+[Compatibility](docs/reference/compatibility.md#gateway-api-scope). Kubernetes ≥1.31 is required;
+CR names, addresses, ports, list sizes and policy inputs are checked at admission
+([validation](docs/operations/validation.md)).
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `server` | — | login/control URL, the agents' ControlURL |
-| `apiUrl` | `server` | in-cluster REST endpoint |
-| `headscale.version` | none | optional version hint for diagnostics; does not bypass capability probes |
-| `headscale.ref` | empty | reserved for managed Headscale; non-empty values are rejected |
-| `apiSecretRef.{name,key}` | key `apiKey` | Secret (operator namespace) with the read-only bootstrap API key |
-| `apiKeyLifetime` / `authKeyLifetime` | `720h` / `168h` | working API key (minimum 1h) / per-CR pre-auth key; both rotated at half-life |
-| `proxy.{image,resources,mtu,probeInterval}` | operator image, –, `1200`, `5m` | agent pod defaults |
-| `proxy.imagePullSecrets` | operator default | registry Secret names in each agent namespace; omitted inherits `AGENT_IMAGE_PULL_SECRETS` (JSON array), `[]` clears the operator-supplied list; credentials are never copied |
-| `tagTemplate` / `hostnameTemplate` | `tag:egress-{name}` / `egress-{name}` | egress tag and MagicDNS name when the CR sets none |
-| `ingressTagTemplate` / `ingressHostnameTemplate` | `tag:ingress-{name}` / `ingress-{name}` | same for ingress |
-| `dns.hostsConfigMap` | off | ConfigMap (key `hosts`) receiving the rendered CoreDNS hosts file |
-| `dns.ingressNameTemplate` | off | `{name}`, `{namespace}` → ingress and HTTP-expose DNS names; an expose's `dnsLabel` replaces `{name}` |
-| `dns.ingressAliasTemplate` | off | Optional HTTP-alias template in the same zone as `ingressNameTemplate` |
-| `policy.baseConfigMap` | off | ConfigMap (key `policy`) with the human-written base policy (HuJSON) |
-| `policy.renderedConfigMap` | `<base>-rendered` | where the render is published for review |
-| `policy.mode` | `DryRun` | `DryRun` renders only; `Apply` also writes Headscale when live ≠ render |
-| `policy.tagOwners` | required when on | owners of generated tags, e.g. `[group:operator]` |
-| `policy.routeApprovers` | required when on | approvers of generated `/32` routes, e.g. `[tag:fabric]` |
-| `policy.ingressSourceAllowlist` | none | globs an ingress `allowFrom` entry must match, e.g. `["group:*"]` |
-| `defaults.tls.issuerRef` | none | cert-manager issuer used by `mode: http` ingresses that select no TLS source |
-| `reservedNetworks[].{name,prefixes[]}` | none | address space no `TailnetSite` may overlap (node prefix, each cluster's LAN/pod/service/LB ranges); up to 64 entries × 32 prefixes |
-
-### TailnetEgress (operator namespace)
-
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `tailnetRef.name` | — | the Tailnet |
-| `tag` / `hostname` | from templates | node tag / MagicDNS name |
-| `consumerNamespaces[]` | — | namespaces whose pods may reach the target Services (NetworkPolicy) |
-| `targets[].name` | — | Service name starting with a letter, ≤63 characters; unique within the CR and operator namespace; 1–50 targets |
-| `targets[].address`, `.port` | — | off-cluster host (IP or MagicDNS name) and TCP port |
-| `targets[].aliases[]` | none | lowercase DNS names, each ≤63 characters, resolving to the target Service (needs `dns.hostsConfigMap`) |
-| `image`, `resources` | Tailnet defaults | agent overrides |
-
-### TailnetIngress (tenant namespace)
-
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `tailnetRef.name` | — | the Tailnet |
-| `tag` / `hostname` | from templates | node tag / MagicDNS name |
-| `allowFrom[]` | required | at least one non-empty peer source (policy `src`); each must match `ingressSourceAllowlist` when policy generation is enabled |
-| `exposes[].name`, `.port` | — | 1–50 exposes with unique names; HTTP exposes share port 443, L4 ports must be unique |
-| `exposes[].backend.{service,namespace,port}` | namespace = CR's | in-cluster backend; an explicit namespace selects a Service there, while CA references stay in the CR namespace |
-| `exposes[].mode` | `l4` | `http`: terminate TLS on the agent (port 443) and proxy HTTP, routing virtual hosts by SNI |
-| `exposes[].dnsLabel` | CR name | HTTP name substituted into `ingressNameTemplate`; at most one HTTP expose may omit it |
-| `exposes[].alias` | `false` | Also publish the HTTP expose under `ingressAliasTemplate` and include that name in the certificate |
-| `exposes[].backend.tls` | absent | verified HTTPS upstream with an explicit `serverName` and namespace-local `caConfigMapRef` |
-| `exposes[].timeouts.{request,backendRequest}` | unlimited / `30s` | whole HTTP response / backend response-header deadline; `0s` disables |
-| `tls.secretName` / `tls.issuerRef` | `Tailnet.spec.defaults.tls.issuerRef` | One certificate covering all HTTP names and aliases: a namespace-local `kubernetes.io/tls` Secret, or a cert-manager `Issuer`/`ClusterIssuer` |
-| `image`, `resources` | Tailnet defaults | agent overrides |
-
-Kubernetes ≥1.31 is required. CR names, addresses, ports, list sizes and policy inputs are checked
-at admission. See [validation rules and tests](docs/OPERATIONS.md#5-validation) before upgrading CRDs.
-
-### TailnetSite (cluster-scoped)
-
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `tailnetRef.name` | — | the Tailnet whose policy renders the approvals |
-| `prefixes[]` | — | 1–64 canonical CIDRs; a `/32` is a single host |
-| `advertisedBy.tags[]` | `policy.routeApprovers` | tags of the routers that advertise the prefixes (any Headscale node, operator-managed or not) |
-| `owner` | required | accountable team/person, ≤63 characters; named in conflict messages |
-| `description` | none | free text |
-
-### TailnetGateway (cluster-scoped)
-
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `suspend` | `true` | nothing is created until explicitly `false`; a suspend/resume cycle keeps the identity |
-| `deletionPolicy` | `Retain` | CR deletion keeps node, Secret and resources; `Delete` is the fail-closed teardown including the Headscale node |
-| `tailnetRef.name` | — | the Tailnet; immutable |
-| `hostname` | — | Headscale node name; immutable |
-| `tags[]` | `[tag:fabric]` | bootstrap tags; must be in `policy.routeApprovers` for automatic route approval; immutable |
-| `stateSecretRef.name` | — | state Secret the operator creates empty and the Pod fills with its node identity; immutable, back it up |
-| `image`, `dns.image` | — | kernel Tailscale / CoreDNS image with a version tag or digest (`latest` and bare images rejected); the only mutable Pod-template fields |
-| `routes.lan[]` | — | 1–128 IPv4 prefixes advertised as subnet routes |
-| `routes.advertiseEgressTargets` | `true` | also advertise every literal `TailnetEgress` target of the Tailnet as `/32` |
-| `service.loadBalancerIP`, `.tailnetLBCIDR` | — | LB address of the split-DNS Service (immutable) and the pool CIDR containing it, advertised as a route so peers reach every LB IP |
-| `service.poolLabels`, `.loadBalancerClass` | none | ≤ 16 labels your LB pool selects on (mutable); optional class (immutable) |
-| `dns.zone`, `.serviceName`, `.serviceClusterIP` | — | authoritative zone (= the split zone of `ingressNameTemplate`), ClusterIP Service for the cluster CoreDNS forward; all immutable |
-| `dns.staticRecords[]` | none | ≤ 128 relative names with an `address` (A/AAAA) **or** an in-zone `target` (CNAME); live-reloaded |
-| `dns.wildcardAddress` | none | fallback A record for `*.<zone>`; dynamic names always win |
-| `replicas` | `1` | only `1` is accepted |
-| `dns.extraZones[]` | none | ≤ 16 extra zones (`zone` + 1–8 `upstreams`): hosts-source names inside the zone answered locally, everything else forwarded; immutable |
-| `forwards[]`, `forwardImage`, `authKeySecretRef`, `adoption` | — | schema only; the current writer rejects them (`FreshBlocked`) |
-
-### Status and conditions
-
-| Kind | Conditions | Notable reasons |
-| --- | --- | --- |
-| `Tailnet` | `ApiReachable`, `ApiKeyValid`, `HeadscaleCompatible`, `PolicyMode`, `SplitDNS`, `UsersUnique`, `PolicyRendered`, `PolicyApplied` | `Reachable` / `Unreachable` / `Unhealthy` (database down); `Valid` / `Rejected` / `Error`; `Compatible` / `Incompatible` / `CannotVerify` / `ProbeFailed`; `Database` / `File`; `SplitDNS=Unknown/CannotVerify` (manual configuration required); `Unique` / `Duplicate` (two Headscale users share a name — every policy write is rejected until one is destroyed; `status.userConflicts` counts them) / `CannotVerify`; `Rendered`, `BaseMissing`, `BaseInvalid`, `PolicyEmpty` (refused: would lock everyone out); `DryRun`, `InSync`, `Applied`, `PolicyModeFile` (write skipped), `PolicyRejected` (Headscale refused; old policy stays), `ApplyFailed`, `NoAPIKey` |
-| `TailnetEgress` | `TagKnown`, `Registered`, `RoutesGranted`, `TargetsReachable`, `ServiceConflict`, `Ready` | `Known` / `Unknown` / `PolicyPending` (tag not in live policy yet); `Registered` / `NotRegistered`; `RoutesMissing`, `Unreachable`, `ProbeFailed` (agent not scraped — NetworkPolicy or pod down; nothing is known about routes/dials); `Conflict` (target name taken by a foreign Service); `Ready` false with `NoTailnet`, `NoAPIKey`, `TagUnknown`, otherwise with the reason of the first blocking condition (`NotRegistered`, `RoutesMissing`, `ProbeFailed`, `Unreachable`); per target `status.targets[].reason` ∈ `NotAdvertised`, `NotApproved` (re-approved by the operator on the next policy reconcile), `NoGrant`, `ProbeFailed` |
-| `TailnetSite` | `RouteConflict`, `UnmanagedOverlap`, `Advertised`, `Approved`, `Ready` | `OverlapsReserved` / `OverlapsSite` (blocked, nothing rendered; the older site is untouched); `Unmanaged` (a node without an advertiser tag advertises an overlapping route — report only); `NotAdvertised` / `NotApproved` (exact-prefix match on advertiser nodes); `NotObserved` (control server not queried); `Ready` false carries the first blocking reason in the order `RouteConflict`, `Advertised`, `Approved` |
-| `TailnetGateway` | `Registered`, `RoutesInSync`, `DNSReady`, `StaleNodes`, `ClusterDNSForward`, `WorkloadCurrent`, `ServiceReady`, `Ready` | `Suspended`; `Provisioning` / `FreshBlocked` / `IdentityChanged` / `FreshRuntimeReady` (Ready); `Approved` / `NotApproved` (routes); `PodCurrent` / `PodTemplateStale` / `WorkloadUpdateBlocked`; `LoadBalancerAssigned` / `LBPending`; `ExternallyManaged` (DNS forward, stale nodes) |
-| `TailnetIngress` | `TagKnown`, `PolicyGranted`, `Registered`, `BackendsReachable`, `TLSReady`, `Ready` | as egress, plus `Granted` / `PolicyDenied` (`allowFrom` outside the allowlist), `InvalidDNSName`, `DNSNameConflict` (an older CR already claims a name/alias), and for `mode: http` the `TLS*` reasons ([USAGE §6.1](docs/USAGE.md#61-ingress-terminate-tls-on-the-agent)); `Ready` false carries the first blocking reason in the order `Registered`, `PolicyGranted`, `TLSReady`, `BackendsReachable` |
-
-`Tailnet.status.policy` = `{renderedHash, appliedHash, appliedAt, generated{tags,grants,routes}}`;
-`TailnetIngress.status.dnsName` is the ingress-level DNS name; HTTP names and aliases appear in
-`status.exposes[].dnsName` and `.dnsAliases`. All are published as A records with the node's IPv4
-address; `status.tag` is the effective tag. `kubectl get tailnet` includes `COMPAT` and `DNS` reason columns.
-Preflight uses the API response shape, not a reported server version: database policy mode and a
-successful non-mutating `policy/check` probe are required for `Compatible`. Missing or failed
-observations stay `Unknown`. See [preflight details](docs/INSTALL.md#25-preflight).
-Event `PolicyDriftOverwritten` fires when
-the live policy was changed behind the operator's back and rewritten.
-
-Metrics (operator, TCP 8080): `tailnet_resource_ready`, `tailnet_resource_condition`,
-`tailnet_egress_target_state`, `tailnet_ingress_expose_reachable`, `tailnet_node_online`,
-`tailnet_node_last_seen_seconds`, `tailnet_headscale_user_conflicts`, `tailnet_policy_pending`, `tailnet_policy_generated`,
-`tailnet_policy_applied_timestamp_seconds`, `tailnet_policy_apply_errors_total`,
-`tailnet_route_approvals_replayed_total`, `tailnet_headscale_api_requests_total`, key expiry gauges;
-agents (TCP 9080): `tailnet_agent_connections_active`, `tailnet_agent_bytes_total`,
-`tailnet_agent_dial_duration_seconds`. Bundled alerts and runbooks: [OPERATIONS §6](docs/OPERATIONS.md#6-monitoring-and-alert-runbooks).
+Metrics (operator TCP 8080, agents TCP 9080) and the bundled alerts with their runbooks:
+[Metrics](docs/reference/metrics.md), [Alerts](docs/reference/alerts.md),
+[Monitoring and alert runbooks](docs/OPERATIONS.md).
 
 ## How it works
 
-Six reconcilers, each turning CRs into desired state applied with server-side apply — no per-CR
-restart to add or remove a target:
-
-- **Tailnet** — mints the working API key from the bootstrap key, rotates it at half-life (new key
-  verified before the old one is expired), reports reachability.
-- **Egress / Ingress** — per CR: tag pre-check against the live policy, a reusable ephemeral pre-auth
-  key (rotated at half-life and on server/tag change; a restarted pod re-registers on its own, a
-  deleted CR's node ages out),
-  one agent Deployment, one Service per target, a NetworkPolicy scoped to `consumerNamespaces`, and a
-  status that classifies every target route (`NotAdvertised` / `NotApproved` / `NoGrant`) from the
-  node's netmap and the router's advertised/approved sets — the two silent failures of a hand-built
-  proxy, named.
-- **Gateway** — creates the subnet-router StatefulSet, its Services and CoreDNS zone exactly once
-  (immutable receipts pin the identity), then only follows image/route changes into the template and
-  the hosts file into the zone; it never restarts, adopts or deletes the Pod without `deletionPolicy: Delete`.
-- **DNS** — folds egress aliases and ingress names into one CoreDNS `hosts` ConfigMap per Tailnet.
-  The resolver is the cluster's, not the operator's; if the operator dies the last file stays valid.
-- **Policy** — parses the base HuJSON generically, appends tagOwners / `/32` approvals / grants
-  derived from the CRs (base wins, nothing removed, unknown blocks pass through), publishes the render
-  in a ConfigMap and, in `Apply`, writes it when the live document differs. Headscale validates
-  (including the base's `tests`) before storing, so a rejected render never becomes active. After a
-  successful write it replays missed `autoApprovers` approvals (a route advertised before its
-  approver existed) on the routers, so `NotApproved` heals without `headscale nodes approve-routes`.
-- **Data plane** — one agent pod per CR is a userspace tsnet node. `AGENT_MODE` sets the direction
-  and has no default (the operator sets it on every agent Deployment; an unset value is a startup error):
-  egress takes `--accept-routes` and `Dial`s the off-cluster address over the tailnet; ingress listens
-  on the tailnet and `Dial`s an in-cluster backend; an `http` expose terminates TLS on that listener
-  (SNI and Host bound to the ingress DNS name, certificate reloaded from the projected Secret) and
-  proxies HTTP/1.1 and HTTP/2 to the backend. Same binary, `io.Copy` with half-close, no SOCKS5, no
-  second container; state is in-memory and ephemeral by design.
-
-A single image carries both binaries; the operator runs `/tailnet-operator`, each agent pod runs
-`/tailnet-agent`.
+Six reconcilers (Tailnet, Egress, Ingress, Gateway, DNS, Policy) turn CRs into desired state
+applied with server-side apply; one agent pod per CR is a userspace tsnet node, the same image
+carrying `/tailnet-operator` and `/tailnet-agent`. The full walk-through — key rotation, route
+diagnosis, policy rendering and replay, the data plane — is
+[Model and how it works](docs/explanation/model.md#how-it-works).
 
 ## Develop
 
@@ -290,8 +155,8 @@ task image           # build the combined image locally
 ```
 
 CI runs the same gates in a fresh container, then publishes a cosign-signed multi-arch image and the
-chart; see [CONTRIBUTING](CONTRIBUTING.md), [COMPATIBILITY](docs/COMPATIBILITY.md) and
-[SECURITY](docs/SECURITY.md#supply-chain).
+chart; see [CONTRIBUTING](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/CONTRIBUTING.md), [COMPATIBILITY](docs/reference/compatibility.md) and
+[SECURITY](docs/explanation/security-model.md#supply-chain).
 
 | Path | What |
 | --- | --- |
@@ -305,4 +170,4 @@ chart; see [CONTRIBUTING](CONTRIBUTING.md), [COMPATIBILITY](docs/COMPATIBILITY.m
 | `deploy/` | generated default bundle and CRDs (kustomize); `examples/` incl. a base policy and admission fixtures |
 | `test/{validation,chart,security}` | envtest admission tests, chart contracts, image-audit tests |
 | `test/e2e/`, `test/e2e-kind/` | Headscale integration suite; rootless kind cluster suite |
-| `docs/` | [INSTALL](docs/INSTALL.md), [USAGE](docs/USAGE.md), [COMPATIBILITY](docs/COMPATIBILITY.md), [SECURITY](docs/SECURITY.md), [RBAC reference](docs/reference/rbac.md) |
+| `docs/` | [Diátaxis](https://diataxis.fr/) tree: [tutorials](docs/tutorials/README.md), [how-to](docs/how-to/README.md), [reference](docs/reference/README.md) (generated pages via `task docs` / `task rbac-gen`), [explanation](docs/explanation/README.md), [operations](docs/operations/README.md); [docs/README.md](docs/README.md) for paths by role |

@@ -2,7 +2,7 @@
 
 Changes are developed in this repository and proposed through its Radicle patch workflow.
 Discuss API, permissions, compatibility and migration changes before implementation.
-For private vulnerability reports, use [the security policy](docs/SECURITY.md), not a public issue.
+For private vulnerability reports, use [the security policy](docs/explanation/security-model.md), not a public issue.
 
 ## Local checks
 
@@ -27,7 +27,7 @@ Do not add broad suppressions to make a failing release pass.
 
 Use `task e2e-kind` for the disposable pod-level installation/failover suite.
 It requires local rootless Podman, kind and suitable cgroup delegation.
-See [the runner's safety boundaries](test/e2e-kind/README.md).
+See [the runner's safety boundaries](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/test/e2e-kind/README.md).
 
 The complete local run is `task e2e-full`: the exact CI gate (`hack/ci-test.sh` — gofmt/vet,
 govulncheck, unit, chart, admission against envtest 1.31, Tier 1 against real Headscale 0.28.0 and

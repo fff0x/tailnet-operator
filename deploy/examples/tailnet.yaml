@@ -32,7 +32,7 @@ spec:
     # Optional short alias for HTTP exposes that set `alias: true`. Must end in the SAME zone as
     # ingressNameTemplate so it resolves over the tailnet.
     # ingressAliasTemplate: "{name}.prod-1.tailnet.example.internal"
-  # Operator-owned policy (optional; needs Headscale policy mode "database", docs/INSTALL.md §7).
+  # Operator-owned policy (optional; needs Headscale policy mode "database", docs/how-to/policy.md).
   # The base document (policy-base.jsonc) lives in Git -> ConfigMap; the operator appends tagOwners,
   # /32 route approvals and grants derived from the CRs and writes the union. Start in DryRun, read
   # <baseConfigMap>-rendered, then switch to Apply.

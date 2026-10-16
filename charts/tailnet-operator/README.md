@@ -16,14 +16,14 @@ helm install tailnet-operator ./charts/tailnet-operator --namespace tailnet-syst
 Install one release per cluster. `namespace` defaults to the release namespace; a different value
 must already exist (`--create-namespace` only creates the release namespace). Uninstall keeps the
 namespace and the CRDs. The Tailnet CR, bootstrap key, Headscale policy and DNS wiring are described
-in [INSTALL](../../docs/INSTALL.md).
+in [INSTALL](../../docs/how-to/install-operator.md).
 
 ## CRDs
 
 `task crds` generates `deploy/crds/` and copies the files into this chart's `crds/`. Helm installs
 missing CRDs but never upgrades or removes them: use `task crd-upgrade KUBE_CONTEXT=<context>` for a
 manual installation, or `install.crds: CreateReplace` / `upgrade.crds: CreateReplace` on a Flux
-`HelmRelease`. Validate existing CRs against a new schema first ([OPERATIONS §5](../../docs/OPERATIONS.md#5-validation)).
+`HelmRelease`. Validate existing CRs against a new schema first ([OPERATIONS §5](../../docs/operations/validation.md)).
 
 ## Permissions
 
@@ -93,17 +93,17 @@ A PodMonitor grants no network access; agent NetworkPolicies allow TCP 9080 from
 namespace only, so a scraper elsewhere needs its own additive policy. Key-expiry alert thresholds are
 `monitoring.rules.apiKeyExpiryWarningSeconds` (7 d) and `authKeyExpiryWarningSeconds` (1 d); keep
 them below half the configured key lifetime. Alert semantics and runbooks:
-[OPERATIONS §6](../../docs/OPERATIONS.md#6-monitoring-and-alert-runbooks).
+[OPERATIONS §6](../../docs/OPERATIONS.md).
 
 ## HTTP TLS termination
 
 A `TailnetIngress` with a `mode: http` expose terminates TLS on the agent using a namespace-local
-`kubernetes.io/tls` Secret or a cert-manager issuer ([USAGE §6.1](../../docs/USAGE.md#61-ingress-terminate-tls-on-the-agent)).
+`kubernetes.io/tls` Secret or a cert-manager issuer ([USAGE §6.1](../../docs/how-to/ingress-https.md#terminate-tls-on-the-agent)).
 The chart grants `Certificate` get/create/patch/delete for the issuer path; missing cert-manager CRDs
 do not affect startup or L4 operation. Do not downgrade below v0.4.0 while HTTP CRs exist.
 Backend TLS and expose timeouts require v0.5.0 agents, including explicit image overrides.
 CA ConfigMaps are namespace-local; existing ConfigMap permissions cover inspection and watch.
-See [compatibility](../../docs/COMPATIBILITY.md#http-extension-compatibility-v050) before enabling extensions or downgrading.
+See [compatibility](../../docs/reference/compatibility.md#http-extension-compatibility-v050) before enabling extensions or downgrading.
 
 ## Development
 

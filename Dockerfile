@@ -57,6 +57,7 @@ COPY deploy ./deploy
 COPY hack ./hack
 COPY docs/OPERATIONS.md ./docs/OPERATIONS.md
 COPY docs/reference/rbac.md ./docs/reference/rbac.md
+COPY docs/reference/crds.md ./docs/reference/crds.md
 COPY .radicle/native.yaml ./.radicle/native.yaml
 
 ##
