@@ -4,6 +4,36 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Changed
+
+- Gateway bootstrap no longer freezes the *content* of its sources: between the first Create and
+  the completion receipt the writer re-checks the Gateway/Tailnet snapshots and the hosts
+  ConfigMap's identity (UID, liveness), not its `resourceVersion` or the TailnetEgress revisions.
+  Agents registering during the bootstrap (which rewrite the hosts file) therefore no longer turn
+  the mint into `Ready=False/FreshBlocked`; the live DNS and route reconcilers converge the zone
+  and routes after completion, as they already did for every later change.
+
+### Fixed
+
+- Gateway teardown of a bootstrap that stopped halfway (no `<gateway>-fresh` receipt) now removes
+  the children that bootstrap wrote — ServiceAccount, Role, RoleBinding, Services,
+  PodDisruptionBudget, `-coredns` ConfigMap and StatefulSet — by the operator's own
+  `tsunaro.io/gateway-uid` label, each with a UID precondition. Previously only the state/auth
+  Secrets and receipts went, and the leftovers blocked every further attempt until deleted by
+  hand. Unlabelled objects, even under the gateway's names, are still never touched.
+
+### Docs
+
+- `how-to/gateway.md`: *Cloud load-balancer controllers* (`service.loadBalancerClass` when a cloud
+  controller manager would claim the gateway's LoadBalancer Service) and *Replace a hand-built
+  gateway* (side-by-side bootstrap, resolver flips, retiring the old router with immediate route
+  failover).
+- `how-to/ingress-tcp.md`, `how-to/ingress-https.md`: *Tailnet without a policy writer (spoke
+  cluster)* — pin `spec.tag`/`hostname` and declare `tagOwners` + grant in the hub base policy;
+  cross-referenced from `how-to/policy.md`.
+- Gateway reference and FreshBlocked runbook state the recovery path for a partial bootstrap
+  (`deletionPolicy: Delete`, delete, recreate).
+
 ## [0.18.0] - 2026-10-17
 
 ### Added

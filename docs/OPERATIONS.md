@@ -118,7 +118,10 @@ is a legitimate second router.
 `TailnetGatewayFreshBlocked`: a `TailnetGateway` has reported `Ready=False/FreshBlocked` for 5 min.
 The fresh writer found an expired or drifted bootstrap key, unverified provenance or template
 drift and writes nothing; the derived zone keeps its last state. The `Ready` message names the
-check that failed — see the gateway reference for each case. Suspended gateways are absent from
+check that failed — see the gateway reference for each case. A bootstrap that stopped halfway
+leaves labelled children that block the next attempt: set `deletionPolicy: Delete`, delete the CR
+and recreate it; the teardown removes everything carrying the Gateway's own label and nothing
+else. Suspended gateways are absent from
 `tailnet_resource_ready`/`tailnet_resource_condition` and never raise this or
 `TailnetResourceNotReady`.
 

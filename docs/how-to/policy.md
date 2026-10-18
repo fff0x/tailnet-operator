@@ -179,6 +179,10 @@ rejected instead of applied.
 Never run `headscale policy set` by hand while the operator is in `Apply`: it is overwritten within
 5 minutes and reported as event `PolicyDriftOverwritten`.
 
+Agents of *other* clusters on the same Headscale (spoke Tailnets without a policy block) are not
+generated here: declare their tags and grants in this base policy by hand — see
+[Tailnet without a policy writer](ingress-tcp.md#tailnet-without-a-policy-writer-spoke-cluster).
+
 ## Review before Apply, drift, rollback
 
 | Want | Do |

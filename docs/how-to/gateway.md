@@ -140,6 +140,23 @@ spec:
     matchExpressions: [{ key: io.cilium/lb-pool, operator: NotIn, values: [tailnet] }]
 ```
 
+**Cloud load-balancer controllers.** On clusters that run a cloud controller manager
+(Hetzner, AWS, GCP, …) a `LoadBalancer` Service without a class is claimed by the cloud
+provider, which provisions an external load balancer, usually cannot carry UDP/53 and
+never hands out an address from your in-cluster pool: the gateway stays
+`ServiceReady=False/LBPending` and peers get no resolver. Hand the Service to the
+in-cluster implementation explicitly:
+
+```yaml
+  service:
+    loadBalancerIP: 198.51.100.17
+    loadBalancerClass: io.cilium/l2-announcer   # or io.cilium/bgp-control-plane, metallb.io/metallb, …
+```
+
+The class is part of the pinned identity: add it before the first reconcile, or recreate the
+gateway with `deletionPolicy: Delete`. Bare-metal clusters without a cloud controller do not
+need it.
+
 **iBGP.** Tailnet peers reach `198.51.100.0/24` through the gateway (it is an advertised route); the
 *LAN* reaches those addresses only if the nodes announce them. With Cilium's BGP control plane,
 one instance in the site ASN peering with the LAN router (MetalLB or kube-vip speakers do the same
@@ -239,7 +256,7 @@ kubectl get tailnetsite prod-1-lan                                              
 | Symptom | Meaning | Fix |
 | --- | --- | --- |
 | `Ready=False/Provisioning` for minutes | Pod not yet running | `kubectl -n tailnet-system describe pod prod-1-gw-0`: image pull, kernel preflight (`/dev/net/tun`, `ip_forward`), Pod Security admission |
-| `Ready=False/FreshBlocked` | bootstrap blocked: key expired before registration, receipt or template drift, a pool key colliding with an operator label | alert `TailnetGatewayFreshBlocked`; runbook [OPERATIONS](../OPERATIONS.md#monitoring-gateway-fresh-blocked) |
+| `Ready=False/FreshBlocked` | bootstrap blocked: key expired before registration, receipt or template drift, a pool key colliding with an operator label, or children of an earlier bootstrap that stopped halfway | alert `TailnetGatewayFreshBlocked`; runbook [OPERATIONS](../OPERATIONS.md#monitoring-gateway-fresh-blocked). Leftovers: set `deletionPolicy: Delete`, delete the CR, recreate it — the teardown removes everything carrying the Gateway's label |
 | `RoutesInSync=False/NotApproved` | advertised but not approved | `policy.mode: Apply` with the tag in `routeApprovers`, or approve in Headscale |
 | `ServiceReady=False/LBPending` | no LoadBalancer address | pool CIDR contains `loadBalancerIP`, selector matches `poolLabels`, LB controller healthy; `Ready` does not wait for this |
 | `WorkloadCurrent=False/PodTemplateStale` | image or route change written to the template | delete Pod `prod-1-gw-0` when convenient; the running Pod keeps serving |
@@ -256,6 +273,36 @@ kubectl get tailnetsite prod-1-lan                                              
 | `service.poolLabels` | set/removed on the Service in place |
 | `deletionPolicy`, `suspend` | lifecycle only; a suspend/resume cycle keeps the identity |
 | `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `service.loadBalancerIP`, `service.loadBalancerClass`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP`, `dns.extraZones` | identity — admission rejects most, the rest report `IdentityChanged`; recreate with `deletionPolicy: Delete` |
+
+## Replace a hand-built gateway
+
+A cluster that already runs its own subnet router (a hand-written Tailscale StatefulSet with
+socat/CoreDNS sidecars, a VM, …) moves to the operator gateway without a tailnet outage for
+peers, because Headscale keeps a second, approved advertiser of the same prefixes as standby and
+fails over to it the moment the primary disappears. The operator never adopts the old router;
+the two run side by side until you delete the old one.
+
+1. **Create the `TailnetGateway` next to the old router** with its own `hostname`, its own
+   `service.loadBalancerIP`, its own `dns.serviceClusterIP` and `deletionPolicy: Retain`. Give it
+   the same `routes.lan` and `tailnetLBCIDR`; advertising a prefix twice is intended. Wait for
+   `Ready=True`, `RoutesInSync=True/Approved`, `DNSReady=True`.
+2. **If the old router read the operator's hosts file** (`Tailnet.spec.dns.hostsConfigMap`), keep
+   that ConfigMap owned by the operator; the old sidecar may keep mounting it until step 5.
+3. **Flip the cluster resolver**: point the kube-system CoreDNS forward for the tailnet zone (and
+   any corporate zones the old sidecar served) at the new `dns.serviceClusterIP`
+   ([DNS with CoreDNS](dns-coredns.md)). Compare a few lookups from a pod against the old
+   resolver first; only names the old router answered from local state may differ.
+4. **Flip the tailnet resolver**: set the Headscale split-DNS entry for the zone to the new
+   `loadBalancerIP` and grant tailnet peers `udp:53`/`tcp:53` to it. Verify
+   `dig @<loadBalancerIP> k8s.<zone>` from a peer.
+5. **Retire the old router**: delete its Headscale node (`headscale nodes delete`) — routes fail
+   over to the operator gateway immediately (`headscale nodes list-routes` shows it as the only
+   advertiser) — then expire its pre-auth keys, remove its manifests and any Services and
+   Secrets that held its state.
+
+Anything that only the old router answered (API proxies on its tailnet IP, MagicDNS names such
+as `<old-hostname>`) needs its own replacement before step 5: a `TailnetIngress` per API
+([Ingress: TCP](ingress-tcp.md)) and the gateway's `dns.staticRecords` for the names.
 
 ## Extra zones for corporate resolvers
 

@@ -208,6 +208,31 @@ Before a downgrade, restore a verified legacy gateway path; do not remove backen
 `allowFrom` authorizes tailnet peers; it neither performs OIDC nor supplies application identity headers.
 Removing gateway authentication is a separate access-control decision. Native application login and credentials remain independent.
 
+## Tailnet without a policy writer (spoke cluster)
+
+Only one Tailnet per Headscale may run `policy.mode: Apply`. On every other cluster sharing that
+control plane (a *spoke*) the operator still enrols the agent and renders DNS, but it cannot write
+`tagOwners` or grants — `allowFrom` is informational there. The hub's admin declares them in the base
+policy, so pin the tag instead of relying on the template:
+
+```yaml
+spec:
+  tag: tag:ingress-prod-2-shop          # explicit: the hub policy references this literal
+  hostname: prod-2-shop                 # explicit: unique across the whole tailnet
+  allowFrom: [group:shop]               # documents the intent; the hub grant is authoritative
+```
+
+Hub base policy (`policy.jsonc`), reviewed like any other admin change
+([Change the base policy](policy.md#change-the-base-policy-admin)):
+
+```jsonc
+"tagOwners": { "tag:ingress-prod-2-shop": ["group:operator"] },
+"grants": [ { "src": ["group:shop"], "dst": ["tag:ingress-prod-2-shop"], "ip": ["tcp:443"] } ]
+```
+
+Until the hub applies it the CR reports `TagKnown=False/Unknown` (no key is minted); afterwards it is `Ready`
+like on the hub. Peers that still cannot connect are missing the grant, not the agent.
+
 ## HTTPS through a shared gateway
 
 TLS terminates at the gateway (it holds `*.prod-1.tailnet.example.internal`); the ingress gives the

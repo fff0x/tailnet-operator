@@ -45,8 +45,12 @@ rendered as hosts+forward blocks (see [Extra zones](#extra-zones-dnsextrazones))
    additionally bind to this new State UID, preventing selection of old orphan Pods.
 3. Call `PlanGatewayMint`, then the existing Headscale client, then `storeGatewayMintRecord`.
    The reusable key is non-ephemeral, tag-bound and limited to 24 hours.
-4. Recheck source revisions, empty State UID and durable auth before each resource Create.
-   Create the nine rendered resources, with the StatefulSet last. Never patch or adopt an existing object.
+4. Recheck the Gateway/Tailnet snapshots, the identity (UID, not content) of the hosts
+   ConfigMap, the empty State UID and durable auth before each resource Create. Hosts
+   content and TailnetEgress revisions may change during the bootstrap: the live DNS
+   and route reconcilers converge them after completion, so agents registering
+   mid-bootstrap do not block it. Create the nine rendered resources, with the
+   StatefulSet last. Never patch or adopt an existing object.
 5. Create immutable `<gateway>-fresh` completion evidence: scope, independent State UID,
    auth receipt, child UIDs and admitted payload hashes. It contains no credentials or private-state hash.
 6. Observe the retained set. Report runtime Ready only after a running, Ready Pod matches
@@ -438,12 +442,16 @@ not touch the completion receipt, and a running Gateway stays Ready.
 On deletion with the finalizer present the controller tears down, in this order and
 fail-closed, only what this Gateway provably created:
 
-1. The StatefulSet recorded in the `<gateway>-fresh` receipt, then it waits until no
-   Pod labelled `tsunaro.io/gateway-uid=<CR UID>` remains (`Ready=False/Deleting`).
+1. The StatefulSet recorded in the `<gateway>-fresh` receipt (without a receipt: the
+   StatefulSet under the Gateway's name if it carries our label), then it waits until
+   no Pod labelled `tsunaro.io/gateway-uid=<CR UID>` remains (`Ready=False/Deleting`).
 2. The Headscale node bound to the state Secret (`VerifyGatewayState`, falling back to
    `status.nodeId`); deleting it drops its route approvals. Then the minted bootstrap
    key is expired by its recorded ID. A user-supplied `authKeySecretRef` is never touched.
-3. The remaining receipt children, each by the UID recorded at creation.
+3. The remaining receipt children, each by the UID recorded at creation. Without a
+   receipt, the children of the partial bootstrap are known only by the label: every
+   ServiceAccount, Role, RoleBinding, Service, PodDisruptionBudget and ConfigMap
+   carrying `tsunaro.io/gateway-uid=<CR UID>` is deleted by its live UID.
 4. The auth Secret, the state Secret (UID must equal the receipt's), then the
    `-auth-receipt`, `-fresh` and any transient `-fresh-next` ConfigMaps last: the
    receipt is the inventory.
@@ -453,9 +461,10 @@ with a different UID, a receipt without our label, or a Headscale error other th
 blocks at that step: `Ready=False/TeardownBlocked` names the step, nothing further is
 deleted, and the finalizer stays until the conflict is removed or the policy is set to
 `Retain`. Without a completion receipt (partial creation) there is no child inventory:
-only the state/auth Secrets and receipts carrying our label are removed and the key is
-expired; children created before the fault remain. Deleting a suspended Gateway or one
-reconciled without a runtime client always retains.
+everything carrying our label is removed and the key is expired; unlabelled objects,
+even under our names, remain. This is the recovery path for a bootstrap that stopped
+halfway: set `deletionPolicy: Delete`, delete the CR, recreate it. Deleting a suspended
+Gateway or one reconciled without a runtime client always retains.
 
 ## Live DNS reconcile
 
