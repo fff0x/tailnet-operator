@@ -207,7 +207,7 @@ func ReconcileFresh(ctx context.Context, c client.Client, namespace string, g *t
 		return bad()
 	}
 	currentState := &corev1.Secret{}
-	if !freshSourcesUnchanged(ctx, c, g, tn, hosts, egresses) ||
+	if !freshSourcesUnchanged(ctx, c, g, tn, hosts) ||
 		c.Get(ctx, client.ObjectKeyFromObject(state), currentState) != nil || currentState.UID != stateUID || currentState.ResourceVersion != state.ResourceVersion {
 		return bad()
 	}
@@ -229,7 +229,7 @@ func ReconcileFresh(ctx context.Context, c client.Client, namespace string, g *t
 		// Recheck source revisions, the independently captured empty State UID and
 		// durable auth before each write, especially before starting the StatefulSet.
 		currentState := &corev1.Secret{}
-		if !freshSourcesUnchanged(ctx, c, g, tn, hosts, egresses) ||
+		if !freshSourcesUnchanged(ctx, c, g, tn, hosts) ||
 			c.Get(ctx, client.ObjectKeyFromObject(state), currentState) != nil || currentState.UID != stateUID ||
 			currentState.DeletionTimestamp != nil || len(currentState.Data) != 0 || len(currentState.OwnerReferences) != 0 ||
 			currentState.Immutable != nil && *currentState.Immutable {
@@ -247,7 +247,7 @@ func ReconcileFresh(ctx context.Context, c client.Client, namespace string, g *t
 		}
 		receipt.Objects = append(receipt.Objects, objectReceipt(obj))
 	}
-	if !freshSourcesUnchanged(ctx, c, g, tn, hosts, egresses) {
+	if !freshSourcesUnchanged(ctx, c, g, tn, hosts) {
 		return bad()
 	}
 	data, err := json.Marshal(receipt)
@@ -476,22 +476,16 @@ func freshNames(g *tnv1.TailnetGateway) []string {
 	return names
 }
 
-func freshSourcesUnchanged(ctx context.Context, c client.Reader, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, hosts *corev1.ConfigMap, egresses *tnv1.TailnetEgressList) bool {
+// freshSourcesUnchanged guards the identity of the mint's sources, not their
+// content: the Gateway/Tailnet snapshots and the hosts ConfigMap's UID and
+// liveness. Hosts content and TailnetEgress revisions may change mid-mint —
+// after completion UpdateDNSRevision re-renders the zone from the live source
+// and PlanSpecRoutes re-plans routes from the live CRs, so freezing them here
+// only turned every agent registration during the bootstrap into FreshBlocked.
+func freshSourcesUnchanged(ctx context.Context, c client.Reader, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, hosts *corev1.ConfigMap) bool {
 	live := &corev1.ConfigMap{}
-	current := &tnv1.TailnetEgressList{}
-	if !mintSnapshotsUnchanged(ctx, c, g, tn) || c.Get(ctx, client.ObjectKeyFromObject(hosts), live) != nil || live.UID != hosts.UID || live.ResourceVersion != hosts.ResourceVersion || live.DeletionTimestamp != nil || c.List(ctx, current, client.InNamespace(hosts.Namespace)) != nil {
-		return false
-	}
-	revisions := func(rows []tnv1.TailnetEgress) map[types.UID]string {
-		out := map[types.UID]string{}
-		for _, e := range rows {
-			if e.Spec.TailnetRef.Name == tn.Name {
-				out[e.UID] = e.ResourceVersion
-			}
-		}
-		return out
-	}
-	return reflect.DeepEqual(revisions(current.Items), revisions(egresses.Items))
+	return mintSnapshotsUnchanged(ctx, c, g, tn) && c.Get(ctx, client.ObjectKeyFromObject(hosts), live) == nil &&
+		live.UID == hosts.UID && live.DeletionTimestamp == nil
 }
 
 func writerObjectKind(obj client.Object) string {

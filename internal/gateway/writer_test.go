@@ -1,13 +1,17 @@
 package gateway
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
@@ -230,4 +234,79 @@ func TestFreshPayloadFingerprint(t *testing.T) {
 	if objectReceipt(other) == before {
 		t.Fatal("foreign ConfigMap drift not bound")
 	}
+}
+
+// Only the identity of the mint's sources is frozen: content churn on the hosts
+// file or TailnetEgress list (agents registering during the bootstrap) must not
+// block, a replaced/deleted hosts source or a changed Gateway/Tailnet must.
+func TestFreshSourcesUnchangedIgnoresContentRevisions(t *testing.T) {
+	ctx := context.Background()
+	build := func(t *testing.T) (client.Client, *tnv1.TailnetGateway, *tnv1.Tailnet, *corev1.ConfigMap) {
+		t.Helper()
+		in := freshFixture()
+		g, tn := in.Gateway, in.Tailnet
+		tn.UID = "tailnet-uid"
+		hosts := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "tailnet-hosts", Namespace: in.Namespace, UID: "hosts-uid"}, Data: map[string]string{"hosts": "203.0.113.1 a.tail.example"}}
+		scheme := runtime.NewScheme()
+		for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, tnv1.AddToScheme} {
+			if err := add(scheme); err != nil {
+				t.Fatal(err)
+			}
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(g, tn, hosts).Build()
+		for _, obj := range []client.Object{g, tn, hosts} { // snapshots exactly as the writer read them
+			if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !freshSourcesUnchanged(ctx, c, g, tn, hosts) {
+			t.Fatal("unchanged sources rejected")
+		}
+		return c, g, tn, hosts
+	}
+	t.Run("content churn passes", func(t *testing.T) {
+		c, g, tn, hosts := build(t)
+		live := hosts.DeepCopy()
+		live.Data["hosts"] += "\n203.0.113.2 b.tail.example"
+		if err := c.Update(ctx, live); err != nil || live.ResourceVersion == hosts.ResourceVersion {
+			t.Fatal("fixture did not bump the hosts revision")
+		}
+		if !freshSourcesUnchanged(ctx, c, g, tn, hosts) {
+			t.Fatal("hosts content change mid-mint blocks the bootstrap")
+		}
+		egress := &tnv1.TailnetEgress{ObjectMeta: metav1.ObjectMeta{Name: "late", Namespace: hosts.Namespace}, Spec: tnv1.TailnetEgressSpec{TailnetRef: tnv1.TailnetRef{Name: tn.Name}, Targets: []tnv1.Target{{Name: "db", Address: "203.0.113.9", Port: 5432}}}}
+		if err := c.Create(ctx, egress); err != nil {
+			t.Fatal(err)
+		}
+		if !freshSourcesUnchanged(ctx, c, g, tn, hosts) {
+			t.Fatal("egress change mid-mint blocks the bootstrap")
+		}
+	})
+	t.Run("replaced hosts source blocks", func(t *testing.T) {
+		c, g, tn, hosts := build(t)
+		if err := c.Delete(ctx, hosts.DeepCopy()); err != nil {
+			t.Fatal(err)
+		}
+		if freshSourcesUnchanged(ctx, c, g, tn, hosts) {
+			t.Fatal("deleted hosts source accepted")
+		}
+		replaced := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: hosts.Name, Namespace: hosts.Namespace, UID: "other-uid"}, Data: hosts.Data}
+		if err := c.Create(ctx, replaced); err != nil {
+			t.Fatal(err)
+		}
+		if freshSourcesUnchanged(ctx, c, g, tn, hosts) {
+			t.Fatal("replaced hosts source accepted")
+		}
+	})
+	t.Run("changed tailnet blocks", func(t *testing.T) {
+		c, g, tn, hosts := build(t)
+		live := tn.DeepCopy()
+		live.Spec.Server = "https://other.example"
+		if err := c.Update(ctx, live); err != nil {
+			t.Fatal(err)
+		}
+		if freshSourcesUnchanged(ctx, c, g, tn, hosts) {
+			t.Fatal("changed Tailnet accepted mid-mint")
+		}
+	})
 }
