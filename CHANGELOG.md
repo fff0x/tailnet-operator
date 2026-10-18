@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-19
+
 ### Changed
 
 - Gateway bootstrap no longer freezes the *content* of its sources: between the first Create and
@@ -33,6 +35,12 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   cross-referenced from `how-to/policy.md`.
 - Gateway reference and FreshBlocked runbook state the recovery path for a partial bootstrap
   (`deletionPolicy: Delete`, delete, recreate).
+
+### Removed
+
+- The `docs/{INSTALL,USAGE,SECURITY,COMPATIBILITY}.md` redirect stubs, as announced in 0.17.0 and
+  0.18.0; the Diátaxis pages under `docs/how-to`, `docs/reference` and `docs/explanation` are the
+  only locations.
 
 ## [0.18.0] - 2026-10-17
 

@@ -35,5 +35,4 @@ namespaces, `10.0.0.0/8` the site network. Commands assume `kubectl` against the
 and, where Headscale is in-cluster, `kubectl -n tailnet-system exec deploy/headscale -- headscale …`.
 
 The documentation is licensed under [CC BY 4.0](LICENSE); the operator under
-[Apache-2.0](../LICENSE). Former page names (`INSTALL.md`, `USAGE.md`, `SECURITY.md`,
-`COMPATIBILITY.md`) remain as redirect stubs for one release.
+[Apache-2.0](../LICENSE).
