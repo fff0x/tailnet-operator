@@ -12,6 +12,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
@@ -40,7 +41,8 @@ type TeardownProgress struct {
 }
 
 // TeardownFresh deletes, fail-closed and in a fixed order, only what this gateway
-// provably created: receipt children by recorded UID, provenance objects by the
+// provably created: receipt children by recorded UID, provenance objects — and,
+// without a completion receipt, the partial bootstrap's children — by the
 // operator's own gateway-uid label, the Headscale node bound to the state Secret
 // and the minted bootstrap key. Every Kubernetes delete carries a UID precondition.
 // It is idempotent: each call re-reads the inventory and resumes.
@@ -64,6 +66,18 @@ func TeardownFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tail
 		}
 		if err := teardownDelete(ctx, c, ns, ref); err != nil {
 			return TeardownProgress{Step: "statefulset"}, err
+		}
+	}
+	if len(receipt.Objects) == 0 {
+		// Partial bootstrap: the StatefulSet, if it got as far, carries only the label.
+		sts, owned, err := teardownOwned(ctx, c, ns, g.Name, g, &appsv1.StatefulSet{})
+		if err != nil {
+			return TeardownProgress{Step: "statefulset"}, err
+		}
+		if owned {
+			if err := teardownDeleteObject(ctx, c, sts); err != nil {
+				return TeardownProgress{Step: "statefulset"}, err
+			}
 		}
 	}
 	pods := &corev1.PodList{}
@@ -114,6 +128,13 @@ func TeardownFresh(ctx context.Context, c client.Client, ns string, g *tnv1.Tail
 		}
 		if err := teardownDelete(ctx, c, ns, ref); err != nil {
 			return TeardownProgress{Step: strings.ToLower(ref.Kind)}, err
+		}
+	}
+	// 3b. No receipt means a bootstrap that stopped between the first Create and
+	// the completion record: the children it wrote are known only by the label.
+	if len(receipt.Objects) == 0 {
+		if err := teardownSweepLabelled(ctx, c, ns, g); err != nil {
+			return TeardownProgress{Step: "partial-children"}, err
 		}
 	}
 
@@ -184,6 +205,36 @@ func teardownOwned(ctx context.Context, c client.Client, ns, name string, g *tnv
 		return obj, false, ErrTeardownBlocked
 	}
 	return obj, obj.GetLabels()[gatewayUIDLabel] == string(g.UID), nil
+}
+
+// teardownSweepLabelled deletes the plan-kind children that carry this gateway's
+// own UID label — the only attribution a bootstrap without a completion receipt
+// leaves behind. Unlabelled objects, even under our names, are foreign and stay.
+// Provenance Secrets and the receipt ConfigMaps are handled by name in step 4.
+func teardownSweepLabelled(ctx context.Context, c client.Client, ns string, g *tnv1.TailnetGateway) error {
+	skip := map[string]bool{g.Name + "-auth-receipt": true, g.Name + "-fresh": true, g.Name + "-fresh-next": true}
+	for _, list := range []client.ObjectList{&corev1.ServiceAccountList{}, &rbacv1.RoleList{}, &rbacv1.RoleBindingList{}, &corev1.ServiceList{}, &policyv1.PodDisruptionBudgetList{}, &corev1.ConfigMapList{}} {
+		if c.List(ctx, list, client.InNamespace(ns), client.MatchingLabels{gatewayUIDLabel: string(g.UID)}) != nil {
+			return ErrTeardownBlocked
+		}
+		items, err := apimeta.ExtractList(list)
+		if err != nil {
+			return ErrTeardownBlocked
+		}
+		for _, item := range items {
+			obj, ok := item.(client.Object)
+			if !ok {
+				return ErrTeardownBlocked
+			}
+			if _, isCM := obj.(*corev1.ConfigMap); isCM && skip[obj.GetName()] {
+				continue
+			}
+			if err := teardownDeleteObject(ctx, c, obj); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func teardownDelete(ctx context.Context, c client.Client, ns string, ref freshObjectReceipt) error {

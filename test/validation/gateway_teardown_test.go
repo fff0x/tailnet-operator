@@ -209,23 +209,34 @@ func gatewayTeardownCases(t *testing.T, newFixture func(*testing.T, bool) *gatew
 		f.assertHeadscale([]string{node.ID}, []string{"9"})
 	})
 
-	t.Run("partial creation deletes only labelled provenance", func(t *testing.T) {
+	t.Run("partial creation deletes only labelled objects", func(t *testing.T) {
 		f := newFixture(t, false)
+		bystander := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "bystander", Namespace: f.ns}}
+		gatewayWriterMust(t, f.c.Create(f.ctx, bystander), "create unlabelled bystander")
 		f.writes.failName = f.g.Name + "-coredns"
 		f.reconcile("FreshBlocked")
 		f.absent(f.g.Name+"-fresh", &corev1.ConfigMap{})
+		f.get(f.g.Name, &corev1.ServiceAccount{}) // the fault left children behind
 		f.setDeletionPolicy(tnv1.GatewayDeletionPolicyDelete)
 		f.reconcile("FreshBlocked")
 		gatewayWriterMust(t, f.c.Delete(f.ctx, f.g), "delete gateway")
 		if !f.teardownReconcile() {
 			t.Fatal("partial set without a receipt must still release")
 		}
-		// Without a completion receipt there is no child inventory: the children
-		// created before the fault stay, labelled provenance goes, the key expires.
+		// Without a completion receipt there is no child inventory: everything
+		// carrying the gateway's own label goes, the key expires, foreign objects stay.
 		f.absent(string(f.g.Spec.StateSecretRef.Name), &corev1.Secret{})
 		f.absent(f.g.Name+"-auth", &corev1.Secret{})
 		f.absent(f.g.Name+"-auth-receipt", &corev1.ConfigMap{})
-		f.get(f.g.Name, &corev1.ServiceAccount{})
+		f.absent(f.g.Name, &corev1.ServiceAccount{})
+		f.absent(f.g.Name, &rbacv1.Role{})
+		f.absent(f.g.Name, &rbacv1.RoleBinding{})
+		f.absent(f.g.Name, &corev1.Service{})
+		kept := &corev1.ServiceAccount{}
+		f.get(bystander.Name, kept)
+		if kept.UID != bystander.UID {
+			t.Fatal("teardown touched an unlabelled ServiceAccount")
+		}
 		f.assertHeadscale(nil, []string{"9"})
 	})
 
