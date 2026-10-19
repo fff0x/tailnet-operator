@@ -4,6 +4,9 @@ weight: 10
 description: "The five kinds, why the tag is the authorization, and what each reconciler turns a CR into."
 ---
 
+Diagrams of the resulting shape, one per scenario, and the full list of objects each CR creates:
+[Architecture by scenario](architecture.md).
+
 ## Model
 
 - **`Tailnet`** (cluster-scoped) — one per Headscale control server: login URL, in-cluster API
