@@ -29,6 +29,7 @@ are published in the release notes and as Radicle issues labelled `security`.
 | Operator pod | Credentials, workloads, status, Headscale policy | Needs broad namespace access by design; a compromised operator is a cluster and tailnet incident. |
 | Tailnet peer | Access per Headscale policy and per-CR identity | The operator authenticates nodes, not application users. |
 | HTTP backend | In `mode: http` the agent terminates frontend TLS; `backend.tls` enables verified HTTPS upstream | Without `backend.tls`, the cluster hop is plain HTTP. With it, frontend and backend TLS remain separate sessions. |
+| Operator → Headscale API | Bearer working key on every call; an `https://` `apiUrl` with the issuer CA in `headscale.caConfigMapRef` verifies the server | Over `http://` the key, minted pre-auth keys and the policy cross the cluster network in clear; only CNI pod-to-pod encryption covers that hop |
 | Registry | Release images and charts are signed with the CI's fixed Cosign key | A valid signature says who built it, not that it is safe to run; verify the immutable digest you deploy. |
 
 Backend HTTPS uses only the selected namespace-local CA bundle, with chain, hostname and validity verification.

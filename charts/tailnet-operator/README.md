@@ -122,8 +122,10 @@ See [compatibility](../../docs/reference/compatibility.md#http-extension-compati
 | agentImage.digest | string | `""` | Agent digest. An entirely empty agentImage inherits the complete operator image, including its digest. |
 | agentImage.repository | string | `""` | Agent repository; empty inherits image.repository. |
 | agentImage.tag | string | `""` | Agent tag. With an explicit repository, empty uses Chart.appVersion; otherwise inherits image.tag. |
-| env.extra | list | `[]` | Additional EnvVar entries. POD_NAMESPACE, OPERATOR_IMAGE, AGENT_IMAGE_PULL_SECRETS, AGENT_RESOURCES and SSL_CERT_FILE are reserved. |
+| env.extra | list | `[]` | Additional EnvVar entries. POD_NAMESPACE, OPERATOR_IMAGE, AGENT_IMAGE_PULL_SECRETS, AGENT_RESOURCES, SSL_CERT_FILE and SSL_CERT_DIR are reserved. |
 | fullnameOverride | string | `""` | Override the resource name with a letter-first DNS label (at most 53 characters). Install only one operator per cluster. |
+| headscale.caConfigMapRef.key | string | `"ca.crt"` | Key of the PEM bundle in that ConfigMap. |
+| headscale.caConfigMapRef.name | string | `""` | ConfigMap in the operator namespace holding a PEM bundle the operator trusts for an https `apiUrl` in addition to the public roots (the issuer CA behind Headscale's own certificate). Empty: public roots only. |
 | image.digest | string | `""` | Optional sha256 digest; takes precedence over the tag. |
 | image.pullPolicy | string | `"IfNotPresent"` | Operator pull policy. |
 | image.repository | string | `"docker.io/ff0x/tailnet-operator"` | Operator image repository. Verify mirror availability before installation. |

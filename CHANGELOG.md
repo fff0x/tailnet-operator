@@ -4,6 +4,18 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- Chart value `headscale.caConfigMapRef` mounts a PEM bundle from a ConfigMap and sets
+  `SSL_CERT_DIR`, so an `https://` `apiUrl` signed by a site CA verifies next to the public
+  roots. No Go change: Go merges `SSL_CERT_DIR` with `SSL_CERT_FILE`. Unset, the Deployment is
+  byte-identical to before. [Prepare Headscale § API over TLS](docs/how-to/install-headscale.md#api-over-tls)
+  explains the Headscale side; the security model names the clear-text hop that `http://` leaves.
+- Docs: [Architecture by scenario](docs/explanation/architecture.md) — a diagram per scenario
+  (egress, ingress, HTTPS ingress, gateway, policy and key flow) and a table of every object a CR
+  creates; [Reach the Kubernetes API over the tailnet](docs/how-to/kubernetes-api.md); the
+  documentation index opens with what the operator lets you do.
+
 ## [0.19.0] - 2026-10-19
 
 ### Changed

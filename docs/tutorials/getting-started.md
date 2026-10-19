@@ -110,7 +110,9 @@ Read the three reason columns:
   (`prod-1.tailnet.example.internal`) is yours to configure later.
 
 If `APIKEY` is not `True`, `kubectl describe tailnet corp` names the cause (`ApiReachable`,
-`ApiKeyValid`); fix `apiUrl` or the Secret and the Tailnet retries on its own.
+`ApiKeyValid`); fix `apiUrl` or the Secret and the Tailnet retries on its own. The `http://`
+`apiUrl` is fine for this tutorial; for production serve the API over TLS
+([API over TLS](../how-to/install-headscale.md#api-over-tls)).
 
 ## 5. First egress (5 min)
 

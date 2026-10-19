@@ -15,7 +15,7 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
 | | |
 | --- | --- |
 | **Tutorial** — Headscale to first egress and ingress in about thirty minutes | [docs/tutorials](docs/tutorials/getting-started.md) |
-| **How-to guides** — install, egress, ingress, DNS, policy, site, gateway, upgrade, troubleshoot | [docs/how-to](docs/how-to/README.md) |
+| **How-to guides** — install, egress, ingress, Kubernetes API, DNS, policy, site, gateway, upgrade, troubleshoot | [docs/how-to](docs/how-to/README.md) |
 | **Reference** — CRD fields, chart values, RBAC, metrics, alerts, conditions and reasons | [docs/reference](docs/reference/README.md) |
 | **Explanation & operations** — model, security model; keys, state, validation, runbooks | [docs/explanation](docs/explanation/README.md) · [docs/operations](docs/operations/README.md) |
 | **All docs by role** — evaluator, installer, SRE, tenant, policy admin, auditor, contributor | [docs/README.md](docs/README.md) |
@@ -112,7 +112,9 @@ kubectl get tailnet,tailnetegress,tailnetingress -A
 
 A pod in `billing-dev` dials `db-1.tailnet-system.svc:1521` or `https://api.corp.example`; a tailnet
 peer in `group:shop` dials `shop-shop-dev.prod-1.tailnet.example.internal:5432`. The policy behind
-it (tagOwners, `/32` approvals, grants) was generated from the two CRs.
+it (tagOwners, `/32` approvals, grants) was generated from the two CRs. In production, serve the
+Headscale API over TLS and give the chart the issuer CA
+([API over TLS](docs/how-to/install-headscale.md#api-over-tls)).
 
 ## CRD reference
 

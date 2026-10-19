@@ -49,6 +49,11 @@ spec:
             # The scratch bundle carries the CA roots here, for HTTPS Headscale APIs.
             - name: SSL_CERT_FILE
               value: /ca-certificates.crt
+            {{- if .Values.headscale.caConfigMapRef.name }}
+            # Go merges SSL_CERT_DIR with SSL_CERT_FILE: the site CA joins the public roots.
+            - name: SSL_CERT_DIR
+              value: /etc/tailnet-operator/ca
+            {{- end }}
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -83,3 +88,22 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.headscale.caConfigMapRef }}
+          {{- if .name }}
+          volumeMounts:
+            - name: headscale-ca
+              mountPath: /etc/tailnet-operator/ca
+              readOnly: true
+          {{- end }}
+          {{- end }}
+      {{- with .Values.headscale.caConfigMapRef }}
+      {{- if .name }}
+      volumes:
+        - name: headscale-ca
+          configMap:
+            name: {{ .name | quote }}
+            items:
+              - key: {{ .key | quote }}
+                path: ca.crt
+      {{- end }}
+      {{- end }}

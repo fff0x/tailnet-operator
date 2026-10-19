@@ -549,6 +549,30 @@ env:
 	equal(t, "extra env valueFrom", envVar(t, c, "EXTRA_SECRET").ValueFrom, &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "extra-config"}, Key: "value"}})
 }
 
+// TestHeadscaleCATrust: headscale.caConfigMapRef mounts a PEM bundle and points SSL_CERT_DIR at it,
+// which Go merges with the SSL_CERT_FILE roots. Unset, the Deployment carries no volume at all.
+func TestHeadscaleCATrust(t *testing.T) {
+	dep, c := operator(t, render(t, ""))
+	equal(t, "default volumes", len(dep.Spec.Template.Spec.Volumes), 0)
+	equal(t, "default mounts", len(c.VolumeMounts), 0)
+	for _, env := range c.Env {
+		if env.Name == "SSL_CERT_DIR" {
+			t.Errorf("SSL_CERT_DIR rendered without a CA ConfigMap")
+		}
+	}
+
+	dep, c = operator(t, render(t, "headscale: {caConfigMapRef: {name: site-ca, key: bundle.pem}}\n"))
+	equal(t, "public roots stay", envVar(t, c, "SSL_CERT_FILE").Value, "/ca-certificates.crt")
+	equal(t, "cert dir", envVar(t, c, "SSL_CERT_DIR").Value, "/etc/tailnet-operator/ca")
+	equal(t, "mounts", c.VolumeMounts, []corev1.VolumeMount{{Name: "headscale-ca", MountPath: "/etc/tailnet-operator/ca", ReadOnly: true}})
+	equal(t, "volumes", dep.Spec.Template.Spec.Volumes, []corev1.Volume{{Name: "headscale-ca", VolumeSource: corev1.VolumeSource{
+		ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "site-ca"},
+			Items:                []corev1.KeyToPath{{Key: "bundle.pem", Path: "ca.crt"}},
+		},
+	}}})
+}
+
 func TestAgentResourceValues(t *testing.T) {
 	for _, tc := range []struct{ name, values, want string }{
 		{"override", "agent: {resources: {requests: {cpu: 25m, memory: 64Mi}, limits: {memory: 256Mi}}}", `{"limits":{"memory":"256Mi"},"requests":{"cpu":"25m","memory":"64Mi"}}`},

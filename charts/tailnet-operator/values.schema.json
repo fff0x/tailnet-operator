@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["image", "agentImage", "agent", "replicas", "leaderElection", "env", "monitoring", "networkPolicy", "podSecurityContext", "securityContext", "resources", "namespace", "fullnameOverride", "imagePullSecrets"],
+  "required": ["image", "agentImage", "agent", "replicas", "leaderElection", "env", "headscale", "monitoring", "networkPolicy", "podSecurityContext", "securityContext", "resources", "namespace", "fullnameOverride", "imagePullSecrets"],
   "properties": {
     "fullnameOverride": {"type": "string", "maxLength": 53, "pattern": "^$|^[a-z]([-a-z0-9]*[a-z0-9])?$"},
     "namespace": {"type": "string", "maxLength": 63, "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
@@ -39,6 +39,12 @@
     "resources": {"type": "object"},
     "podSecurityContext": {"type": "object"},
     "securityContext": {"type": "object"},
+    "headscale": {"type": "object", "additionalProperties": false, "required": ["caConfigMapRef"], "properties": {
+      "caConfigMapRef": {"type": "object", "additionalProperties": false, "required": ["name", "key"], "properties": {
+        "name": {"type": "string", "maxLength": 253, "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"},
+        "key": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[-._a-zA-Z0-9]+$"}
+      }}
+    }},
     "env": {"type": "object", "additionalProperties": false, "required": ["extra"], "properties": {"extra": {"type": "array", "items": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "minLength": 1}}}}}},
     "monitoring": {"type": "object", "additionalProperties": false, "required": ["serviceMonitor", "podMonitor", "rules", "dashboard"], "properties": {
       "serviceMonitor": {"type": "object", "additionalProperties": false, "required": ["enabled", "labels", "interval"], "properties": {"enabled": {"type": "boolean"}, "labels": {"$ref": "#/definitions/labels"}, "interval": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$"}}},

@@ -68,6 +68,30 @@ Check the live pod's selected SSL mode, database hostname and CA mount without d
 Absence of TLS errors in logs is not a negative validation test; retained logs might omit startup.
 Test rejection of a wrong CA or hostname only in an isolated fixture, not by breaking a production database connection.
 
+## API over TLS
+
+Every operator call to `apiUrl` carries the working API key, and the responses carry freshly minted
+pre-auth keys and the policy. Over `http://` that crosses the cluster network in clear; a CNI with
+pod-to-pod encryption (Cilium WireGuard, for example) protects the wire, nothing else does. Prefer
+HTTPS from Headscale itself — a public URL that terminates TLS at an ingress proxy only moves the
+clear-text hop to proxy → Headscale.
+
+1. Issue Headscale a certificate whose SANs include the in-cluster Service name, e.g. with
+   cert-manager and an internal issuer: `dnsNames: [headscale.tailnet-system.svc,
+   headscale.tailnet-system.svc.cluster.local]`.
+2. Point Headscale at it: `tls_cert_path` / `tls_key_path` (or `HEADSCALE_TLS_CERT_PATH` /
+   `HEADSCALE_TLS_KEY_PATH`). Headscale then serves HTTPS on `listen_addr` for *all* traffic, so a
+   proxy in front of the public `server` URL must speak TLS to the backend (Gateway API
+   `BackendTLSPolicy`) or pass TLS through.
+3. Publish the issuer CA as a ConfigMap in the operator namespace (`ca.crt`, PEM) and name it in the
+   chart: `headscale.caConfigMapRef: {name: local-ca-bundle, key: ca.crt}`. The operator mounts it
+   read-only and sets `SSL_CERT_DIR`; Go merges it with the public roots, so a public `server` URL
+   keeps working.
+4. Set `apiUrl: https://headscale.tailnet-system.svc:8443` (the port is your `listen_addr`) on the
+   Tailnet and watch `ApiReachable` and `ApiKeyValid` return to `True`.
+
+A wrong SAN or CA shows as `ApiReachable=False` with a `tls:` error in the condition message.
+
 ## Preflight
 
 The Tailnet controller probes the server's capabilities on every reconcile (at least every five

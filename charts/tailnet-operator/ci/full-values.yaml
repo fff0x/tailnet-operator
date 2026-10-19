@@ -26,6 +26,10 @@ env:
   extra:
     - name: TS_NO_LOGS_NO_SUPPORT
       value: "1"
+headscale:
+  caConfigMapRef:
+    name: local-ca-bundle
+    key: ca.crt
 monitoring:
   serviceMonitor:
     enabled: true

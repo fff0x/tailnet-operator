@@ -58,8 +58,14 @@ securityContext:
   capabilities:
     drop: [ALL]
 env:
-  # -- Additional EnvVar entries. POD_NAMESPACE, OPERATOR_IMAGE, AGENT_IMAGE_PULL_SECRETS, AGENT_RESOURCES and SSL_CERT_FILE are reserved.
+  # -- Additional EnvVar entries. POD_NAMESPACE, OPERATOR_IMAGE, AGENT_IMAGE_PULL_SECRETS, AGENT_RESOURCES, SSL_CERT_FILE and SSL_CERT_DIR are reserved.
   extra: []
+headscale:
+  caConfigMapRef:
+    # -- ConfigMap in the operator namespace holding a PEM bundle the operator trusts for an https `apiUrl` in addition to the public roots (the issuer CA behind Headscale's own certificate). Empty: public roots only.
+    name: ""
+    # -- Key of the PEM bundle in that ConfigMap.
+    key: ca.crt
 monitoring:
   serviceMonitor:
     # -- Requires Prometheus Operator CRDs. Disabled for a fresh Kubernetes installation.

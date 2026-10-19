@@ -23,7 +23,7 @@ Kubernetes **1.31 or later** is required. The API server validates these rules b
 | Expose `timeouts` | HTTP only; optional `request` and `backendRequest` durations; `0s` disables the named timer |
 | TLS issuer reference | Name is a DNS subdomain of at most 253 characters; kind defaults to `Issuer`, also permits `ClusterIssuer`; group defaults to and must equal `cert-manager.io` |
 | Target, listener and backend ports | 1–65535 |
-| Tailnet `server` | HTTPS scheme and a non-empty remainder; `apiUrl` may still use an internal HTTP endpoint |
+| Tailnet `server` | HTTPS scheme and a non-empty remainder; `apiUrl` accepts `http://` for an in-cluster endpoint — prefer `https://` with the chart's `headscale.caConfigMapRef` ([API over TLS](../how-to/install-headscale.md#api-over-tls)) |
 | Tailnet `apiKeyLifetime` | Valid duration ≥1h, at most 32 characters; omitted defaults to 720h |
 | Tailnet `policy.mode` | `DryRun` or `Apply` |
 | Tailnet `dns.ingressNameTemplate` | Empty disables ingress DNS names; otherwise contains `{name}`, uses only `{name}`/`{namespace}`, and ends in a literal lowercase zone with at least two labels; at most 253 characters |
