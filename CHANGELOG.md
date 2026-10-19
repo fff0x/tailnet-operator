@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-19
+
 ### Added
 
 - `TailnetEgress`/`TailnetIngress` report `Registered=False/WorkloadBlocked` with the admission
