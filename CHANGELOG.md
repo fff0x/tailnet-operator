@@ -4,6 +4,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- Docs: [Connect a second cluster](docs/how-to/second-cluster.md) — hub and spokes on one Headscale
+  in one walk-through (per-cluster names, exported fragments, grants between clusters, one DNS zone
+  per cluster, repository layout); [Limitations](docs/reference/limitations.md) — the functional
+  boundaries in one table per area, each checked against the code.
+
 ## [0.20.0] - 2026-10-19
 
 ### Added

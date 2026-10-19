@@ -235,7 +235,8 @@ like on the hub. Peers that still cannot connect are missing the grant, not the 
 
 Instead of hand-copying each tag and grant, run the spoke operator in `policy.mode: Export`: it
 renders exactly these entries into a fragment ConfigMap the hub merges — see
-[Second cluster](policy.md#second-cluster-export-on-the-spoke-merge-on-the-hub).
+[Second cluster](policy.md#second-cluster-export-on-the-spoke-merge-on-the-hub) and the full
+walk-through [Connect a second cluster](second-cluster.md).
 
 ## HTTPS through a shared gateway
 

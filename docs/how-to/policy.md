@@ -250,4 +250,5 @@ silently dropping them, so delete the fragment from `fragmentConfigMaps` before 
 ConfigMap.
 
 Until the hub applies the merged policy, the spoke's own CRs report `TagKnown=False/Unknown` — that
-gap is the review window for the foreign grants.
+gap is the review window for the foreign grants. Names, DNS zones, cross-cluster grants and the
+repository layout for a spoke are in [Connect a second cluster](second-cluster.md).

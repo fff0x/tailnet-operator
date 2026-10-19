@@ -1,0 +1,73 @@
+---
+title: "Limitations"
+weight: 45
+description: "What the operator deliberately does not do, why, and what to use instead — data path, policy, HTTP mode, gateway, IPv6, control plane."
+---
+
+One page for the boundaries that are otherwise scattered across the how-to guides. Every row is
+checked against the code of the pinned release; if a row stops being true the page is wrong, not the
+code. Versions and the preflight matrix are in [Compatibility](compatibility.md).
+
+## Data path (agents)
+
+| Limit | Why | Workaround or status |
+| --- | --- | --- |
+| Agents forward **TCP only**. No UDP, no ICMP, no ping through an egress or ingress. | The agent is a userspace `tsnet` node: it `Listen`s and `Dial`s TCP streams and copies bytes. It has no `NET_ADMIN`, no `/dev/net/tun`, no kernel routes. | UDP/ICMP to a site goes through the [gateway](../how-to/gateway.md) (a real subnet router). Diagnose reachability with the agent's `/targets` probe and the `TargetsReachable` condition, not with ping. |
+| Agents do not advertise routes and do not accept routes. | An egress agent dials one `host:port` per target; it is not a router and must never pull the site's prefixes into a tenant namespace. | Site prefixes are advertised by the `TailnetGateway` (or any tagged router) and approved per `/32` from the egress targets. |
+| One agent Pod per CR, `Recreate` on change. A resource or image change restarts it; its ephemeral node re-registers. | Two Pods would briefly share one hostname and tag; the node identity is per Pod. | Expect a short interruption per change ([Agent resources](../how-to/install-operator.md#agent-resources)). No HA pair per CR. |
+| An egress target is `address:port` (IP or MagicDNS name), one Service per CR, TCP ports only. | The Service's `ClusterIP:listenPort` maps 1:1 onto a tunnel. | Several hosts behind one name: several targets or several CRs. HTTPS with a hostname check: an alias, so SNI/Host stay intact ([Egress § aliases](../how-to/egress.md)). |
+| Egress aliases resolve to a **ClusterIP** and are therefore cluster-local. | The hosts file maps the alias to the Service of that cluster. | Each cluster forwards its alias zone to its own resolver ([Second cluster § DNS](../how-to/second-cluster.md#4-dns-one-zone-per-cluster)). |
+
+## HTTP ingress (`mode: http`)
+
+| Limit | Why | Workaround or status |
+| --- | --- | --- |
+| Routing by **TLS SNI and `Host` only**. No path, header or method rules; no rewrites. | The agent terminates TLS for the names it holds a certificate for and hands each request to one `httputil.ReverseProxy` per virtual host. Authorization is the tailnet policy's job. | L7 rules belong to the backend or to an in-cluster gateway behind the ingress ([Ingress: HTTPS § passthrough](../how-to/ingress-https.md)). |
+| A request for a name without a virtual host gets `308` (one served host) or `404` (several). | Unknown SNI is rejected at the handshake; an unknown `Host` on a known certificate cannot be routed. | Add the name as an alias (extra SAN and virtual host). |
+| Clients may speak HTTP/1.1 or HTTP/2 (and upgrade to WebSocket); the **backend is always spoken to over HTTP/1.1**. No end-to-end gRPC, no HTTP/3. | `x/net/http2` is configured on the listener only; the backend transport uses its own dialer without HTTP/2 negotiation. QUIC is UDP. | gRPC: publish the port as a TCP ingress (`mode` L4) and let the client terminate TLS; HTTP/3: terminate elsewhere. |
+| Backend TLS verification needs `backendServerName` **and** a CA bundle. | Without a name to verify there is nothing to pin; `InsecureSkipVerify` is not offered. | Mount the CA ConfigMap ([Ingress: HTTPS § backend TLS](../how-to/ingress-https.md)). |
+
+## Policy
+
+| Limit | Why | Workaround or status |
+| --- | --- | --- |
+| **Exactly one** `Tailnet` per Headscale may run `policy.mode: Apply`. | The render is base + generated; two writers would overwrite each other. | Spokes use `Export` and the hub merges their fragments ([Second cluster](../how-to/second-cluster.md)). |
+| The operator never edits `groups`, `hosts`, `acls`, `ssh` or `tests`; a fragment may only add `tagOwners`, `autoApprovers.routes` and `grants`. | Those blocks are the admin's authorization model; the operator only derives what its CRs imply. | Edit the base ConfigMap in Git; the operator re-renders. |
+| Requires Headscale **policy mode `database`** for `Apply`; in `file` mode it renders but never writes. | `PUT /api/v1/policy` is only accepted in database mode. | Migrate once ([Policy § migrate from file mode](../how-to/policy.md)); read-only `DryRun` works in either mode. |
+| `allowFrom` is checked against `ingressSourceAllowlist` with path-style globs; an empty allowlist denies every source. | Tenants must not grant themselves `autogroup:member` or `*`. | Set the allowlist on the `Tailnet` (`["group:*"]`, specific tags). |
+| Headscale `tests` cannot assert operator-generated grants. | Tests run on the base alone (`headscale policy check`, rollback import) and `src` must resolve to existing nodes. | Test invariants of the base only, with a long-lived tagged node as `src`. |
+
+## Gateway (`TailnetGateway`)
+
+| Limit | Why | Workaround or status |
+| --- | --- | --- |
+| **Fresh IPv4 gateways only.** An IPv6 LAN route or IPv6 LB/DNS address blocks the workload update (`WorkloadCurrent=False/WorkloadUpdateBlocked`). | The fresh writer verifies an IPv4-only plan before it touches the StatefulSet. | Keep IPv6 prefixes out of `routes.lan` for now. |
+| No adoption of an existing subnet router; `spec.suspend` defaults to `true`. | The operator creates the node, state Secret and key itself; a foreign node's state cannot be verified. | Run the operator gateway next to the old router, then retire the old one ([Gateway § replacing a hand-built gateway](../how-to/gateway.md)). |
+| One StatefulSet, **one replica** — no HA pair, no failover between gateways. | A subnet router is a single node identity in Headscale; two advertisers of the same prefix are a Headscale/HA question, not an operator one. | Two gateways with disjoint prefixes, or accept the single router. |
+| LoadBalancer pool, iBGP peering, kernel forwarding and `/dev/net/tun` are **site prerequisites**. | The operator renders the Service and the BGP intent; the platform must honour them. | [Gateway prerequisites](../how-to/gateway.md#prerequisites). |
+| Headscale split-DNS cannot be set or verified by the operator (`SplitDNS=Unknown/CannotVerify`). | Headscale has no DNS API. | Add `dns.nameservers.split` by hand; the `Tailnet` prints the zone. |
+
+## IPv6
+
+| Limit | Why | Workaround or status |
+| --- | --- | --- |
+| Egress targets may be IPv6 addresses; the operator generates a `/128` approval and dials them. | tsnet carries both families. | — |
+| The rendered **hosts file is IPv4-only**: an ingress node's tailnet IPv6 address is skipped. | Clients prefer AAAA, and tsnet/netstack agents did not accept tailnet IPv6 in the clusters verified so far; a dead AAAA would cost a connect timeout on every lookup. | Planned as a `Tailnet.spec.dns` switch once IPv6 is verified. |
+| The gateway is IPv4-only (above). | Fresh writer scope. | — |
+
+## Not provided
+
+| Feature | Status |
+| --- | --- |
+| Exit nodes, app connectors, Tailscale Serve/Funnel, session recording | Not modelled. An exit-node tag can live in the base policy and on a node you run yourself. |
+| HA proxy groups / coalescing several CRs into one node | Not modelled; one CR = one node. |
+| Managing Headscale itself (users, pre-auth for humans, DNS config, OIDC) | Out of scope; the operator consumes the REST API for nodes, keys and policy only. |
+| Kubernetes `Ingress`/Gateway API objects as input | Not read; the input is the five `tsunaro.io` kinds. |
+
+## Control plane
+
+| Limit | Why | Workaround or status |
+| --- | --- | --- |
+| Headscale **0.29.x** only; 0.28.x is detected and reported `HeadscaleCompatible=False`. | Operator-owned policy needs `POST /api/v1/policy/check`, which 0.28 lacks. | [Compatibility](compatibility.md); L4 egress/ingress with a hand-maintained policy still works on 0.28. |
+| More than one operator replica needs `leaderElection.enabled`. | Two active managers would reconcile the same objects. | Chart value; a PDB with `minAvailable=1` is rendered for several replicas. |
+| The `Tailnet` is cluster-scoped and administrative. | Its writer controls policy inputs and credentials. | Do not delegate `Tailnet` writes to tenants ([Security model](../explanation/security-model.md)). |

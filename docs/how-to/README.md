@@ -19,5 +19,6 @@ operator is installed; if it is not, start with [Getting started](../tutorials/g
 | [Let the operator own the policy](policy.md) | Read what the operator renders, review in DryRun, switch to Apply, migrate from file mode |
 | [Declare a site network (TailnetSite)](site-network.md) | Give a LAN a name and a status; block overlapping routes |
 | [Run the gateway (subnet router + split-DNS)](gateway.md) | Prerequisites and order, complete example with LB pool, iBGP, split-DNS and site |
+| [Connect a second cluster](second-cluster.md) | Hub and spokes on one Headscale: per-cluster names, exported policy fragments, grants between clusters, one DNS zone per cluster, what lives in which repository |
 | [Upgrade and roll back](upgrade-rollback.md) | Chart and CRD upgrade order, what to verify afterwards, how to roll back |
 | [Troubleshoot](troubleshooting.md) | Symptom → cause → fix table and the diagnosis cheat sheet |

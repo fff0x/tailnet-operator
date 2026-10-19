@@ -4,6 +4,9 @@ weight: 40
 description: "Supported Kubernetes, Headscale, cert-manager, CNI and Helm versions; per-version compatibility notes; preflight matrix; test coverage."
 ---
 
+Versions and verified platforms live here; the functional boundaries (TCP-only agents, SNI/Host
+routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitations.md).
+
 ## Supported platforms
 
 | Component | Supported | Notes |
