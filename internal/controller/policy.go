@@ -183,6 +183,10 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	} else if conflict {
 		l.Error(nil, "rendered ConfigMap exists and is not owned by this Tailnet; refusing to overwrite", "configmap", outName)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(&tn, corev1.EventTypeWarning, "ConfigMapNotOwned",
+				"rendered ConfigMap %s/%s is owned by another resource; refusing to overwrite", r.OperatorNamespace, outName)
+		}
 		return ctrl.Result{RequeueAfter: policyRequeue}, nil
 	}
 
@@ -361,6 +365,10 @@ func (r *TailnetPolicyReconciler) export(ctx context.Context, tn *tnv1.Tailnet) 
 		return ctrl.Result{}, err
 	} else if conflict {
 		log.FromContext(ctx).Error(nil, "fragment ConfigMap exists and is not owned by this Tailnet; refusing to overwrite", "configmap", outName)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(tn, corev1.EventTypeWarning, "ConfigMapNotOwned",
+				"fragment ConfigMap %s/%s is owned by another resource; refusing to overwrite", r.OperatorNamespace, outName)
+		}
 		return ctrl.Result{RequeueAfter: policyRequeue}, nil
 	}
 	msg := fmt.Sprintf("%d tags, %d grants, %d routes exported", sum.Tags, sum.Grants, sum.Routes)
@@ -387,7 +395,9 @@ func (r *TailnetPolicyReconciler) export(ctx context.Context, tn *tnv1.Tailnet) 
 func (r *TailnetPolicyReconciler) publishRender(ctx context.Context, tn *tnv1.Tailnet, outName, rendered string) (conflict bool, err error) {
 	var existing corev1.ConfigMap
 	err = r.Get(ctx, types.NamespacedName{Namespace: r.OperatorNamespace, Name: outName}, &existing)
-	if err == nil && !ownedBy(&existing, tn.UID) {
+	// An ownerRef-less render/fragment ConfigMap of ours (e.g. left over a Tailnet re-create) is
+	// adopted by the SSA apply below; a foreign or otherwise-controlled one is refused.
+	if err == nil && !ownedBy(&existing, tn.UID) && !adoptable(&existing, rolePolicyRender) {
 		return true, nil
 	}
 	if client.IgnoreNotFound(err) != nil {

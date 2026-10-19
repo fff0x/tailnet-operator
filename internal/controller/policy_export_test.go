@@ -196,6 +196,46 @@ func TestPolicyByConfigMap(t *testing.T) {
 	}
 }
 
+// TestPublishRenderAdoption: publishRender takes over an ownerRef-less render ConfigMap that still
+// carries our role label, and refuses one labelled for something else.
+func TestPublishRenderAdoption(t *testing.T) {
+	s := exportScheme(t)
+	tn := &tnv1.Tailnet{ObjectMeta: metav1.ObjectMeta{Name: "corp", UID: "corp-uid"}}
+	for _, tc := range []struct {
+		name         string
+		labels       map[string]string
+		wantConflict bool
+	}{
+		{"orphaned-ours", map[string]string{roleLabel: rolePolicyRender}, false},
+		{"foreign-label", map[string]string{roleLabel: "something-else"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "headscale-policy-rendered", Namespace: "operator", Labels: tc.labels},
+				Data: map[string]string{policyKey: "# stale"}}
+			c := fake.NewClientBuilder().WithScheme(s).WithObjects(tn, cm).Build()
+			r := TailnetPolicyReconciler{Client: c, Scheme: s, OperatorNamespace: "operator"}
+			conflict, err := r.publishRender(context.Background(), tn, "headscale-policy-rendered", "# new")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if conflict != tc.wantConflict {
+				t.Fatalf("conflict=%v want %v", conflict, tc.wantConflict)
+			}
+			var got corev1.ConfigMap
+			if err := c.Get(context.Background(), types.NamespacedName{Namespace: "operator", Name: "headscale-policy-rendered"}, &got); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantConflict {
+				if got.Data[policyKey] != "# stale" || ownedBy(&got, tn.UID) {
+					t.Fatal("foreign ConfigMap was adopted or overwritten")
+				}
+			} else if got.Data[policyKey] != "# new" || !ownedBy(&got, tn.UID) {
+				t.Fatalf("orphaned ConfigMap not adopted: data=%q owners=%v", got.Data[policyKey], got.OwnerReferences)
+			}
+		})
+	}
+}
+
 func TestPolicyOwnedExport(t *testing.T) {
 	tn := &tnv1.Tailnet{Spec: tnv1.TailnetSpec{Policy: tnv1.PolicySpec{Mode: "Export",
 		TagOwners: []string{"group:operator"}, RouteApprovers: []string{"tag:fabric"}}}}

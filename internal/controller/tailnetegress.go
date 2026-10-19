@@ -349,6 +349,16 @@ func ownedBy(obj metav1.Object, uid types.UID) bool {
 	return false
 }
 
+// adoptable reports whether cm is a fully-derived operator ConfigMap (the role label has marked our
+// hosts and rendered/fragment ConfigMaps since v0.1.0) that currently has no controller — e.g. a
+// hosts ConfigMap left ownerRef-less during a Tailnet re-create. Such a ConfigMap carries no state
+// worth keeping (every reconcile rewrites it in full), so the next reconcile may take it over.
+// A ConfigMap already controlled by someone (a stale ref is cleaned up by Kubernetes GC, which then
+// deletes it) or without the operator's role label is never adoptable.
+func adoptable(cm *corev1.ConfigMap, role string) bool {
+	return metav1.GetControllerOf(cm) == nil && cm.Labels[roleLabel] == role
+}
+
 // associateNode records this CR's online node and removes offline duplicates carrying the same tag
 // and hostname pattern — but only when an online node exists, so a brief outage deletes nothing.
 func (r *TailnetEgressReconciler) associateNode(ctx context.Context, eg *tnv1.TailnetEgress, hs *headscale.Client, nodes []headscale.Node, tag, hostname string) {

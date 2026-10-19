@@ -22,6 +22,14 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   `FragmentMissing` — both fail the render closed). New reasons `Export`, `FragmentMissing`,
   `FragmentInvalid`. [Policy § Second cluster](docs/how-to/policy.md#second-cluster-export-on-the-spoke-merge-on-the-hub).
 
+### Fixed
+
+- An ownerRef-less operator ConfigMap (hosts, rendered or fragment — e.g. left behind when a Tailnet
+  is re-created) is now re-adopted instead of refused forever: the guard recognises our own
+  `tsunaro.io/role` label on a ConfigMap with no controller and takes it back over on the next
+  reconcile. A ConfigMap controlled by another resource, or without that label, stays refused and now
+  surfaces as a `ConfigMapNotOwned` warning event instead of an operator log line only.
+
 ## [0.19.0] - 2026-10-19
 
 ### Changed

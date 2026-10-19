@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,6 +35,7 @@ const hostsKey = "hosts"
 type TailnetDNSReconciler struct {
 	client.Client
 	Scheme            *runtime.Scheme
+	Recorder          record.EventRecorder
 	OperatorNamespace string
 }
 
@@ -65,15 +67,22 @@ func (r *TailnetDNSReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	// Owner guard: a ConfigMap of that name not created by this Tailnet is somebody else's.
+	// Owner guard: a ConfigMap of that name not created by this Tailnet is somebody else's — unless
+	// it is one of ours left ownerRef-less (adoptable), which the SSA apply below takes back over.
 	var existing corev1.ConfigMap
 	err := r.Get(ctx, types.NamespacedName{Namespace: r.OperatorNamespace, Name: name}, &existing)
-	if err == nil && !ownedBy(&existing, tn.UID) {
-		l.Error(nil, "hosts ConfigMap exists and is not owned by this Tailnet; refusing to overwrite",
-			"configmap", name)
+	switch {
+	case err == nil && ownedBy(&existing, tn.UID):
+	case err == nil && adoptable(&existing, roleDNSHosts):
+		l.Info("adopting orphaned hosts ConfigMap", "configmap", name)
+	case err == nil:
+		l.Error(nil, "hosts ConfigMap exists and is not owned by this Tailnet; refusing to overwrite", "configmap", name)
+		if r.Recorder != nil {
+			r.Recorder.Eventf(&tn, corev1.EventTypeWarning, "ConfigMapNotOwned",
+				"hosts ConfigMap %s/%s is owned by another resource; refusing to overwrite", r.OperatorNamespace, name)
+		}
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
-	}
-	if client.IgnoreNotFound(err) != nil {
+	case client.IgnoreNotFound(err) != nil:
 		return ctrl.Result{}, err
 	}
 

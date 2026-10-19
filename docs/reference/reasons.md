@@ -23,4 +23,6 @@ Preflight uses the API response shape, not a reported server version: database p
 successful non-mutating `policy/check` probe are required for `Compatible`. Missing or failed
 observations stay `Unknown`. See [preflight details](../how-to/install-headscale.md#preflight).
 Event `PolicyDriftOverwritten` fires when
-the live policy was changed behind the operator's back and rewritten.
+the live policy was changed behind the operator's back and rewritten. Event `ConfigMapNotOwned`
+fires when a hosts or rendered/fragment ConfigMap of the configured name is controlled by another
+resource (an ownerRef-less one carrying the operator's `tsunaro.io/role` label is re-adopted instead).

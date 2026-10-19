@@ -14,7 +14,7 @@ in the operator namespace needs a backup.
 | Secret `headscale-bootstrap` (bootstrap API key) | you | no new working key can be minted; running agents keep working until their pre-auth key expires | **must back up** (or be able to mint a new key on Headscale) |
 | Secret `<tailnet>-apikey` (working key) | operator | re-minted from the bootstrap key at the next reconcile | no |
 | Secret `<cr>-authkey` (agent pre-auth key) | operator | re-minted; the agent pod restarts and re-registers as the same node name | no |
-| ConfigMaps `tailnet-dns-hosts`, `<base>-rendered` | operator | rewritten at the next reconcile | no |
+| ConfigMaps `tailnet-dns-hosts`, `<base>-rendered`, `<tailnet>-policy-fragment` | operator (label `tsunaro.io/role`) | rewritten at the next reconcile; an ownerRef-less one carrying that label is re-adopted, a foreign one is refused with event `ConfigMapNotOwned` | no |
 | Headscale policy (live document) | operator in `Apply`, you in `DryRun` | base policy lives in Git/ConfigMap; the render is deterministic | base ConfigMap source in Git |
 | Secret `<gateway>-state` (tsnet node state) and ConfigMaps `<gateway>-auth-receipt`, `<gateway>-fresh` | operator, written once | gateway node identity is gone: delete the CR (`deletionPolicy: Delete` removes the Headscale node) and create it again | **must back up** together, see [gateway reference](../reference/gateway.md#key-and-expiry-lifecycle) |
 | Headscale database | Headscale | out of scope here; every operator-managed node, key and the applied policy live in it | per your Headscale runbook |

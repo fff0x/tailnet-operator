@@ -6,9 +6,13 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -42,6 +46,58 @@ func TestRenderHosts(t *testing.T) {
 	empty := renderHosts("corp", nil, warn)
 	if strings.Count(empty, "\n") != 1 || !strings.HasPrefix(empty, "# managed by") {
 		t.Fatalf("empty render = %q", empty)
+	}
+}
+
+// TestDNSHostsOwnerGuard: an ownerRef-less hosts ConfigMap carrying our role label is adopted; a
+// foreign-controlled one or one without the label is refused with a ConfigMapNotOwned event.
+func TestDNSHostsOwnerGuard(t *testing.T) {
+	s := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(s)
+	_ = tnv1.AddToScheme(s)
+	truep := true
+	for _, tc := range []struct {
+		name       string
+		labels     map[string]string
+		owner      []metav1.OwnerReference
+		wantAdopt  bool
+		wantEvents int
+	}{
+		{"orphaned-ours", map[string]string{roleLabel: roleDNSHosts}, nil, true, 0},
+		{"orphaned-no-label", map[string]string{"app": "x"}, nil, false, 1},
+		{"foreign-controller", map[string]string{roleLabel: roleDNSHosts},
+			[]metav1.OwnerReference{{APIVersion: "tsunaro.io/v1alpha1", Kind: "Tailnet", Name: "other", UID: "other-uid", Controller: &truep}}, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tn := dnsTailnet()
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: tn.Spec.DNS.HostsConfigMap, Namespace: "tailnet-system", Labels: tc.labels, OwnerReferences: tc.owner},
+				Data:       map[string]string{hostsKey: "# stale\n"},
+			}
+			rec := record.NewFakeRecorder(4)
+			r := &TailnetDNSReconciler{Client: fake.NewClientBuilder().WithScheme(s).WithObjects(tn, cm).WithStatusSubresource(tn).Build(),
+				Scheme: s, Recorder: rec, OperatorNamespace: "tailnet-system"}
+			if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: tn.Name}}); err != nil {
+				t.Fatal(err)
+			}
+			var got corev1.ConfigMap
+			if err := r.Get(context.Background(), types.NamespacedName{Namespace: "tailnet-system", Name: tn.Spec.DNS.HostsConfigMap}, &got); err != nil {
+				t.Fatal(err)
+			}
+			adopted := ownedBy(&got, tn.UID)
+			if adopted != tc.wantAdopt {
+				t.Fatalf("adopted=%v want %v (owners=%v)", adopted, tc.wantAdopt, got.OwnerReferences)
+			}
+			if tc.wantAdopt && got.Data[hostsKey] == "# stale\n" {
+				t.Fatal("adopted ConfigMap not re-rendered")
+			}
+			if !tc.wantAdopt && got.Data[hostsKey] != "# stale\n" {
+				t.Fatal("refused ConfigMap was overwritten")
+			}
+			if len(rec.Events) != tc.wantEvents {
+				t.Fatalf("events=%d want %d", len(rec.Events), tc.wantEvents)
+			}
+		})
 	}
 }
 

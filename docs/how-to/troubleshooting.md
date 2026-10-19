@@ -27,6 +27,7 @@ description: "Symptom table with the condition reasons, and the diagnosis cheat 
 | `PolicyRendered=False/PolicyEmpty` | base ConfigMap | base has no `tagOwners` or no `acls`/`grants` — refused to avoid a lock-out |
 | `PolicyApplied=False/ApplyFailed` | condition message (`read: …; write: …`) | Headscale still in file mode, empty policy table, API unreachable |
 | Event `PolicyDriftOverwritten` | `kubectl get events -A --field-selector reason=PolicyDriftOverwritten` | someone ran `headscale policy set` |
+| hosts/rendered ConfigMap not updating; Event `ConfigMapNotOwned` | `kubectl get events -A --field-selector reason=ConfigMapNotOwned`, `kubectl -n tailnet-system get cm <name> -o yaml` | a ConfigMap of that name is controlled by another resource — rename it or remove the foreign one (an ownerRef-less one with label `tsunaro.io/role` is adopted automatically) |
 
 ## Diagnosis cheat sheet
 

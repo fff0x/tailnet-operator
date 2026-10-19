@@ -104,6 +104,7 @@ func New(cfg *rest.Config, opts Options) (ctrl.Manager, error) {
 		}).SetupWithManager},
 		{"TailnetDNS", (&controller.TailnetDNSReconciler{
 			Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
+			Recorder: mgr.GetEventRecorderFor("tailnet-operator"),
 		}).SetupWithManager},
 		{"TailnetPolicy", (&controller.TailnetPolicyReconciler{
 			Metrics: metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
