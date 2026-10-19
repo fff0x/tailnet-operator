@@ -18,6 +18,7 @@ description: "Symptom table with the condition reasons, and the diagnosis cheat 
 | `UsersUnique=False/Duplicate`, `PolicyApplied=False/PolicyRejected` | `headscale users list` | duplicate user names (typically OIDC plus a CLI-created user); destroy the surplus user, the next reconcile clears both |
 | Egress `TagKnown=False/Unknown` | `kubectl describe tailnetegress` | tag missing in `tagOwners` (file mode) |
 | Egress `TagKnown=False/PolicyPending` | `kubectl describe tailnet` → `PolicyApplied` | policy not applied yet / rejected |
+| `Registered=False/WorkloadBlocked` | condition message, `kubectl -n <ns> describe deploy <agent>` | agent pod refused by a LimitRange/ResourceQuota/PodSecurity — raise `spec.resources` or `Tailnet.spec.proxy.resources` ([Agent resources](install-operator.md#namespaces-with-a-limitrange)) |
 | `status.targets[].reason=NotAdvertised` | router `--advertise-routes` | route not advertised |
 | `… NotApproved` | `headscale nodes list-routes`, `kubectl describe tailnet` events | route not approved; with operator-owned policy it is re-approved on the next policy reconcile — persists → `autoApprovers` entry missing or router tag differs |
 | `… NoGrant` | policy `grants` | no grant tag → /32:port (file mode) |

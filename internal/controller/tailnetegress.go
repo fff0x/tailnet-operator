@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -168,6 +169,13 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return r.fail(ctx, &eg, "ListNodes", err)
 	}
 	r.associateNode(ctx, &eg, hs, nodes, tag, hostname)
+	// An agent that never registers because its pod is refused (LimitRange/quota/PodSecurity) looks
+	// the same as one still starting; name the admission reason so it is actionable.
+	if meta.IsStatusConditionFalse(eg.Status.Conditions, "Registered") {
+		if msg := workloadBlocked(ctx, r.Client, types.NamespacedName{Namespace: ns, Name: eg.Name}); msg != "" {
+			setCond(&eg.Status.Conditions, eg.Generation, "Registered", metav1.ConditionFalse, "WorkloadBlocked", msg)
+		}
+	}
 
 	// Diagnosis: classify each target route against the netmap + advertised/approved sets.
 	advertised, approved := routeSets(nodes)

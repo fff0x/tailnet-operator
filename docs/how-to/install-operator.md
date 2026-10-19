@@ -102,6 +102,26 @@ Installing these defaults or changing effective resources restarts each affected
 Its ephemeral node re-registers, causing a brief interruption. CRs with higher-tier overrides keep their resources.
 The generated standalone bundle includes the same defaults; customize its operator environment in an overlay.
 
+### Namespaces with a LimitRange
+
+The chart defaults (requests `10m`/`32Mi`) match what agents actually use. In a namespace with a
+`LimitRange` minimum or a `ResourceQuota`, admission may reject an agent pod whose request is below
+the floor; the CR then reports `Registered=False/WorkloadBlocked` with the admission message (e.g.
+`minimum cpu usage per Container is 100m`). Raise the agent block to clear it — cluster-wide on the
+Tailnet, or per CR:
+
+```yaml
+kind: Tailnet
+spec:
+  proxy:
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {memory: 512Mi}
+```
+
+Each block is selected whole (`CR.spec.resources` > `Tailnet.spec.proxy.resources` > chart default);
+there is no per-key merge, so set every value you need in the block you choose.
+
 ## Network isolation
 
 `networkPolicy.enabled` isolates the operator pod; `networkPolicy.provider` picks the dialect.

@@ -39,6 +39,7 @@ Not `READY`? Read the reason of the target, then the condition:
 | --- | --- | --- |
 | `TagKnown=False/Unknown` | tag not in `tagOwners` | add it to the policy (file mode) |
 | `TagKnown=False/PolicyPending` | operator owns the policy, tag not applied yet | wait a reconcile; check `kubectl describe tailnet corp` → `PolicyApplied` |
+| `Registered=False/WorkloadBlocked` | the agent pod is refused by a LimitRange/ResourceQuota/PodSecurity (message carries the admission text) | raise `spec.resources` or `Tailnet.spec.proxy.resources` — see [Agent resources](install-operator.md#namespaces-with-a-limitrange) |
 | `NotAdvertised` | no node advertises a route covering `10.0.10.20` | add the host (`/32`) or its subnet to the router's `--advertise-routes` |
 | `NotApproved` | advertised, not approved (a `TailnetGateway` reports the same state as `RoutesInSync=False/NotApproved`) | when the operator owns the policy: wait one policy reconcile (≤ 5 min) — it replays the missed approval; persists → the router's tag is not in the `autoApprovers` entry. File mode: `headscale nodes approve-routes …` |
 | `NoGrant` | tag has no grant to `10.0.10.20/32:1521` | add the grant (file mode) — generated automatically when the operator owns the policy |

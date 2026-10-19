@@ -6,6 +6,10 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Added
 
+- `TailnetEgress`/`TailnetIngress` report `Registered=False/WorkloadBlocked` with the admission
+  message when the agent pod is refused (LimitRange, ResourceQuota, PodSecurity), instead of the
+  generic "no online node yet". [Agent resources](docs/how-to/install-operator.md#namespaces-with-a-limitrange)
+  shows how to clear it.
 - Chart value `headscale.caConfigMapRef` mounts a PEM bundle from a ConfigMap and sets
   `SSL_CERT_DIR`, so an `https://` `apiUrl` signed by a site CA verifies next to the public
   roots. No Go change: Go merges `SSL_CERT_DIR` with `SSL_CERT_FILE`. Unset, the Deployment is

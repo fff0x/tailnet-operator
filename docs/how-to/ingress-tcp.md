@@ -34,6 +34,7 @@ From a laptop in `group:shop`: `psql -h shop-shop-dev.prod-1.tailnet.example.int
 | `PolicyGranted=False/PolicyDenied` | an `allowFrom` entry is outside the admin allowlist (`Tailnet.spec.policy.ingressSourceAllowlist`) | use an allowed principal (e.g. a `group:`), or ask the admin to widen the allowlist |
 | `BackendsReachable=False` | `shop-db-rw:5432` does not answer from the agent pod | Service/port wrong, backend down, NetworkPolicy in the tenant namespace blocks the agent |
 | `TagKnown=False` | see egress table above | |
+| `Registered=False/WorkloadBlocked` | the agent pod is refused by a LimitRange/ResourceQuota/PodSecurity | raise `spec.resources` or `Tailnet.spec.proxy.resources` — see [Agent resources](install-operator.md#namespaces-with-a-limitrange) |
 
 ## Tailnet without a policy writer (spoke cluster)
 

@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -229,6 +230,13 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.fail(ctx, &in, "ListNodes", err)
 	}
 	r.associateNode(ctx, &in, hs, nodes, tag, hostname)
+	// A pod refused by admission (LimitRange/quota/PodSecurity) never registers; name that reason
+	// instead of leaving the generic "no online node yet".
+	if meta.IsStatusConditionFalse(in.Status.Conditions, "Registered") {
+		if msg := workloadBlocked(ctx, r.Client, ingressWorkloadKey(&in)); msg != "" {
+			setCond(&in.Status.Conditions, in.Generation, "Registered", metav1.ConditionFalse, "WorkloadBlocked", msg)
+		}
+	}
 
 	probes, probeErr := r.scrapeIngressProbes(ctx, ns, in.Name)
 	r.computeIngressStatus(&in, tlsState, probes, probeErr, time.Now())
