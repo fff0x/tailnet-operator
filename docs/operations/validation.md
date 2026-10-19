@@ -25,7 +25,8 @@ Kubernetes **1.31 or later** is required. The API server validates these rules b
 | Target, listener and backend ports | 1–65535 |
 | Tailnet `server` | HTTPS scheme and a non-empty remainder; `apiUrl` accepts `http://` for an in-cluster endpoint — prefer `https://` with the chart's `headscale.caConfigMapRef` ([API over TLS](../how-to/install-headscale.md#api-over-tls)) |
 | Tailnet `apiKeyLifetime` | Valid duration ≥1h, at most 32 characters; omitted defaults to 720h |
-| Tailnet `policy.mode` | `DryRun` or `Apply` |
+| Tailnet `policy.mode` | `DryRun`, `Apply` or `Export`; `Export` (a spoke) forbids `baseConfigMap`/`fragmentConfigMaps`; `tagOwners` and `routeApprovers` are required with a base or in `Export` |
+| Tailnet `policy.fragmentConfigMaps` | At most 32 DNS-subdomain names; only valid alongside `baseConfigMap` |
 | Tailnet `dns.ingressNameTemplate` | Empty disables ingress DNS names; otherwise contains `{name}`, uses only `{name}`/`{namespace}`, and ends in a literal lowercase zone with at least two labels; at most 253 characters |
 | Tailnet `policy.ingressSourceAllowlist` | Each entry begins with `group:`, `tag:` or `autogroup:` plus a non-empty suffix, or is an email-shaped pattern; at most 253 characters; bare `*` is rejected |
 | Tailnet `headscale.ref` | Reserved; only empty is accepted |

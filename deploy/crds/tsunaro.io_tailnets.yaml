@@ -213,6 +213,20 @@ spec:
                       ConfigMap (operator namespace, key "policy") holding the base policy in HuJSON.
                       Empty → the feature is off and nothing is rendered or written.
                     type: string
+                  fragmentConfigMaps:
+                    description: |-
+                      ConfigMaps (operator namespace, key "policy") holding fragments exported by spoke Tailnets
+                      (mode Export on another cluster, committed here after review). Each is merged after the base
+                      and this cluster's own CRs; base and own entries win. A listed fragment that is missing or
+                      malformed fails the render closed (no write) rather than dropping the spoke's grants.
+                      Only valid alongside baseConfigMap.
+                    items:
+                      maxLength: 253
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                      type: string
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-type: set
                   ingressSourceAllowlist:
                     description: |-
                       Glob patterns a TailnetIngress.spec.allowFrom entry must match, e.g. ["group:*"]. Ingress CRs
@@ -227,15 +241,19 @@ spec:
                     default: DryRun
                     description: |-
                       DryRun renders into renderedConfigMap only; Apply also writes the control server when the
-                      live policy differs. Start with DryRun, compare, then switch.
+                      live policy differs; Export renders only this Tailnet's generated entries (no base, no write)
+                      into renderedConfigMap so a hub operator can merge them via fragmentConfigMaps. Start with
+                      DryRun, compare, then switch.
                     enum:
                     - DryRun
                     - Apply
+                    - Export
                     type: string
                   renderedConfigMap:
                     description: |-
-                      ConfigMap (operator namespace, key "policy") that receives the rendered policy for review.
-                      Empty → "<baseConfigMap>-rendered".
+                      ConfigMap (operator namespace, key "policy") that receives the rendered policy (Apply/DryRun)
+                      or the exported fragment (Export) for review.
+                      Empty → "<baseConfigMap>-rendered" (Apply/DryRun) or "<tailnet>-policy-fragment" (Export).
                     type: string
                   routeApprovers:
                     description: |-
@@ -253,10 +271,20 @@ spec:
                 type: object
                 x-kubernetes-validations:
                 - message: policy.tagOwners and policy.routeApprovers are required
-                    when baseConfigMap is set
-                  rule: '!has(self.baseConfigMap) || size(self.baseConfigMap) == 0
-                    || (has(self.tagOwners) && size(self.tagOwners) > 0 && has(self.routeApprovers)
-                    && size(self.routeApprovers) > 0)'
+                    when baseConfigMap is set or mode is Export
+                  rule: '!((has(self.baseConfigMap) && size(self.baseConfigMap) >
+                    0) || (has(self.mode) && self.mode == ''Export'')) || (has(self.tagOwners)
+                    && size(self.tagOwners) > 0 && has(self.routeApprovers) && size(self.routeApprovers)
+                    > 0)'
+                - message: 'mode Export is a spoke: leave baseConfigMap and fragmentConfigMaps
+                    empty'
+                  rule: '!(has(self.mode) && self.mode == ''Export'') || ((!has(self.baseConfigMap)
+                    || size(self.baseConfigMap) == 0) && (!has(self.fragmentConfigMaps)
+                    || size(self.fragmentConfigMaps) == 0))'
+                - message: policy.fragmentConfigMaps requires baseConfigMap
+                  rule: '!has(self.fragmentConfigMaps) || size(self.fragmentConfigMaps)
+                    == 0 || (has(self.baseConfigMap) && size(self.baseConfigMap) >
+                    0)'
               proxy:
                 description: |-
                   ProxySpec are the defaults for the per-CR agent pods this Tailnet spawns. A TailnetEgress may

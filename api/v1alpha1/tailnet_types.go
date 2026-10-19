@@ -73,21 +73,37 @@ type DNSSpec struct {
 // grant per (egress, port) or ingress — and writes the union with PUT /api/v1/policy. Base entries always win
 // over generated ones; the operator never removes anything from the base.
 // Exactly one operator may run in Apply mode against a control server.
-// +kubebuilder:validation:XValidation:rule="!has(self.baseConfigMap) || size(self.baseConfigMap) == 0 || (has(self.tagOwners) && size(self.tagOwners) > 0 && has(self.routeApprovers) && size(self.routeApprovers) > 0)",message="policy.tagOwners and policy.routeApprovers are required when baseConfigMap is set"
+// +kubebuilder:validation:XValidation:rule="!((has(self.baseConfigMap) && size(self.baseConfigMap) > 0) || (has(self.mode) && self.mode == 'Export')) || (has(self.tagOwners) && size(self.tagOwners) > 0 && has(self.routeApprovers) && size(self.routeApprovers) > 0)",message="policy.tagOwners and policy.routeApprovers are required when baseConfigMap is set or mode is Export"
+// +kubebuilder:validation:XValidation:rule="!(has(self.mode) && self.mode == 'Export') || ((!has(self.baseConfigMap) || size(self.baseConfigMap) == 0) && (!has(self.fragmentConfigMaps) || size(self.fragmentConfigMaps) == 0))",message="mode Export is a spoke: leave baseConfigMap and fragmentConfigMaps empty"
+// +kubebuilder:validation:XValidation:rule="!has(self.fragmentConfigMaps) || size(self.fragmentConfigMaps) == 0 || (has(self.baseConfigMap) && size(self.baseConfigMap) > 0)",message="policy.fragmentConfigMaps requires baseConfigMap"
 type PolicySpec struct {
 	// ConfigMap (operator namespace, key "policy") holding the base policy in HuJSON.
 	// Empty → the feature is off and nothing is rendered or written.
 	// +optional
 	BaseConfigMap string `json:"baseConfigMap,omitempty"`
-	// ConfigMap (operator namespace, key "policy") that receives the rendered policy for review.
-	// Empty → "<baseConfigMap>-rendered".
+	// ConfigMap (operator namespace, key "policy") that receives the rendered policy (Apply/DryRun)
+	// or the exported fragment (Export) for review.
+	// Empty → "<baseConfigMap>-rendered" (Apply/DryRun) or "<tailnet>-policy-fragment" (Export).
 	// +optional
 	RenderedConfigMap string `json:"renderedConfigMap,omitempty"`
 	// DryRun renders into renderedConfigMap only; Apply also writes the control server when the
-	// live policy differs. Start with DryRun, compare, then switch.
-	// +kubebuilder:validation:Enum=DryRun;Apply
+	// live policy differs; Export renders only this Tailnet's generated entries (no base, no write)
+	// into renderedConfigMap so a hub operator can merge them via fragmentConfigMaps. Start with
+	// DryRun, compare, then switch.
+	// +kubebuilder:validation:Enum=DryRun;Apply;Export
 	// +kubebuilder:default=DryRun
 	Mode string `json:"mode,omitempty"`
+	// ConfigMaps (operator namespace, key "policy") holding fragments exported by spoke Tailnets
+	// (mode Export on another cluster, committed here after review). Each is merged after the base
+	// and this cluster's own CRs; base and own entries win. A listed fragment that is missing or
+	// malformed fails the render closed (no write) rather than dropping the spoke's grants.
+	// Only valid alongside baseConfigMap.
+	// +optional
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
+	// +listType=set
+	FragmentConfigMaps []string `json:"fragmentConfigMaps,omitempty"`
 	// Owners of the generated tags (tagOwners value), e.g. ["group:operator"]. Required when on.
 	// +optional
 	TagOwners []string `json:"tagOwners,omitempty"`

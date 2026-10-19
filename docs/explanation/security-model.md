@@ -22,7 +22,7 @@ are published in the release notes and as Radicle issues labelled `security`.
 | --- | --- | --- |
 | Kubernetes administrator | Operator installation, RBAC, CRDs, bootstrap Secret, base policy | Can read every credential and replace workloads; the operator cannot defend against its own administrator. |
 | Headscale administrator | Node identities, grants, route approvals, API keys | API keys are bearer credentials with full control-server access, not per-controller capabilities. |
-| `Tailnet` writer | Control endpoints, bootstrap Secret reference, policy inputs | Administrative. Do not delegate cluster-scoped `Tailnet` writes to tenants. |
+| `Tailnet` writer | Control endpoints, bootstrap Secret reference, policy inputs | Administrative. Do not delegate cluster-scoped `Tailnet` writes to tenants. A `policy.fragmentConfigMaps` entry is another cluster's grants — its only gate is the GitOps review that lands the fragment in the operator namespace, so treat those ConfigMaps as trust-policy changes. |
 | `TailnetEgress` / `TailnetIngress` writer | Agent identity, tag, backends, `allowFrom` | Not a hostile-tenant boundary: custom tags and cross-namespace backends require trusted writers; `allowFrom` is an allowlist, not isolation. |
 | `TailnetGateway` writer | Persistent kernel identity, image pins, routes and retained resources | Administrative. Explicit activation creates a NET_ADMIN workload; never delegate this cluster-scoped CR to tenants. |
 | Agent pod | Ephemeral tsnet identity, reusable preauth key, no Kubernetes client | Container compromise exposes the key and that identity's network access until the key expires. |

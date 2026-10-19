@@ -150,6 +150,21 @@ func TestAdmission(t *testing.T) {
 			spec["policy"].(map[string]any)["ingressSourceAllowlist"] = []any{"group:*", "tag:apps-*", "autogroup:member", "alice@example.com", "*@example.com"}
 			accept(t, obj)
 		}
+
+		// A spoke in Export mode has no base; a hub may list fragment ConfigMaps alongside its base.
+		spoke := templates["tailnet"].DeepCopy()
+		spoke.SetName("spoke")
+		spokePolicy := spoke.Object["spec"].(map[string]any)["policy"].(map[string]any)
+		delete(spokePolicy, "baseConfigMap")
+		spokePolicy["mode"] = "Export"
+		accept(t, spoke)
+
+		hub := templates["tailnet"].DeepCopy()
+		hub.SetName("hub")
+		hubPolicy := hub.Object["spec"].(map[string]any)["policy"].(map[string]any)
+		hubPolicy["mode"] = "Apply"
+		hubPolicy["fragmentConfigMaps"] = []any{"spoke-frag", "other-frag"}
+		accept(t, hub)
 	})
 
 	t.Run("image-pull-secrets", func(t *testing.T) {

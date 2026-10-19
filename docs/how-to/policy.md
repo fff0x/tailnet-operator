@@ -180,8 +180,9 @@ Never run `headscale policy set` by hand while the operator is in `Apply`: it is
 5 minutes and reported as event `PolicyDriftOverwritten`.
 
 Agents of *other* clusters on the same Headscale (spoke Tailnets without a policy block) are not
-generated here: declare their tags and grants in this base policy by hand — see
-[Tailnet without a policy writer](ingress-tcp.md#tailnet-without-a-policy-writer-spoke-cluster).
+generated here. Either declare their tags and grants in this base policy by hand — see
+[Tailnet without a policy writer](ingress-tcp.md#tailnet-without-a-policy-writer-spoke-cluster) — or
+let the spoke export them and merge the fragment, below.
 
 ## Review before Apply, drift, rollback
 
@@ -194,3 +195,59 @@ generated here: declare their tags and grants in this base policy by hand — se
 | Restore the Git policy on the server | `mode: DryRun`, then `headscale policy set -f /acl/policy` |
 
 Full procedures in [Rollback](upgrade-rollback.md#rollback).
+
+## Second cluster: export on the spoke, merge on the hub
+
+Only one operator per Headscale writes the policy (the *hub*, `mode: Apply`). A second cluster (a
+*spoke*) cannot write — but instead of the hub admin hand-copying each spoke tag and grant, the spoke
+renders exactly what its own CRs imply into a **fragment** and the hub merges it.
+
+On the spoke, run the policy generator in Export mode (no base, nothing is written to Headscale):
+
+```yaml
+kind: Tailnet
+spec:
+  policy:
+    mode: Export                 # render only this cluster's generated entries
+    tagOwners: [group:operator]  # the owner stamped on the exported tags
+    routeApprovers: [tag:fabric]
+    ingressSourceAllowlist: ["group:*"]
+```
+
+```sh
+kubectl describe tailnet corp | grep -A1 Policy
+#   PolicyRendered  True   Rendered   3 tags, 3 grants, 1 routes exported
+#   PolicyApplied   False  Export     mode Export: commit ConfigMap tailnet-system/corp-policy-fragment to the hub and list it in policy.fragmentConfigMaps
+```
+
+Copy the fragment into the hub cluster as a ConfigMap (key `policy`) and commit it to the hub's
+GitOps repo — that Git review **is** the gate for the spoke's grants, the same review the hand-written
+entries went through:
+
+```sh
+kubectl -n tailnet-system get cm corp-policy-fragment -o jsonpath='{.data.policy}' > spoke-corp.json
+# review spoke-corp.json, then (in the hub repo) ship it as ConfigMap tailnet-system/spoke-corp-fragment
+```
+
+On the hub, list the fragment ConfigMaps next to the base:
+
+```yaml
+spec:
+  policy:
+    baseConfigMap: headscale-policy
+    mode: Apply
+    fragmentConfigMaps: [spoke-corp-fragment]   # key "policy", operator namespace
+    tagOwners: [group:operator]
+    routeApprovers: [tag:fabric]
+```
+
+The hub renders base → its own CRs → fragments; base and hub entries win, fragments only add. A
+spoke may only add `tagOwners`, `autoApprovers.routes` and `grants` — a fragment carrying any other
+block (`acls`, `groups`, `ssh`, …) is rejected with `PolicyRendered=False/FragmentInvalid` and
+nothing is written. A **listed fragment that is missing** fails the render closed
+(`PolicyRendered=False/FragmentMissing`): the live policy keeps the spoke's grants rather than
+silently dropping them, so delete the fragment from `fragmentConfigMaps` before you delete its
+ConfigMap.
+
+Until the hub applies the merged policy, the spoke's own CRs report `TagKnown=False/Unknown` — that
+gap is the review window for the foreign grants.

@@ -57,7 +57,9 @@ restart to add or remove a target:
   The resolver is the cluster's, not the operator's; if the operator dies the last file stays valid.
 - **Policy** — parses the base HuJSON generically, appends tagOwners / `/32` approvals / grants
   derived from the CRs (base wins, nothing removed, unknown blocks pass through), publishes the render
-  in a ConfigMap and, in `Apply`, writes it when the live document differs. Headscale validates
+  in a ConfigMap and, in `Apply`, writes it when the live document differs. A spoke cluster that
+  shares the Headscale uses `Export` to render only its own entries into a fragment the hub merges
+  after review. Headscale validates
   (including the base's `tests`) before storing, so a rejected render never becomes active. After a
   successful write it replays missed `autoApprovers` approvals (a route advertised before its
   approver existed) on the routers, so `NotApproved` heals without `headscale nodes approve-routes`.

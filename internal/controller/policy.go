@@ -102,13 +102,17 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	spec := tn.Spec.Policy
-	if spec.BaseConfigMap == "" {
+	if spec.BaseConfigMap == "" && spec.Mode != "Export" {
 		return ctrl.Result{}, r.off(ctx, &tn)
 	}
 	// Idle reconciliations expose a zero baseline before later events, so increase() can
 	// observe the first error or replay batch rather than starting with its nonzero total.
 	r.Metrics.PolicyError(tn.Name, false)
 	r.Metrics.Approved(tn.Name, 0)
+
+	if spec.Mode == "Export" {
+		return r.export(ctx, &tn)
+	}
 
 	// Base document.
 	var baseCM corev1.ConfigMap
@@ -138,11 +142,26 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// obtained (nil when the control server was not queried).
 	var nodes []headscale.Node
 	defer func() { r.siteStatus(ctx, &tn, sites, nodes) }()
-	rendered, sum, err := policy.Render([]byte(base), in)
+	// Spoke fragments committed here after review; a missing one fails closed rather than dropping
+	// the spoke's grants from a live policy.
+	frags, missing, err := r.readFragments(ctx, spec.FragmentConfigMaps)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if missing != "" {
+		return ctrl.Result{RequeueAfter: time.Minute}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
+			setCond(&t.Status.Conditions, t.Generation, "PolicyRendered", metav1.ConditionFalse, "FragmentMissing",
+				fmt.Sprintf("fragment ConfigMap %s/%s not found or has no key %q", r.OperatorNamespace, missing, policyKey))
+		})
+	}
+	rendered, sum, err := policy.Render([]byte(base), in, frags...)
 	if err != nil {
 		reason := "BaseInvalid"
-		if errors.Is(err, policy.ErrEmpty) {
+		switch {
+		case errors.Is(err, policy.ErrEmpty):
 			reason = "PolicyEmpty"
+		case errors.Is(err, policy.ErrFragment):
+			reason = "FragmentInvalid"
 		}
 		l.Error(err, "policy not rendered; nothing written", "reason", reason)
 		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
@@ -160,29 +179,17 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if outName == "" {
 		outName = spec.BaseConfigMap + "-rendered"
 	}
-	var existing corev1.ConfigMap
-	err = r.Get(ctx, types.NamespacedName{Namespace: r.OperatorNamespace, Name: outName}, &existing)
-	if err == nil && !ownedBy(&existing, tn.UID) {
+	if conflict, err := r.publishRender(ctx, &tn, outName, string(rendered)); err != nil {
+		return ctrl.Result{}, err
+	} else if conflict {
 		l.Error(nil, "rendered ConfigMap exists and is not owned by this Tailnet; refusing to overwrite", "configmap", outName)
 		return ctrl.Result{RequeueAfter: policyRequeue}, nil
 	}
-	if client.IgnoreNotFound(err) != nil {
-		return ctrl.Result{}, err
-	}
-	cm := &corev1.ConfigMap{
-		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
-		ObjectMeta: metav1.ObjectMeta{Name: outName, Namespace: r.OperatorNamespace,
-			Labels: map[string]string{"app.kubernetes.io/managed-by": fieldOwner, roleLabel: rolePolicyRender}},
-		Data: map[string]string{policyKey: string(rendered)},
-	}
-	if err := controllerutil.SetControllerReference(&tn, cm, r.Scheme); err != nil {
-		return ctrl.Result{}, err
-	}
-	if err := ssaApply(ctx, r.Client, cm); err != nil {
-		return ctrl.Result{}, err
-	}
 
 	msg := fmt.Sprintf("%d tags, %d grants, %d routes generated", sum.Tags, sum.Grants, sum.Routes)
+	if sum.Fragments > 0 {
+		msg += fmt.Sprintf("; %d fragments merged", sum.Fragments)
+	}
 	if len(sum.Denied) > 0 {
 		msg += "; denied ingress tags: " + strings.Join(sum.Denied, ", ")
 	}
@@ -323,6 +330,100 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		t.Status.Policy.AppliedAt = &now
 		setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionTrue, "Applied", "rendered policy written to the control server")
 	})
+}
+
+// export renders only this Tailnet's generated entries (mode Export, a spoke) into a fragment
+// ConfigMap for a hub operator to merge. It never reads a base or writes the control server; the
+// spoke's agents stay TagKnown=False until the hub applies the merged policy — that gap is the
+// review gate for foreign grants.
+func (r *TailnetPolicyReconciler) export(ctx context.Context, tn *tnv1.Tailnet) (ctrl.Result, error) {
+	in, skipped, sites, err := r.collect(ctx, tn)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	// A spoke cannot approve its own routes (the hub owns the policy), so sites report from an
+	// empty node list until the hub merges the fragment.
+	defer r.siteStatus(ctx, tn, sites, nil)
+	rendered, sum, err := policy.RenderFragment(in)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	canonical, err := policy.Normalize(rendered)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	hash := policy.Hash(canonical)
+	outName := tn.Spec.Policy.RenderedConfigMap
+	if outName == "" {
+		outName = tn.Name + "-policy-fragment"
+	}
+	if conflict, err := r.publishRender(ctx, tn, outName, string(rendered)); err != nil {
+		return ctrl.Result{}, err
+	} else if conflict {
+		log.FromContext(ctx).Error(nil, "fragment ConfigMap exists and is not owned by this Tailnet; refusing to overwrite", "configmap", outName)
+		return ctrl.Result{RequeueAfter: policyRequeue}, nil
+	}
+	msg := fmt.Sprintf("%d tags, %d grants, %d routes exported", sum.Tags, sum.Grants, sum.Routes)
+	if len(sum.Denied) > 0 {
+		msg += "; denied ingress tags: " + strings.Join(sum.Denied, ", ")
+	}
+	if len(skipped) > 0 {
+		msg += "; skipped: " + strings.Join(skipped, ", ")
+	}
+	return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
+		if t.Status.Policy == nil {
+			t.Status.Policy = &tnv1.PolicyStatus{}
+		}
+		t.Status.Policy.RenderedHash = hash
+		t.Status.Policy.Generated = tnv1.PolicyGenerated{Tags: sum.Tags, Grants: sum.Grants, Routes: sum.Routes}
+		setCond(&t.Status.Conditions, t.Generation, "PolicyRendered", metav1.ConditionTrue, "Rendered", msg)
+		setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionFalse, "Export",
+			fmt.Sprintf("mode Export: commit ConfigMap %s/%s to the hub and list it in policy.fragmentConfigMaps", r.OperatorNamespace, outName))
+	})
+}
+
+// publishRender writes the rendered policy or fragment to outName under the owner guard. It reports
+// conflict=true when another owner holds the ConfigMap (the caller then requeues without writing).
+func (r *TailnetPolicyReconciler) publishRender(ctx context.Context, tn *tnv1.Tailnet, outName, rendered string) (conflict bool, err error) {
+	var existing corev1.ConfigMap
+	err = r.Get(ctx, types.NamespacedName{Namespace: r.OperatorNamespace, Name: outName}, &existing)
+	if err == nil && !ownedBy(&existing, tn.UID) {
+		return true, nil
+	}
+	if client.IgnoreNotFound(err) != nil {
+		return false, err
+	}
+	cm := &corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+		ObjectMeta: metav1.ObjectMeta{Name: outName, Namespace: r.OperatorNamespace,
+			Labels: map[string]string{"app.kubernetes.io/managed-by": fieldOwner, roleLabel: rolePolicyRender}},
+		Data: map[string]string{policyKey: rendered},
+	}
+	if err := controllerutil.SetControllerReference(tn, cm, r.Scheme); err != nil {
+		return false, err
+	}
+	return false, ssaApply(ctx, r.Client, cm)
+}
+
+// readFragments loads the policy fragments (operator namespace, key "policy") this hub merges. A
+// name whose ConfigMap or key is missing is returned as missing so the caller fails the render
+// closed; the rendered policy is never rewritten without every listed fragment present.
+func (r *TailnetPolicyReconciler) readFragments(ctx context.Context, names []string) (frags [][]byte, missing string, err error) {
+	for _, name := range names {
+		var cm corev1.ConfigMap
+		if err := r.Get(ctx, types.NamespacedName{Namespace: r.OperatorNamespace, Name: name}, &cm); err != nil {
+			if client.IgnoreNotFound(err) != nil {
+				return nil, "", err
+			}
+			return nil, name, nil
+		}
+		data, ok := cm.Data[policyKey]
+		if !ok {
+			return nil, name, nil
+		}
+		frags = append(frags, []byte(data))
+	}
+	return frags, "", nil
 }
 
 // off removes this Tailnet's rendered ConfigMap and policy status when the feature is disabled.
@@ -535,22 +636,6 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
 	}
-	byBase := func(ctx context.Context, o client.Object) []reconcile.Request {
-		if o.GetNamespace() != r.OperatorNamespace {
-			return nil
-		}
-		var tns tnv1.TailnetList
-		if err := r.List(ctx, &tns); err != nil {
-			return nil
-		}
-		var out []reconcile.Request
-		for _, t := range tns.Items {
-			if t.Spec.Policy.BaseConfigMap == o.GetName() {
-				out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{Name: t.Name}})
-			}
-		}
-		return out
-	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("tailnetpolicy").
 		// A preflight mode change matters; unrelated status writes must not re-trigger the render.
@@ -578,6 +663,25 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				return true
 			},
 		})).
-		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(byBase)).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.byPolicyConfigMap)).
 		Complete(r)
+}
+
+// byPolicyConfigMap enqueues every Tailnet whose base or one of whose fragment ConfigMaps is o
+// (operator namespace only).
+func (r *TailnetPolicyReconciler) byPolicyConfigMap(ctx context.Context, o client.Object) []reconcile.Request {
+	if o.GetNamespace() != r.OperatorNamespace {
+		return nil
+	}
+	var tns tnv1.TailnetList
+	if err := r.List(ctx, &tns); err != nil {
+		return nil
+	}
+	var out []reconcile.Request
+	for _, t := range tns.Items {
+		if t.Spec.Policy.BaseConfigMap == o.GetName() || slices.Contains(t.Spec.Policy.FragmentConfigMaps, o.GetName()) {
+			out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{Name: t.Name}})
+		}
+	}
+	return out
 }

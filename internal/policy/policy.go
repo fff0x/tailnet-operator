@@ -24,6 +24,9 @@ var (
 	// ErrEmpty: the base has no tagOwners or neither acls nor grants — applying it would lock
 	// everyone out, so the operator refuses to render.
 	ErrEmpty = errors.New("base policy empty: needs tagOwners and at least one acl or grant")
+	// ErrFragment: a spoke fragment is not an object, or carries a key other than tagOwners,
+	// autoApprovers or grants (a spoke may only add those, never acls/groups/tests/ssh).
+	ErrFragment = errors.New("policy fragment invalid")
 )
 
 // Target is one egress destination the tag may reach.
@@ -70,9 +73,11 @@ type Inputs struct {
 	Sites                  []Site
 }
 
-// Summary counts what was added and which ingress tags were denied a grant.
+// Summary counts what was added (including spoke fragment contributions), how many fragments were
+// merged, and which ingress tags were denied a grant.
 type Summary struct {
 	Tags, Grants, Routes int
+	Fragments            int
 	Denied               []string
 }
 
@@ -88,18 +93,53 @@ func Allowed(src string, allowlist []string) bool {
 }
 
 // Render returns the base with the generated tagOwners, autoApprovers.routes and grants appended
-// (egress targets, ingresses and gateway routes),
-// as indented JSON (comments of the base are not carried over; they live in Git).
-func Render(base []byte, in Inputs) ([]byte, Summary, error) {
+// (egress targets, ingresses and gateway routes), then any spoke fragments merged last (base and
+// this cluster's own entries always win), as indented JSON (comments of the base are not carried
+// over; they live in Git).
+func Render(base []byte, in Inputs, fragments ...[]byte) ([]byte, Summary, error) {
 	var sum Summary
 	doc, err := parse(base)
 	if err != nil {
 		return nil, sum, err
 	}
-	owners, ok := doc["tagOwners"].(map[string]any)
-	if !ok || (len(arr(doc["acls"])) == 0 && len(arr(doc["grants"])) == 0) {
+	if _, ok := doc["tagOwners"].(map[string]any); !ok || (len(arr(doc["acls"])) == 0 && len(arr(doc["grants"])) == 0) {
 		return nil, sum, ErrEmpty
 	}
+	generate(doc, in, &sum)
+	for _, f := range fragments {
+		if err := mergeFragment(doc, f, &sum); err != nil {
+			return nil, sum, err
+		}
+	}
+	return marshal(doc, sum)
+}
+
+// RenderFragment returns only what this Tailnet's CRs imply (tagOwners, autoApprovers.routes,
+// grants), with no base and no emptiness check, so a hub operator can merge it via Render's
+// fragments. This is what mode Export publishes for review.
+func RenderFragment(in Inputs) ([]byte, Summary, error) {
+	var sum Summary
+	doc := map[string]any{
+		"tagOwners":     map[string]any{},
+		"autoApprovers": map[string]any{"routes": map[string]any{}},
+		"grants":        []any{},
+	}
+	generate(doc, in, &sum)
+	return marshal(doc, sum)
+}
+
+func marshal(doc map[string]any, sum Summary) ([]byte, Summary, error) {
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return nil, sum, err
+	}
+	return append(out, '\n'), sum, nil
+}
+
+// generate appends the tagOwners, autoApprovers.routes and grants implied by in to doc, in place.
+// It relies only on doc being a map; missing tagOwners/autoApprovers/grants are created.
+func generate(doc map[string]any, in Inputs, sum *Summary) {
+	owners := ensureMap(doc, "tagOwners")
 
 	// tagOwners: declare every CR tag the base does not already own.
 	tags := make([]string, 0, len(in.Egresses)+len(in.Ingresses))
@@ -122,16 +162,8 @@ func Render(base []byte, in Inputs) ([]byte, Summary, error) {
 	}
 
 	// autoApprovers.routes: every egress target /32 may be auto-approved on the routers.
-	aa, _ := doc["autoApprovers"].(map[string]any)
-	if aa == nil {
-		aa = map[string]any{}
-		doc["autoApprovers"] = aa
-	}
-	routes, _ := aa["routes"].(map[string]any)
-	if routes == nil {
-		routes = map[string]any{}
-		aa["routes"] = routes
-	}
+	aa := ensureMap(doc, "autoApprovers")
+	routes := ensureMap(aa, "routes")
 	for _, e := range in.Egresses {
 		for _, t := range e.Targets {
 			cur := strs(routes[t.CIDR])
@@ -223,12 +255,59 @@ func Render(base []byte, in Inputs) ([]byte, Summary, error) {
 		add(map[string]any{"src": toAny(dedupe(i.AllowFrom)), "dst": []any{i.Tag}, "ip": ip})
 	}
 	doc["grants"] = grants
+}
 
-	out, err := json.MarshalIndent(doc, "", "  ")
+// mergeFragment merges a spoke fragment into doc using the same additive rules as generate: unknown
+// tagOwners are added, autoApprovers.routes are unioned, grants are appended with canon de-dupe.
+// It rejects any top-level key beyond tagOwners/autoApprovers/grants (ErrFragment), so a spoke
+// cannot slip in acls, groups, tests or ssh through the hub.
+func mergeFragment(doc map[string]any, frag []byte, sum *Summary) error {
+	m, err := parse(frag)
 	if err != nil {
-		return nil, sum, err
+		return fmt.Errorf("%w: not valid policy HuJSON", ErrFragment)
 	}
-	return append(out, '\n'), sum, nil
+	for k := range m {
+		switch k {
+		case "tagOwners", "autoApprovers", "grants":
+		default:
+			return fmt.Errorf("%w: unexpected key %q", ErrFragment, k)
+		}
+	}
+	sum.Fragments++
+	owners := ensureMap(doc, "tagOwners")
+	if fo, ok := m["tagOwners"].(map[string]any); ok {
+		for _, t := range sortedKeys(fo) {
+			if _, exists := owners[t]; !exists {
+				owners[t] = fo[t]
+				sum.Tags++
+			}
+		}
+	}
+	if fa, ok := m["autoApprovers"].(map[string]any); ok {
+		if fr, ok := fa["routes"].(map[string]any); ok {
+			routes := ensureMap(ensureMap(doc, "autoApprovers"), "routes")
+			for _, cidr := range sortedKeys(fr) {
+				if merged, added := union(strs(routes[cidr]), strs(fr[cidr])); added {
+					routes[cidr] = toAny(merged)
+					sum.Routes++
+				}
+			}
+		}
+	}
+	grants := arr(doc["grants"])
+	seen := map[string]bool{}
+	for _, g := range grants {
+		seen[canon(g)] = true
+	}
+	for _, g := range arr(m["grants"]) {
+		if k := canon(g); !seen[k] {
+			seen[k] = true
+			grants = append(grants, g)
+			sum.Grants++
+		}
+	}
+	doc["grants"] = grants
+	return nil
 }
 
 // Normalize returns the canonical compact JSON of a HuJSON document, so a policy read back from the
@@ -283,6 +362,25 @@ func parse(doc []byte) (map[string]any, error) {
 }
 
 func arr(v any) []any { a, _ := v.([]any); return a }
+
+// ensureMap returns m[key] as a map, creating it if missing or not a map.
+func ensureMap(m map[string]any, key string) map[string]any {
+	if inner, ok := m[key].(map[string]any); ok {
+		return inner
+	}
+	inner := map[string]any{}
+	m[key] = inner
+	return inner
+}
+
+func sortedKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
 
 func strs(v any) []string {
 	var out []string

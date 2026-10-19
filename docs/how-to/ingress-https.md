@@ -233,6 +233,10 @@ Hub base policy (`policy.jsonc`), reviewed like any other admin change
 Until the hub applies it the CR reports `TagKnown=False/Unknown` (no key is minted); afterwards it is `Ready`
 like on the hub. Peers that still cannot connect are missing the grant, not the agent.
 
+Instead of hand-copying each tag and grant, run the spoke operator in `policy.mode: Export`: it
+renders exactly these entries into a fragment ConfigMap the hub merges — see
+[Second cluster](policy.md#second-cluster-export-on-the-spoke-merge-on-the-hub).
+
 ## HTTPS through a shared gateway
 
 TLS terminates at the gateway (it holds `*.prod-1.tailnet.example.internal`); the ingress gives the

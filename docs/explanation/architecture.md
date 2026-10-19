@@ -127,7 +127,7 @@ sequenceDiagram
   Op->>HS: create working API key from the bootstrap key
   Note over Op,HS: rotated at half-life, new key verified before the old one expires
   CR->>Op: tags, consumers, allowFrom, site networks
-  Op->>Op: render base policy + tagOwners, /32 approvals, grants
+  Op->>Op: render base policy + tagOwners, /32 approvals, grants + merge reviewed spoke fragments
   Op->>HS: validate and set policy (mode Apply)
   Op->>HS: create reusable ephemeral pre-auth key per agent
   Op->>HS: list nodes, classify routes (NotAdvertised / NotApproved / NoGrant)
@@ -135,7 +135,10 @@ sequenceDiagram
 ```
 
 Everything the operator writes to Headscale is derived from CRs and visible beforehand: the
-rendered policy lands in a ConfigMap, `DryRun` shows it without writing.
+rendered policy lands in a ConfigMap, `DryRun` shows it without writing. A second cluster that shares
+the Headscale cannot write; in `mode: Export` it renders only its own entries into a fragment
+ConfigMap, which the single Apply writer merges after review — see
+[Second cluster](../how-to/policy.md#second-cluster-export-on-the-spoke-merge-on-the-hub).
 
 ## What the operator creates
 

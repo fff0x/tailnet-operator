@@ -15,6 +15,12 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   (egress, ingress, HTTPS ingress, gateway, policy and key flow) and a table of every object a CR
   creates; [Reach the Kubernetes API over the tailnet](docs/how-to/kubernetes-api.md); the
   documentation index opens with what the operator lets you do.
+- Second-cluster policy without hand-copied grants: `policy.mode: Export` renders a spoke's own
+  tagOwners, route approvals and grants into a fragment ConfigMap, and the hub's
+  `policy.fragmentConfigMaps` merges reviewed fragments after its base and own CRs (base and hub win,
+  fragments only add; a non-additive block is `FragmentInvalid`, a missing fragment is
+  `FragmentMissing` — both fail the render closed). New reasons `Export`, `FragmentMissing`,
+  `FragmentInvalid`. [Policy § Second cluster](docs/how-to/policy.md#second-cluster-export-on-the-spoke-merge-on-the-hub).
 
 ## [0.19.0] - 2026-10-19
 

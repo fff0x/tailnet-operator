@@ -253,3 +253,103 @@ func TestRenderSites(t *testing.T) {
 		t.Fatalf("routes added = %d, want %d", sum.Routes, plainSum.Routes+2)
 	}
 }
+
+// spokeInputs is a second cluster's CRs: its own tags, an egress target and an ingress.
+var spokeInputs = Inputs{
+	TagOwners:              []string{"group:operator"},
+	RouteApprovers:         []string{"tag:fabric"},
+	IngressSourceAllowlist: []string{"group:*"},
+	Egresses:               []Egress{{Tag: "tag:egress-spoke-db", Targets: []Target{{CIDR: "10.9.0.5/32", Port: 5432}}}},
+	Ingresses:              []Ingress{{Tag: "tag:ingress-spoke-api", AllowFrom: []string{"group:ops"}, Ports: []int32{443}}},
+}
+
+func TestRenderFragment(t *testing.T) {
+	out, sum, err := RenderFragment(spokeInputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	// Only the three additive blocks, nothing else (no acls/groups/ssh/hosts).
+	if len(doc) != 3 || doc["acls"] != nil || doc["groups"] != nil {
+		t.Fatalf("fragment carried unexpected keys: %s", out)
+	}
+	owners := doc["tagOwners"].(map[string]any)
+	if len(owners) != 2 || owners["tag:egress-spoke-db"].([]any)[0] != "group:operator" {
+		t.Fatalf("fragment tagOwners = %v", owners)
+	}
+	routes := doc["autoApprovers"].(map[string]any)["routes"].(map[string]any)
+	if len(routes) != 1 || routes["10.9.0.5/32"].([]any)[0] != "tag:fabric" {
+		t.Fatalf("fragment routes = %v", routes)
+	}
+	if len(doc["grants"].([]any)) != 2 || sum.Tags != 2 || sum.Grants != 2 || sum.Routes != 1 {
+		t.Fatalf("fragment summary = %+v", sum)
+	}
+	// Deterministic and allowlist-aware: a denied source never reaches the fragment.
+	again, _, _ := RenderFragment(spokeInputs)
+	if string(again) != string(out) {
+		t.Fatal("RenderFragment not deterministic")
+	}
+	denied := spokeInputs
+	denied.IngressSourceAllowlist = nil
+	_, dsum, _ := RenderFragment(denied)
+	if dsum.Grants != 1 || len(dsum.Denied) != 1 {
+		t.Fatalf("denied ingress leaked into fragment: %+v", dsum)
+	}
+}
+
+func TestRenderWithFragments(t *testing.T) {
+	frag, _, err := RenderFragment(spokeInputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, sum, err := Render([]byte(base), inputs, frag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	// The spoke's tags, route and grants are now in the hub render.
+	owners := doc["tagOwners"].(map[string]any)
+	if owners["tag:egress-spoke-db"] == nil || owners["tag:ingress-spoke-api"] == nil {
+		t.Fatalf("spoke tags not merged: %v", owners)
+	}
+	routes := doc["autoApprovers"].(map[string]any)["routes"].(map[string]any)
+	if routes["10.9.0.5/32"] == nil {
+		t.Fatalf("spoke route not merged: %v", routes)
+	}
+	base0, base0Sum, _ := Render([]byte(base), inputs)
+	var baseDoc map[string]any
+	_ = json.Unmarshal(base0, &baseDoc)
+	if len(doc["grants"].([]any)) != len(baseDoc["grants"].([]any))+2 || sum.Grants != base0Sum.Grants+2 {
+		t.Fatalf("spoke grants not merged: %d vs %d", len(doc["grants"].([]any)), len(baseDoc["grants"].([]any)))
+	}
+
+	// Base wins: a fragment re-declaring a base-owned tag does not overwrite it.
+	collide := []byte(`{"tagOwners":{"tag:egress-legacy":["group:evil"]},"grants":[]}`)
+	out2, _, err := Render([]byte(base), inputs, collide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.Unmarshal(out2, &doc)
+	if doc["tagOwners"].(map[string]any)["tag:egress-legacy"].([]any)[0] != "group:legacy" {
+		t.Fatal("fragment overwrote a base tagOwner")
+	}
+
+	// Idempotent: merging the same fragment twice adds nothing the second time, but both count.
+	dup, dupSum, _ := Render([]byte(base), inputs, frag, frag)
+	if string(dup) != string(out) || dupSum.Grants != sum.Grants || sum.Fragments != 1 || dupSum.Fragments != 2 {
+		t.Fatalf("duplicate fragment changed the render: %+v / %+v", sum, dupSum)
+	}
+
+	// Fail closed on a foreign key or a non-object fragment.
+	for _, bad := range []string{`{"acls":[{"action":"accept"}]}`, `{"groups":{"group:x":["a@"]}}`, `[]`, `not json`} {
+		if _, _, err := Render([]byte(base), inputs, []byte(bad)); !errors.Is(err, ErrFragment) {
+			t.Fatalf("fragment %q accepted: %v", bad, err)
+		}
+	}
+}

@@ -1,0 +1,12 @@
+# ExpectedError: required when baseConfigMap is set or mode is Export
+---
+apiVersion: tsunaro.io/v1alpha1
+kind: Tailnet
+metadata:
+  name: invalid
+spec:
+  server: https://ts.example.com
+  apiSecretRef:
+    name: bootstrap
+  policy:
+    mode: Export
