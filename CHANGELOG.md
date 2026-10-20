@@ -11,6 +11,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   per cluster, repository layout); [Limitations](docs/reference/limitations.md) — the functional
   boundaries in one table per area, each checked against the code.
 
+### Changed
+
+- `Tailnet.spec.apiUrl` no longer participates in the HTTP ingress agent identity. Agents dial
+  `server`, never `apiUrl`, so switching the operator's API endpoint (for example `http` → `https`)
+  keeps every agent running. One-time effect: the first upgrade to this version re-rolls the HTTP
+  ingress agents once, together with the image rollout that upgrade performs anyway.
+
 ## [0.20.0] - 2026-10-19
 
 ### Added

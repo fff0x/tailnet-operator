@@ -52,13 +52,11 @@ func ingressResolvedControlDigest(in *tnv1.TailnetIngress, tn *tnv1.Tailnet) str
 	if hostname == "" {
 		hostname = naming.Render(tn.Spec.IngressHostnameTemplate, in.Name)
 	}
-	apiURL := tn.Spec.APIURL
-	if apiURL == "" {
-		apiURL = tn.Spec.Server
-	}
+	// apiUrl is the operator's own path to the Headscale REST API; agents only ever dial Server.
+	// Keeping it out means switching apiUrl (say, http -> https) does not re-roll every HTTP agent.
 	data, _ := json.Marshal(struct {
-		Tailnet, UID, Server, APIURL, Tag, Hostname string
-	}{tn.Name, string(tn.UID), tn.Spec.Server, apiURL, tag, hostname})
+		Tailnet, UID, Server, Tag, Hostname string
+	}{tn.Name, string(tn.UID), tn.Spec.Server, tag, hostname})
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])
 }

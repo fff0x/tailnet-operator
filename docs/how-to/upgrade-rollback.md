@@ -24,7 +24,10 @@ LIVE_CR_FILE="$live" task test-validation; rm -f -- "$live"
    ingress connection.
 
 A pure operator restart with unchanged desired state does not restart agents; a `Ready=False` during
-an agent image change is a real interruption, not a status flap. Breaking changes per version are
+an agent image change is a real interruption, not a status flap. Outside upgrades, an agent restarts
+only when something it dials or presents changes: `Tailnet.spec.server`, the tag or hostname
+templates, the TLS defaults, or the CR itself. `Tailnet.spec.apiUrl` is the operator's path to the
+Headscale API and leaves agents alone. Breaking changes per version are
 
 ### Verify after the upgrade
 
