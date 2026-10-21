@@ -87,11 +87,16 @@ func storeGatewayMint(ctx context.Context, c client.Client, namespace string, g 
 	return receipt, nil
 }
 
+// mintSnapshotsUnchanged pins the identity of the two CR snapshots (UID, generation,
+// spec, not terminating), not their resourceVersion: the Tailnet and policy controllers
+// write Tailnet status while a gateway bootstraps, and nothing the writer renders reads
+// CR metadata or status. Pinning the revision only turned that status write into a
+// permanently FreshBlocked gateway with its children left behind.
 func mintSnapshotsUnchanged(ctx context.Context, r client.Reader, g *tnv1.TailnetGateway, tn *tnv1.Tailnet) bool {
 	liveG, liveTN := &tnv1.TailnetGateway{}, &tnv1.Tailnet{}
 	return r.Get(ctx, client.ObjectKeyFromObject(g), liveG) == nil && r.Get(ctx, client.ObjectKeyFromObject(tn), liveTN) == nil &&
-		liveG.UID == g.UID && liveG.ResourceVersion == g.ResourceVersion && liveG.Generation == g.Generation && liveG.DeletionTimestamp == nil && equality.Semantic.DeepEqual(liveG.Spec, g.Spec) &&
-		liveTN.UID == tn.UID && liveTN.ResourceVersion == tn.ResourceVersion && liveTN.Generation == tn.Generation && liveTN.DeletionTimestamp == nil && equality.Semantic.DeepEqual(liveTN.Spec, tn.Spec)
+		liveG.UID == g.UID && liveG.Generation == g.Generation && liveG.DeletionTimestamp == nil && equality.Semantic.DeepEqual(liveG.Spec, g.Spec) &&
+		liveTN.UID == tn.UID && liveTN.Generation == tn.Generation && liveTN.DeletionTimestamp == nil && equality.Semantic.DeepEqual(liveTN.Spec, tn.Spec)
 }
 
 func sameGatewayTags(a, b []string) bool {

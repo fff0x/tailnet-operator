@@ -115,16 +115,18 @@ func TestStoreGatewayMintRejectsUnverifiedInputs(t *testing.T) {
 		"ephemeral": func(_ client.Client, _ *tnv1.TailnetGateway, _ *tnv1.Tailnet, key *headscale.PreAuthKey) {
 			key.Ephemeral = true
 		},
+		// Spec moves on either CR block; label/status-only moves no longer do
+		// (TestGatewayMintRecordRejectsChangedScope covers that side).
 		"changed gateway": func(c client.Client, g *tnv1.TailnetGateway, _ *tnv1.Tailnet, _ *headscale.PreAuthKey) {
 			current := &tnv1.TailnetGateway{}
 			_ = c.Get(context.Background(), client.ObjectKey{Name: g.Name}, current)
-			current.Labels = map[string]string{"changed": "yes"}
+			current.Spec.Hostname += "-changed"
 			_ = c.Update(context.Background(), current)
 		},
 		"changed tailnet": func(c client.Client, _ *tnv1.TailnetGateway, tn *tnv1.Tailnet, _ *headscale.PreAuthKey) {
 			current := &tnv1.Tailnet{}
 			_ = c.Get(context.Background(), client.ObjectKey{Name: tn.Name}, current)
-			current.Labels = map[string]string{"changed": "yes"}
+			current.Spec.Server = "https://changed.example"
 			_ = c.Update(context.Background(), current)
 		},
 	} {

@@ -157,9 +157,10 @@ func TestGatewayAuthRecordAPI(t *testing.T) {
 	}
 	changeGateway := func(t *testing.T, g *tnv1.TailnetGateway) {
 		t.Helper()
+		// A spec move: label/status-only moves no longer block a mint (format 2).
 		live := &tnv1.TailnetGateway{}
 		must(t, admin.Get(ctx, client.ObjectKeyFromObject(g), live))
-		live.Labels = map[string]string{"example.com/concurrent": "changed"}
+		live.Spec.Routes.LAN = append(live.Spec.Routes.LAN, "10.99.0.0/16")
 		must(t, admin.Update(ctx, live))
 	}
 

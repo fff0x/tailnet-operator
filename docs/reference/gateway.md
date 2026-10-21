@@ -45,10 +45,12 @@ rendered as hosts+forward blocks (see [Extra zones](#extra-zones-dnsextrazones))
    additionally bind to this new State UID, preventing selection of old orphan Pods.
 3. Call `PlanGatewayMint`, then the existing Headscale client, then `storeGatewayMintRecord`.
    The reusable key is non-ephemeral, tag-bound and limited to 24 hours.
-4. Recheck the Gateway/Tailnet snapshots, the identity (UID, not content) of the hosts
-   ConfigMap, the empty State UID and durable auth before each resource Create. Hosts
-   content and TailnetEgress revisions may change during the bootstrap: the live DNS
-   and route reconcilers converge them after completion, so agents registering
+4. Recheck the Gateway/Tailnet snapshots (UID, generation, spec — not resourceVersion),
+   the identity (UID, not content) of the hosts ConfigMap, the empty State UID and
+   durable auth before each resource Create. Hosts content, TailnetEgress revisions
+   and CR status/metadata may change during the bootstrap: the live DNS and route
+   reconcilers converge content after completion, and the Tailnet controller writing
+   status while the gateway boots is not a changed source. Agents registering
    mid-bootstrap do not block it. Create the nine rendered resources, with the
    StatefulSet last. Never patch or adopt an existing object.
 5. Create immutable `<gateway>-fresh` completion evidence: scope, independent State UID,
@@ -211,18 +213,20 @@ It rejects returned key bytes, key ID or expiry that differ from the mint respon
 It then exclusively creates an immutable, ownerless `<gateway>-auth-receipt`
 ConfigMap in the operator namespace. This record is separate from the nine rendered
 resources and contains no credential bytes or credential hash. Its versioned schema
-binds the Gateway and Tailnet names, UIDs, exact revisions and complete typed-spec
-hashes to the Secret name, Create UID/revision, numeric key ID and absolute expiry.
+(format 2) binds the Gateway and Tailnet names, UIDs and complete typed-spec hashes
+to the Secret name, Create UID/revision, numeric key ID and absolute expiry.
 Spec hashes use `encoding/json`: sorted map keys, original list order and the
 Go types' default/omission semantics. Only admitted snapshots belong in this protocol.
 
 `readGatewayMintRecord` uses explicit uncached reads and checks the trusted record
 before accepting the Secret. Missing records, replaced Secrets, unknown schema
-fields, expiry or changed scope block recovery. **Even metadata/status-only CR
-updates or Secret metadata updates block reuse**, because revisions must match.
-This strict reader is used during bootstrap. Completed-set observation uses the
-separate `<gateway>-fresh` record to tolerate status/metadata-only CR changes;
-Secret metadata changes still block it; auth expiry does not (the key is spent
+fields, expiry or changed scope block recovery. **Secret metadata updates block
+reuse**, because the Secret's revision must match; metadata/status-only updates
+on the Gateway or Tailnet do not (format 1 pinned their revisions too, which
+turned a Tailnet status write during the bootstrap into a stranded `FreshBlocked`
+set). This strict reader is used during bootstrap. Completed-set observation uses
+the separate `<gateway>-fresh` record, which also tolerates status/metadata-only
+CR changes; Secret metadata changes still block it; auth expiry does not (the key is spent
 once the record exists), while the recorded expiry value must still match.
 The ConfigMap is the durable trust anchor: its create/update/delete permissions
 must be restricted as strictly as the Secret's. Immutability does not prevent

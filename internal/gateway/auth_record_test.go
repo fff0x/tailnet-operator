@@ -143,14 +143,13 @@ func TestGatewayMintRecordRetainedReadOnlyRecovery(t *testing.T) {
 	tb, _ := json.Marshal(tn.Spec)
 	gh, th := sha256.Sum256(gb), sha256.Sum256(tb)
 	want := map[string]string{
-		"format": "1", "gatewayName": g.Name, "gatewayUID": string(g.UID), "gatewayVersion": g.ResourceVersion,
-		"gatewaySpecSHA256": hex.EncodeToString(gh[:]), "tailnetName": tn.Name, "tailnetUID": string(tn.UID),
-		"tailnetVersion": tn.ResourceVersion, "tailnetSpecSHA256": hex.EncodeToString(th[:]),
+		"format": "2", "gatewayName": g.Name, "gatewayUID": string(g.UID), "gatewaySpecSHA256": hex.EncodeToString(gh[:]),
+		"tailnetName": tn.Name, "tailnetUID": string(tn.UID), "tailnetSpecSHA256": hex.EncodeToString(th[:]),
 		"secretName": g.Name + "-auth", "secretUID": string(created.UID), "secretVersion": created.Version,
 		"keyID": key.ID, "expires": key.Expiration.UTC().Format(time.RFC3339),
 	}
 	assertAuthRecordCanary(t, key.Key, record, nil)
-	if len(record.Data) != 14 || !reflect.DeepEqual(record.Data, want) {
+	if len(record.Data) != 12 || !reflect.DeepEqual(record.Data, want) {
 		t.Fatal("record is not the exact versioned credential-free scope")
 	}
 	reader := authRecordReader{Reader: c, t: t}
@@ -190,8 +189,8 @@ func TestGatewayMintRecordRejectsMalformedEvidence(t *testing.T) {
 		"foreign manager": func(cm *corev1.ConfigMap) { cm.Labels["app.kubernetes.io/managed-by"] = "foreign" },
 	}
 	for field, value := range map[string]string{
-		"format": "2", "gatewayName": "foreign", "gatewayUID": "foreign", "gatewayVersion": "foreign",
-		"gatewaySpecSHA256": strings.Repeat("0", 64), "tailnetName": "foreign", "tailnetUID": "foreign", "tailnetVersion": "foreign",
+		"format": "1", "gatewayName": "foreign", "gatewayUID": "foreign",
+		"gatewaySpecSHA256": strings.Repeat("0", 64), "tailnetName": "foreign", "tailnetUID": "foreign",
 		"tailnetSpecSHA256": strings.Repeat("0", 64), "secretName": "foreign-auth", "secretUID": "foreign", "secretVersion": "foreign",
 		"keyID": "18", "expires": now.Format(time.RFC3339),
 	} {
@@ -230,6 +229,11 @@ func TestGatewayMintRecordRejectsChangedScope(t *testing.T) {
 	}
 	// Keep RVs unchanged for spec-only mutations to exercise the full typed
 	// hashes, including fields that are not in the Secret's provenance metadata.
+	// CR revision, metadata and status moves are tolerated (format 2 binds UID
+	// and spec, not resourceVersion); the same moves on the Secret still block.
+	tolerated := func(kind, change string) bool {
+		return kind != "secret" && (change == "version" || change == "metadata" || change == "status")
+	}
 	for _, kind := range []string{"gateway", "tailnet", "secret"} {
 		for _, change := range []string{"UID", "version", "metadata", "status", "spec", "namespace"} {
 			if kind == "secret" && change == "status" {
@@ -283,6 +287,13 @@ func TestGatewayMintRecordRejectsChangedScope(t *testing.T) {
 					}
 				}}
 				got, err := readGatewayMintRecord(t.Context(), reader, g.Name, "operator", now)
+				if tolerated(kind, change) {
+					assertAuthRecordCanary(t, key.Key, got, err)
+					if err != nil || got == (GatewayAuthReceipt{}) {
+						t.Fatal("CR revision/metadata/status move blocked the mint record")
+					}
+					return
+				}
 				assertAuthRecordBlocked(t, key.Key, got, err)
 			})
 		}

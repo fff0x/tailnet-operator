@@ -23,11 +23,13 @@ import (
 
 var ErrGatewayAuthRecord = errors.New("gateway auth bootstrap: durable mint record is missing or unverified")
 
-// mintRecordScope v1 hashes the complete typed specs as encoding/json encodes
+// mintRecordScope v2 hashes the complete typed specs as encoding/json encodes
 // them: sorted map keys, original list order, and the types' omitempty/default
 // semantics. Only admitted snapshots should enter this protocol. Status and
 // referenced credential bytes are excluded; spec references themselves are not.
-// Exact CR RVs deliberately make even metadata/status-only changes block reuse.
+// Format 1 also pinned the exact CR resourceVersions, so a status write by the
+// Tailnet or policy controller during the bootstrap blocked the mint for good;
+// v2 binds UID and spec hash only (mintSnapshotsUnchanged guards the generation).
 func mintRecordScope(g *tnv1.TailnetGateway, tn *tnv1.Tailnet, namespace string) (map[string]string, error) {
 	if g == nil || tn == nil || g.UID == "" || tn.UID == "" || g.ResourceVersion == "" || tn.ResourceVersion == "" ||
 		g.Namespace != "" || tn.Namespace != "" || g.DeletionTimestamp != nil || tn.DeletionTimestamp != nil ||
@@ -43,9 +45,8 @@ func mintRecordScope(g *tnv1.TailnetGateway, tn *tnv1.Tailnet, namespace string)
 	}
 	gh, th := sha256.Sum256(gb), sha256.Sum256(tb)
 	return map[string]string{
-		"format": "1", "gatewayName": g.Name, "gatewayUID": string(g.UID), "gatewayVersion": g.ResourceVersion,
-		"gatewaySpecSHA256": hex.EncodeToString(gh[:]), "tailnetName": tn.Name, "tailnetUID": string(tn.UID),
-		"tailnetVersion": tn.ResourceVersion, "tailnetSpecSHA256": hex.EncodeToString(th[:]),
+		"format": "2", "gatewayName": g.Name, "gatewayUID": string(g.UID), "gatewaySpecSHA256": hex.EncodeToString(gh[:]),
+		"tailnetName": tn.Name, "tailnetUID": string(tn.UID), "tailnetSpecSHA256": hex.EncodeToString(th[:]),
 	}, nil
 }
 

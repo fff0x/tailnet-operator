@@ -198,6 +198,24 @@ func TestGatewayFreshWriter(t *testing.T) {
 		f.assertMints(1)
 	})
 
+	t.Run("tailnet status write mid-mint does not block", func(t *testing.T) {
+		// The Tailnet and policy controllers write Tailnet status while a gateway
+		// bootstraps (the new gateway's tags re-render the policy). Fire such a
+		// write between the State Secret and the first child Create: the mint
+		// must complete with one key, not strand a partial set in FreshBlocked.
+		// (The gateway's own status is only ever written by this controller.)
+		f := newFixture(t, false)
+		f.hs.onMint = func() {
+			tn := &tnv1.Tailnet{}
+			gatewayWriterMust(t, admin.Get(ctx, client.ObjectKeyFromObject(f.tn), tn), "read Tailnet mid-mint")
+			tn.Status.Conditions = []metav1.Condition{{Type: "Fixture", Status: metav1.ConditionTrue, Reason: "MidMint", Message: "Synthetic status write during the bootstrap", LastTransitionTime: metav1.Now()}}
+			gatewayWriterMust(t, admin.Status().Update(ctx, tn), "write Tailnet status mid-mint")
+		}
+		f.reconcile("Provisioning")
+		f.assertComplete()
+		f.assertMints(1)
+	})
+
 	t.Run("metrics survive operator restart in fresh path", func(t *testing.T) {
 		// The fresh reconcile path (reconcileFresh) hosts the same DeepEqual
 		// early return as the suspended path: a fresh Prometheus registry after
@@ -429,6 +447,9 @@ type gatewayWriterHeadscale struct {
 	// Teardown observations and fault injection.
 	deletedNodes, expiredKeys []string
 	failDelete                bool
+	// onMint runs inside the pre-auth key handler, i.e. after the State Secret
+	// exists and before any child is created: a hook for mid-mint interference.
+	onMint func()
 }
 
 func (h *gatewayWriterHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -447,6 +468,9 @@ func (h *gatewayWriterHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		}
 	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/preauthkey":
 		h.mints++
+		if h.onMint != nil {
+			h.onMint()
+		}
 		var req headscale.CreatePreAuthKeyRequest
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()

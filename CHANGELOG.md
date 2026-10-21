@@ -18,6 +18,15 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   keeps every agent running. One-time effect: the first upgrade to this version re-rolls the HTTP
   ingress agents once, together with the image rollout that upgrade performs anyway.
 
+### Fixed
+
+- Gateway bootstrap survives status and metadata writes on the Gateway and Tailnet CRs. The mint
+  guard and the `-auth-receipt` record (now format 2) pin UID, generation and spec, not
+  `resourceVersion`: the Tailnet controller re-rendering the policy for the new gateway's tags used
+  to land inside the mint window and strand the set in `Ready=False/FreshBlocked`. A gateway already
+  stranded that way is still cleared the documented way (`deletionPolicy: Delete`, delete, recreate).
+  [Gateway reference](docs/reference/gateway.md#minimal-fresh-lifecycle)
+
 ### Documentation
 
 - Ephemeral agent identity spelled out: a restarted agent is a new node with a new tailnet IP, names

@@ -298,6 +298,21 @@ func TestFreshSourcesUnchangedIgnoresContentRevisions(t *testing.T) {
 			t.Fatal("replaced hosts source accepted")
 		}
 	})
+	t.Run("status and metadata revisions pass", func(t *testing.T) {
+		c, g, tn, hosts := build(t)
+		liveTN, liveG := tn.DeepCopy(), g.DeepCopy()
+		liveTN.Status.ObservedGeneration++
+		liveG.Annotations = map[string]string{"example.test/note": "metadata-only"}
+		if err := c.Update(ctx, liveTN); err != nil || liveTN.ResourceVersion == tn.ResourceVersion {
+			t.Fatal("fixture did not bump the Tailnet revision")
+		}
+		if err := c.Update(ctx, liveG); err != nil || liveG.ResourceVersion == g.ResourceVersion {
+			t.Fatal("fixture did not bump the Gateway revision")
+		}
+		if !freshSourcesUnchanged(ctx, c, g, tn, hosts) {
+			t.Fatal("status/metadata revision mid-mint blocks the bootstrap")
+		}
+	})
 	t.Run("changed tailnet blocks", func(t *testing.T) {
 		c, g, tn, hosts := build(t)
 		live := tn.DeepCopy()
