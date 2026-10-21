@@ -46,6 +46,23 @@ description: "Symptom table with the condition reasons, and the diagnosis cheat 
 | What did the policy render? | `kubectl get tailnet corp -o jsonpath='{.status.policy}'`, ConfigMap `headscale-policy-rendered` | hashes equal, `PolicyApplied=True` |
 | Who is on the tailnet? | `kubectl -n tailnet-system exec deploy/headscale -- headscale nodes list` | egress/ingress nodes online with their tags |
 
+### Clients time out right after an agent restart
+
+An agent Pod carries no state: each start registers a new Headscale node with a new tailnet IP
+([Limitations](../reference/limitations.md#data-path-agents)). The operator rewrites the split-DNS zone
+within seconds and deletes the old node on its next reconcile, but a client that resolved the name
+just before the restart keeps the old address until the 30 s record TTL expires — connections time
+out for up to that long, on top of the restart itself. It is a symptom of the restart, not a second
+fault: check why the agent restarted (`kubectl -n <ns> describe deploy <agent>`, OOM, LimitRange)
+and confirm the new identity is live:
+
+```sh
+kubectl -n <ns> get tailnetingress <name> -o jsonpath='{.status.nodeId} {.status.tailnetIps}{"\n"}'
+dig +short <dnsName> @<gateway DNS Service IP>   # must show the new IP
+```
+
+Address agents by name, never by tailnet IP; the name is the contract that survives a restart.
+
 ### Known CNI behavior: ICMP errors
 
 Kubernetes NetworkPolicy specifies TCP, UDP and SCTP; ICMP handling is up to the CNI, and some

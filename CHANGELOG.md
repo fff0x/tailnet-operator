@@ -18,6 +18,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   keeps every agent running. One-time effect: the first upgrade to this version re-rolls the HTTP
   ingress agents once, together with the image rollout that upgrade performs anyway.
 
+### Documentation
+
+- Ephemeral agent identity spelled out: a restarted agent is a new node with a new tailnet IP, names
+  are the stable handle, records carry a 30 s TTL ([Limitations](docs/reference/limitations.md),
+  [Troubleshooting](docs/how-to/troubleshooting.md#clients-time-out-right-after-an-agent-restart),
+  [Model](docs/explanation/model.md)).
+
 ## [0.20.0] - 2026-10-19
 
 ### Added
