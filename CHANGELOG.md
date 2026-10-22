@@ -37,6 +37,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   stored object that set the field loses it on the next write and, since the field blocked
   bootstrap, starts its fresh bootstrap afterwards — none is known to exist.
 
+### Security
+
+- Go 1.26.10: `govulncheck` reported the reachable `crypto/x509` advisory GO-2026-6809 against
+  Go 1.26.9. The module and the CI test image now require 1.26.10; the scan is clean again.
+
 ### Fixed
 
 - Gateway bootstrap survives status and metadata writes on the Gateway and Tailnet CRs. The mint

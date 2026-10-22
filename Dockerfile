@@ -18,7 +18,7 @@
 ## `buildah run` in a fresh working container, NOT a cacheable Dockerfile RUN.
 ##
 # renovate: datasource=docker depName=golang versioning=docker
-FROM docker.io/library/golang:1.26.9-bookworm AS TEST
+FROM docker.io/library/golang:1.26.10-bookworm AS TEST
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends bash ca-certificates curl jq sqlite3 \
