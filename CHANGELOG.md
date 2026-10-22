@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-22
+
 ### Added
 
 - Docs: [Connect a second cluster](docs/how-to/second-cluster.md) — hub and spokes on one Headscale

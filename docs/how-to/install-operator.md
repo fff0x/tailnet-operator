@@ -28,7 +28,7 @@ before activation. Installing the chart alone does not create a Gateway.
 
 ```sh
 helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
-  --version 0.20.0 --namespace tailnet-system --create-namespace
+  --version 0.21.0 --namespace tailnet-system --create-namespace
 
 kubectl -n tailnet-system create secret generic headscale-bootstrap --from-literal=apiKey='<key>'
 
@@ -55,9 +55,9 @@ To inspect or vendor the chart, pull it and verify its signature first (see
 [SECURITY.md](../explanation/security-model.md) for the key and the Radicle release record):
 
 ```sh
-helm pull oci://oci.this-is-fine.io/charts/tailnet-operator --version 0.20.0
+helm pull oci://oci.this-is-fine.io/charts/tailnet-operator --version 0.21.0
 cosign verify --key deploy/cosign.pub --insecure-ignore-tlog \
-  oci.this-is-fine.io/charts/tailnet-operator:0.20.0
+  oci.this-is-fine.io/charts/tailnet-operator:0.21.0
 ```
 
 ```sh
