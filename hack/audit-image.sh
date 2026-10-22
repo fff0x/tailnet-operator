@@ -142,9 +142,9 @@ jq -e -s '
 ' index.json >/dev/null
 
 stage=signature
-# The publisher signs the index; its descriptors bind both child digests. Fixed-key
-# verification intentionally does not claim public Rekor transparency-log evidence.
-run cosign-legacy verify --key "$work/broker.pub" --insecure-ignore-tlog=true "$ref" >signature.json
+# The publisher signs the index; its descriptors bind both child digests. The signature must
+# also be recorded in the public Rekor transparency log (cosign's default upload).
+run cosign-legacy verify --key "$work/broker.pub" "$ref" >signature.json
 jq -e -s --arg digest "$index" --arg repo "$expected" '
   [ .[] | if type == "array" then .[] else . end ] |
   any(.[]; .critical.image["docker-manifest-digest"] == $digest and
@@ -257,7 +257,7 @@ fi
 
 verify_attestation() {
   local target=$1 digest=$2 kind=$3 predicate=$4 uri=$5
-  run cosign-legacy verify-attestation --key "$work/broker.pub" --insecure-ignore-tlog=true \
+  run cosign-legacy verify-attestation --key "$work/broker.pub" \
     --type "$kind" "$target" >verified.json
   # Exit zero alone is insufficient: require a verified DSSE envelope containing
   # this exact predicate and subject, not an older attestation of the same type.
@@ -278,7 +278,7 @@ verify_attestation() {
 for arch in amd64 arm64; do
   stage=sbom-attestation
   child=$(jq -r --arg arch "$arch" '.[] | select(.platform == ("linux/" + $arch)) | .digest' summaries.json)
-  run cosign-legacy attest --yes --key "$COSIGN_KEY" --tlog-upload=false --type spdxjson \
+  run cosign-legacy attest --yes --key "$COSIGN_KEY" --type spdxjson \
     --predicate "$work/$arch-spdx.json" "$expected@$child"
   verify_attestation "$expected@$child" "$child" spdxjson "$work/$arch-spdx.json" https://spdx.dev/Document
 done
@@ -303,7 +303,7 @@ jq -n --arg source rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX --arg commit "$commit" --ar
     } | tojson | @base64)}]
   }
 }' >provenance.json
-run cosign-legacy attest --yes --key "$COSIGN_KEY" --tlog-upload=false --type slsaprovenance1 \
+run cosign-legacy attest --yes --key "$COSIGN_KEY" --type slsaprovenance1 \
   --predicate "$work/provenance.json" "$ref"
 verify_attestation "$ref" "$index" slsaprovenance1 "$work/provenance.json" https://slsa.dev/provenance/v1
 printf 'image audit: accepted (both platforms; verified SBOM and provenance attestations)\n' >&3

@@ -816,7 +816,8 @@ func auditMockTool(tool string, args []string) int {
 		}
 		if args[0] == "verify" || args[0] == "verify-attestation" {
 			b, err := os.ReadFile(auditArg(args, "--key"))
-			if err != nil || string(b) != "SYNTHETIC PUBLIC KEY\n" || !auditHas(args, "--insecure-ignore-tlog=true") {
+			// Transparency-log evidence is part of the audit: no flag may skip it.
+			if err != nil || string(b) != "SYNTHETIC PUBLIC KEY\n" || auditHas(args, "--insecure-ignore-tlog=true") || auditHas(args, "--insecure-ignore-tlog") {
 				return 83
 			}
 		}
@@ -837,7 +838,7 @@ func auditMockTool(tool string, args []string) int {
 			return 82
 		}
 		if args[0] == "attest" {
-			if !auditHas(args, "--yes") || !auditHas(args, "--tlog-upload=false") || auditArg(args, "--key") != filepath.Join(root, "synthetic.key") {
+			if !auditHas(args, "--yes") || auditHas(args, "--tlog-upload=false") || auditArg(args, "--key") != filepath.Join(root, "synthetic.key") {
 				return 81
 			}
 			if scenario == "attest-error" && digest == auditARM {
