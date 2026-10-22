@@ -95,7 +95,7 @@ spec:
 ```sh
 kubectl get tailnet corp
 # NAME   SERVER                   APIKEY   EXPIRES                COMPAT       POLICY    DNS            AGE
-# corp   https://ts.example.com   True     2026-10-28T12:00:00Z   Compatible   Applied   CannotVerify   3d
+# corp   https://ts.example.com   True     2026-10-28T12:00:00Z   Compatible   Applied   Configured     3d
 ```
 
 From now on: **never run `headscale policy set` by hand.** The operator compares the live document

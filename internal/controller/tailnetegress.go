@@ -570,16 +570,7 @@ func truncate(s string, n int) string {
 }
 
 func (r *TailnetEgressReconciler) agentPodIP(ctx context.Context, ns, name string) string {
-	var pods corev1.PodList
-	if err := r.List(ctx, &pods, client.InNamespace(ns), client.MatchingLabels(selectorLabels(name))); err != nil {
-		return ""
-	}
-	for _, p := range pods.Items {
-		if p.Status.Phase == corev1.PodRunning && p.Status.PodIP != "" {
-			return p.Status.PodIP
-		}
-	}
-	return ""
+	return runningAgentIP(ctx, r.Client, ns, selectorLabels(name))
 }
 
 // SetupWithManager registers the TailnetEgress controller and its owned children.

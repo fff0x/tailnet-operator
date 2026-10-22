@@ -20,7 +20,7 @@ router is never adopted. The complete worked example (manifest, LB pool, iBGP, s
 | A LoadBalancer implementation with a pool whose selector matches `service.poolLabels` and whose CIDR contains `service.loadBalancerIP` | the LB IP is the split-DNS nameserver peers dial; `tailnetLBCIDR` is advertised so peers reach every IP of the pool | `kubectl -n tailnet-system get svc prod-1-gw` shows an `EXTERNAL-IP` |
 | A free, stable ClusterIP for `dns.serviceClusterIP` | the cluster CoreDNS forwards the zone to it; immutable | `kubectl get svc -A -o jsonpath='{.items[*].spec.clusterIP}' \| tr ' ' '\n' \| grep 10.96.0.54` prints nothing before creation |
 | `Tailnet.spec.policy.mode: Apply` with the gateway tag in `routeApprovers` and `tagOwners` set — or a hand-maintained policy with matching `tagOwners` and `autoApprovers.routes` | routes are approved automatically only when the operator owns the policy | `kubectl get tailnet corp` shows `POLICY=Applied` |
-| Headscale `dns.nameservers.split` for the zone → the LB IP (manual; Headscale has no DNS API) | peers must ask the gateway for `*.<zone>` | `Tailnet` reports `SplitDNS=Unknown/CannotVerify`, by design |
+| Headscale `dns.nameservers.split` for the zone → the LB IP (manual; Headscale has no DNS API) | peers must ask the gateway for `*.<zone>` | `Tailnet` reports `SplitDNS=Configured` once an agent's netmap shows it; `Missing`/`Mismatch` otherwise |
 | Backup of the state Secret and the receipt ConfigMaps | the node identity lives there; without them the gateway is a new node | [State, backup and loss](../operations/state-backup.md) |
 
 ## Order
@@ -196,7 +196,7 @@ spec:
 ```
 
 **Headscale split-DNS.** Peers resolve the zone at the gateway's LoadBalancer IP (Headscale has no
-API for this; `SplitDNS=Unknown/CannotVerify` on the Tailnet is the reminder):
+API for this; the Tailnet's `SplitDNS` condition reads the result back from an agent's netmap):
 
 ```yaml
 dns:

@@ -106,8 +106,9 @@ Read the three reason columns:
 - `APIKEY=True` — the operator reached the API and minted its working key (`EXPIRES` is that key).
 - `COMPAT=Incompatible` is **expected in file mode**: it means the operator cannot write the
   policy, which is what you want for now. In database mode it reads `Compatible`.
-- `DNS=CannotVerify` is always shown: Headscale has no DNS API, so the split-DNS zone
-  (`prod-1.tailnet.example.internal`) is yours to configure later.
+- `DNS=CannotVerify` until a gateway and one agent exist: Headscale has no DNS API, so the split-DNS
+  zone (`prod-1.tailnet.example.internal`) is yours to configure; the operator then reads it back
+  from an agent's netmap and reports `Configured`, `Missing` or `Mismatch`.
 
 If `APIKEY` is not `True`, `kubectl describe tailnet corp` names the cause (`ApiReachable`,
 `ApiKeyValid`); fix `apiUrl` or the Secret and the Tailnet retries on its own. The `http://`

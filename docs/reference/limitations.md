@@ -46,7 +46,7 @@ code. Versions and the preflight matrix are in [Compatibility](compatibility.md)
 | No adoption of an existing subnet router; `spec.suspend` defaults to `true`. | The operator creates the node, state Secret and key itself; a foreign node's state cannot be verified. | Run the operator gateway next to the old router, then retire the old one ([Replace a hand-built gateway](../how-to/gateway.md#replace-a-hand-built-gateway)); a lost state Secret or receipt means a new node ([no adoption](gateway.md#no-adoption)). |
 | One StatefulSet, **one replica** — no HA pair, no failover between gateways. | A subnet router is a single node identity in Headscale; two advertisers of the same prefix are a Headscale/HA question, not an operator one. | Two gateways with disjoint prefixes, or accept the single router. |
 | LoadBalancer pool, iBGP peering, kernel forwarding and `/dev/net/tun` are **site prerequisites**. | The operator renders the Service and the BGP intent; the platform must honour them. | [Gateway prerequisites](../how-to/gateway.md#prerequisites). |
-| Headscale split-DNS cannot be set or verified by the operator (`SplitDNS=Unknown/CannotVerify`). | Headscale has no DNS API. | Add `dns.nameservers.split` by hand; the `Tailnet` prints the zone. |
+| Headscale split-DNS cannot be set by the operator. | Headscale has no DNS API. | Add `dns.nameservers.split` by hand; the `Tailnet` verifies it from an agent's netmap (`SplitDNS=Configured` / `Missing` / `Mismatch`) and prints the expected address. |
 
 ## IPv6
 

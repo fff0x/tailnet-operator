@@ -7,12 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/headscale"
-	"tsunaro.io/tailnet-operator/internal/naming"
 )
 
 func preflightConditions(ctx context.Context, hs *headscale.Client, tn *tnv1.Tailnet) bool {
@@ -57,17 +55,6 @@ func setPreflightConditions(tn *tnv1.Tailnet, caps headscale.Capabilities, probe
 	}
 	// Do not copy upstream response bodies into status: gateways can echo bearer tokens or policies.
 	setCond(&tn.Status.Conditions, tn.Generation, "HeadscaleCompatible", status, reason, msg)
-	setSplitDNSCondition(tn)
-}
-
-func setSplitDNSCondition(tn *tnv1.Tailnet) {
-	zone := naming.ZoneOf(tn.Spec.DNS.IngressNameTemplate)
-	if zone == "" {
-		meta.RemoveStatusCondition(&tn.Status.Conditions, "SplitDNS")
-		return
-	}
-	setCond(&tn.Status.Conditions, tn.Generation, "SplitDNS", metav1.ConditionUnknown, "CannotVerify",
-		fmt.Sprintf("Headscale has no DNS API; expected dns.nameservers.split.%s to point to your gateway DNS Service IP", zone))
 }
 
 // userConditions lists Headscale users and reports names shared by more than one user as

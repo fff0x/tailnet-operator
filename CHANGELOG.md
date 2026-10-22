@@ -13,6 +13,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Changed
 
+- `Tailnet` condition `SplitDNS` is verified instead of permanently `Unknown/CannotVerify`. The
+  agent exposes the split-DNS routes of its netmap on the health port (`/dns`); the operator reads
+  them from one running ingress or egress agent of the Tailnet and compares the zone from
+  `dns.ingressNameTemplate` with the `loadBalancerIP` of every bound `TailnetGateway`:
+  `True/Configured`, `False/Missing` (zone absent), `False/Mismatch` (other resolver). `CannotVerify`
+  remains only while no gateway or no online agent binds the Tailnet. Agents of the previous image
+  answer `/dns` with 404 and keep `CannotVerify` until rolled.
 - `Tailnet.spec.apiUrl` no longer participates in the HTTP ingress agent identity. Agents dial
   `server`, never `apiUrl`, so switching the operator's API endpoint (for example `http` → `https`)
   keeps every agent running. One-time effect: the first upgrade to this version re-rolls the HTTP

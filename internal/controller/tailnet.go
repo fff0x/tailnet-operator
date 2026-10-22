@@ -215,6 +215,9 @@ func (r *TailnetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		ok = false
 	}
 	userConditions(ctx, hs, &tn)
+	if !splitDNSCondition(ctx, r.Client, &tn) {
+		ok = false // requeue in a minute so a Headscale DNS fix shows up promptly
+	}
 
 	et := metav1.NewTime(exp)
 	tn.Status.APIKeyExpiresAt = &et

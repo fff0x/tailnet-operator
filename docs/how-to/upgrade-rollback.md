@@ -19,7 +19,7 @@ LIVE_CR_FILE="$live" task test-validation; rm -f -- "$live"
    `install.crds: CreateReplace` and `upgrade.crds: CreateReplace` on a Flux `HelmRelease`.
 2. `helm upgrade` (or apply the new `deploy/`). The operator re-rolls every agent whose image changed;
    agent Deployments use `Recreate`, so each affected CR's data path is interrupted for the restart.
-3. `kubectl get tailnet` — `COMPAT=Compatible`, `POLICY=InSync` or `Applied`, `DNS=CannotVerify`.
+3. `kubectl get tailnet` — `COMPAT=Compatible`, `POLICY=InSync` or `Applied`, `DNS=Configured` (or `CannotVerify` without a gateway).
 4. `kubectl get tailnetegress,tailnetingress -A` — every row `READY=True`; test one egress and one
    ingress connection.
 
@@ -39,7 +39,7 @@ Headscale API and leaves agents alone. Breaking changes per version are
 kubectl -n tailnet-system rollout status deploy/tailnet-operator
 kubectl get tailnetegress,tailnetingress -A
 # every row READY=True
-kubectl get tailnet corp          # COMPAT=Compatible; POLICY=Applied/InSync; DNS=CannotVerify (manual)
+kubectl get tailnet corp          # COMPAT=Compatible; POLICY=Applied/InSync; DNS=Configured
 ```
 
 ## Rollback

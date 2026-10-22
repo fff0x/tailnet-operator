@@ -53,7 +53,7 @@ func probeForwarder(h *httpIngress, cfg target) *forwarder {
 
 func healthCode(p *prober, fw *forwarder, state string) int {
 	rr := httptest.NewRecorder()
-	healthMux(fixedStatus(state), fw, p).ServeHTTP(rr, httptest.NewRequest("GET", "/healthz", nil))
+	healthMux(fixedStatus(state), fw, p, &dnsRoutes{}).ServeHTTP(rr, httptest.NewRequest("GET", "/healthz", nil))
 	return rr.Code
 }
 

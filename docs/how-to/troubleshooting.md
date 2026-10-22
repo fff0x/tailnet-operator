@@ -14,7 +14,8 @@ description: "Symptom table with the condition reasons, and the diagnosis cheat 
 | `HeadscaleCompatible=False/Incompatible` | condition message | missing policy/check endpoint (requires ≥ 0.29), or file policy mode |
 | `PolicyMode=False/File`, `PolicyApplied=False/PolicyModeFile` | Headscale `policy.mode` | switch to database mode using [Migrating from file mode](policy.md#migrating-from-file-mode); writes are skipped until mode detection changes |
 | Preflight `Unknown/ProbeFailed` | API/key conditions and Headscale logs | failed requests or invalid response shape; not proof of file mode |
-| `SplitDNS=Unknown/CannotVerify` | condition message and Headscale DNS config | manually configure the named split zone; external Headscale has no DNS API |
+| `SplitDNS=False/Missing` or `Mismatch` | condition message (observed vs expected resolver) and Headscale `dns.nameservers.split` | point the named zone at the gateway LoadBalancer IP; Headscale has no DNS API, so this is a manual edit |
+| `SplitDNS=Unknown/CannotVerify` | condition message | no `TailnetGateway` binds the Tailnet, or no agent (ingress/egress) is online to read the netmap |
 | `UsersUnique=False/Duplicate`, `PolicyApplied=False/PolicyRejected` | `headscale users list` | duplicate user names (typically OIDC plus a CLI-created user); destroy the surplus user, the next reconcile clears both |
 | Egress `TagKnown=False/Unknown` | `kubectl describe tailnetegress` | tag missing in `tagOwners` (file mode) |
 | Egress `TagKnown=False/PolicyPending` | `kubectl describe tailnet` → `PolicyApplied` | policy not applied yet / rejected |
@@ -35,7 +36,7 @@ description: "Symptom table with the condition reasons, and the diagnosis cheat 
 | Question | Command | Healthy output |
 | --- | --- | --- |
 | Is the control server reachable? | `kubectl describe tailnet corp` | `ApiReachable=True`, `ApiKeyValid=True` |
-| Does preflight pass? | `kubectl get tailnet corp`, `kubectl describe tailnet corp` | `COMPAT=Compatible`, `PolicyMode=True/Database`; `DNS=CannotVerify` is a manual split-DNS configuration hint |
+| Does preflight pass? | `kubectl get tailnet corp`, `kubectl describe tailnet corp` | `COMPAT=Compatible`, `PolicyMode=True/Database`; `DNS=Configured` once a gateway and one agent are up; `Missing`/`Mismatch` name the Headscale `dns.nameservers.split` fix |
 | Why is an egress not ready? | `kubectl -n tailnet-system get tailnetegress X -o jsonpath='{range .status.targets[*]}{.name} {.present} {.reachable} {.reason}{"\n"}{end}'` | `true true` per target, empty reason |
 | Is the route on the router? | `kubectl -n tailnet-system exec deploy/headscale -- headscale nodes list-routes` | the target's `/32` or a covering subnet under the router's approved routes |
 | Does the agent reach the host? | `kubectl -n tailnet-system logs deploy/X \| grep target` | no `dial …: context deadline exceeded` |

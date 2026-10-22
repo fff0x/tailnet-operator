@@ -143,8 +143,20 @@ func (p *prober) httpReady(fw *forwarder) bool {
 	return true // retain Running-only readiness for L4
 }
 
-func healthMux(lc statuser, fw *forwarder, pr *prober) *http.ServeMux {
+func healthMux(lc statuser, fw *forwarder, pr *prober, dr *dnsRoutes) *http.ServeMux {
 	mux := http.NewServeMux()
+	// Split-DNS routes of the current netmap. 503 until the first netmap arrived, so the operator
+	// can tell "nothing observed yet" from "zone absent".
+	mux.HandleFunc("/dns", func(w http.ResponseWriter, r *http.Request) {
+		routes, seen := dr.snapshot()
+		if !seen {
+			http.Error(w, "no netmap yet", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, struct {
+			Routes map[string][]string `json:"routes"`
+		}{routes})
+	})
 	if fw.metrics != nil {
 		mux.Handle("/metrics", fw.metrics.handler())
 	}
@@ -173,12 +185,12 @@ func healthMux(lc statuser, fw *forwarder, pr *prober) *http.ServeMux {
 
 // serveHealth retains the tsnet Running gate. HTTP also requires current local TLS and backend
 // TCP or verified backend TLS proof. With probes disabled HTTP fails closed; L4 is unchanged.
-func serveHealth(ctx context.Context, addr string, ts *tsnet.Server, lc statuser, fw *forwarder, interval time.Duration) {
+func serveHealth(ctx context.Context, addr string, ts *tsnet.Server, lc statuser, fw *forwarder, dr *dnsRoutes, interval time.Duration) {
 	pr := &prober{results: map[string]probeResult{}}
 	if interval > 0 {
 		go pr.loop(ctx, ts, fw, interval)
 	}
-	srv := &http.Server{Addr: addr, Handler: healthMux(lc, fw, pr), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: addr, Handler: healthMux(lc, fw, pr, dr), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

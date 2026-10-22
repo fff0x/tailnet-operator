@@ -112,7 +112,9 @@ func main() {
 		log.Fatalf("initial targets load: %v", err)
 	}
 	go watchTargets(ctx, targetsFile, fw)
-	go serveHealth(ctx, healthAddr, ts, lc, fw, probeInterval)
+	dr := &dnsRoutes{}
+	go dr.watch(ctx, lc)
+	go serveHealth(ctx, healthAddr, ts, lc, fw, dr, probeInterval)
 
 	<-ctx.Done()
 	log.Printf("shutting down")

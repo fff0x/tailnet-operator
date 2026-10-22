@@ -107,7 +107,9 @@ not a version string; `spec.headscale.version` is an optional hint for diagnosti
 | `PolicyMode=False/File` | `updatedAt` is `null`; `Apply` skips policy writes and route approvals (`PolicyApplied=False/PolicyModeFile`) |
 | `PolicyMode=Unknown/CannotVerify` | The response omits `updatedAt` |
 | `…=Unknown/ProbeFailed` | A request failed or returned an invalid body; check reachability, credentials and Headscale logs |
-| `SplitDNS=Unknown/CannotVerify` | Headscale has no DNS API; configure the displayed split zone yourself |
+| `SplitDNS=True/Configured` | An agent's netmap shows `dns.nameservers.split.<zone>` → the gateway LoadBalancer IP |
+| `SplitDNS=False/Missing` / `Mismatch` | The zone is absent from the netmap, or resolves elsewhere; Headscale has no DNS API, so edit `dns.nameservers.split` by hand |
+| `SplitDNS=Unknown/CannotVerify` | No `TailnetGateway` binds this Tailnet, or no agent is online to observe the netmap |
 | `UsersUnique=False/Duplicate` | Two Headscale users share a name (`status.userConflicts`, IDs in the message); Headscale rejects every policy write until one is removed (`headscale users destroy -i <id>`) |
 
 The split-DNS hint is the literal zone after the last placeholder label of `dns.ingressNameTemplate`:

@@ -467,16 +467,7 @@ func (r *TailnetIngressReconciler) scrapeExposeProbes(ctx context.Context, ns, n
 }
 
 func (r *TailnetIngressReconciler) agentPodIP(ctx context.Context, ns, name string) string {
-	var pods corev1.PodList
-	if err := r.List(ctx, &pods, client.InNamespace(ns), client.MatchingLabels(ingressSelectorLabels(name))); err != nil {
-		return ""
-	}
-	for _, p := range pods.Items {
-		if p.DeletionTimestamp == nil && p.Status.Phase == corev1.PodRunning && p.Status.PodIP != "" {
-			return p.Status.PodIP
-		}
-	}
-	return ""
+	return runningAgentIP(ctx, r.Client, ns, ingressSelectorLabels(name))
 }
 
 // SetupWithManager registers the TailnetIngress controller and its owned children.

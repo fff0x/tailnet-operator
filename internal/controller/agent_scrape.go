@@ -10,6 +10,9 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const maxAgentResponseBytes = 1 << 20
@@ -34,7 +37,7 @@ func scrapeJSON(ctx context.Context, ip, path string, out any) error {
 }
 
 func scrapeAgentJSON(ctx context.Context, c *http.Client, ip, path string, out any) error {
-	if net.ParseIP(ip) == nil || (path != "targets" && path != "status") {
+	if net.ParseIP(ip) == nil || (path != "targets" && path != "status" && path != "dns") {
 		return errAgentScrape
 	}
 	endpoint := (&url.URL{Scheme: "http", Host: net.JoinHostPort(ip, strconv.Itoa(agentHealthPort)), Path: "/" + path}).String()
@@ -58,4 +61,19 @@ func scrapeAgentJSON(ctx context.Context, c *http.Client, ip, path string, out a
 		return errAgentScrape
 	}
 	return nil
+}
+
+// runningAgentIP returns the Pod IP of one running, non-terminating agent selected by labels,
+// or "" when none is up. Shared by every controller that scrapes an agent.
+func runningAgentIP(ctx context.Context, c client.Client, ns string, labels map[string]string) string {
+	var pods corev1.PodList
+	if err := c.List(ctx, &pods, client.InNamespace(ns), client.MatchingLabels(labels)); err != nil {
+		return ""
+	}
+	for _, p := range pods.Items {
+		if p.DeletionTimestamp == nil && p.Status.Phase == corev1.PodRunning && p.Status.PodIP != "" {
+			return p.Status.PodIP
+		}
+	}
+	return ""
 }

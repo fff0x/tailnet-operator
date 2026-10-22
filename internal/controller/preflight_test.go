@@ -55,21 +55,10 @@ func TestPreflightConditions(t *testing.T) {
 			if !strings.Contains(c.Message, "99.0.0") || strings.Contains(c.Message, "secret-token") {
 				t.Fatalf("version hint missing or upstream secret leaked: %s", c.Message)
 			}
-			dns := meta.FindStatusCondition(tn.Status.Conditions, "SplitDNS")
-			if dns == nil || dns.Status != metav1.ConditionUnknown || dns.Reason != "CannotVerify" ||
-				!strings.Contains(dns.Message, "dns.nameservers.split.prod-1.tailnet.example.com") {
-				t.Fatalf("SplitDNS=%+v", dns)
-			}
 			for _, cond := range tn.Status.Conditions {
 				if strings.Contains(cond.Message, "secret-token") {
 					t.Fatal("upstream body leaked into preflight status")
 				}
-			}
-			// Turning DNS off must remove a previously published hint.
-			tn.Spec.DNS.IngressNameTemplate = ""
-			setSplitDNSCondition(tn)
-			if meta.FindStatusCondition(tn.Status.Conditions, "SplitDNS") != nil {
-				t.Fatal("stale SplitDNS condition survived DNS removal")
 			}
 		})
 	}

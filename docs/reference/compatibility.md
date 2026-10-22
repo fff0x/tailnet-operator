@@ -102,8 +102,9 @@ The Tailnet controller derives these conditions from the API response shape, not
 | 0.28.x | database | `False/Incompatible` (no `policy/check`) | `True/Database` |
 | 0.28.x | file | `False/Incompatible` | `False/File` |
 
-`SplitDNS` is always `Unknown/CannotVerify`: Headscale has no DNS API, so the operator can only print
-the split zone you have to configure. See [preflight](../how-to/install-headscale.md#preflight) for the condition semantics.
+`SplitDNS` is independent of the Headscale version: it is read back from the netmap of a running agent
+(`True/Configured`, `False/Missing`, `False/Mismatch`) and `Unknown/CannotVerify` only while no gateway
+or no online agent binds the Tailnet. See [preflight](../how-to/install-headscale.md#preflight) for the condition semantics.
 
 ## Test coverage
 
