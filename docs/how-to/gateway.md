@@ -32,7 +32,7 @@ router is never adopted. The complete worked example (manifest, LB pool, iBGP, s
    reconcile (≤ 5 min).
 4. Set the Headscale split-DNS entry; add the cluster CoreDNS `forward` for the zone to
    `dns.serviceClusterIP` ([Wire the cluster CoreDNS](dns-coredns.md#wire-the-cluster-coredns) form, upstream = the gateway's DNS Service). Repeat both for
-   every `dns.extraZones[]` zone the gateway serves for a legacy network ([Extra zones for legacy networks](#extra-zones-for-legacy-networks)).
+   every `dns.extraZones[]` zone the gateway serves for a legacy network ([Extra zones for corporate resolvers](#extra-zones-for-corporate-resolvers)).
 5. Declare the LAN as a `TailnetSite` ([Declare a site network](site-network.md)) so overlaps are blocked and the site has a status.
 6. Verify from both sides: a Pod resolves `api.<zone>` through the cluster CoreDNS; a tailnet peer
    resolves `router.<zone>` through split-DNS and reaches `192.0.2.1` through the gateway.
@@ -333,5 +333,5 @@ primary zone; `dns.extraZones` is immutable after creation.
 
 Declared in the schema but **rejected by the current writer** (`Ready=False/FreshBlocked` or
 admission): `forwards[]`/`forwardImage` (TCP forwards), `authKeySecretRef`
-(external bootstrap key), `adoption`, IPv6 prefixes, `replicas` other than `1`. Lifecycle, rollback
+(external bootstrap key), IPv6 prefixes, `replicas` other than `1`. Lifecycle, rollback
 and deletion: [gateway reference](../reference/gateway.md#key-and-expiry-lifecycle).
