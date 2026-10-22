@@ -87,17 +87,18 @@ each signed with the CI broker's fixed Cosign key, together with an SPDX SBOM an
 provenance attestation per platform. Images are scanned for HIGH/CRITICAL findings before a
 versioned release is accepted; `govulncheck` runs on every build.
 
-The public key is [`deploy/cosign.pub`](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/deploy/cosign.pub). Signatures are not uploaded to a
-transparency log, so verification passes `--insecure-ignore-tlog`. Verify the digest you are about
-to deploy, not a tag:
+The public key is [`deploy/cosign.pub`](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/deploy/cosign.pub). Signatures and, from v0.21.1 on,
+the SBOM and provenance attestations are recorded in the public Rekor transparency log, so plain
+`cosign verify` checks the log entry too. Verify the digest you are about to deploy, not a tag:
 
 ```sh
-cosign verify --key deploy/cosign.pub --insecure-ignore-tlog docker.io/ff0x/tailnet-operator@sha256:<digest>
-cosign verify-attestation --key deploy/cosign.pub --insecure-ignore-tlog --type spdxjson \
+cosign verify --key deploy/cosign.pub docker.io/ff0x/tailnet-operator@sha256:<digest>
+cosign verify-attestation --key deploy/cosign.pub --type spdxjson \
   docker.io/ff0x/tailnet-operator@sha256:<digest>
-cosign verify --key deploy/cosign.pub --insecure-ignore-tlog \
-  oci.this-is-fine.io/charts/tailnet-operator:<version>
+cosign verify --key deploy/cosign.pub oci.this-is-fine.io/charts/tailnet-operator:<version>
 ```
+
+Attestations of releases before v0.21.1 were not uploaded; verify those with `--insecure-ignore-tlog`.
 
 The production image is built from `scratch` and contains only the two static binaries.
 
@@ -111,7 +112,7 @@ bound together independently of the registry:
 
 ```sh
 rad clone rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX && cd tailnet-operator
-rad-artifact show v0.21.0 --pretty          # creator must be a delegate; shows image/chart digests
+rad-artifact show v0.21.1 --pretty          # creator must be a delegate; shows image/chart digests
 test "$(rad-artifact cid deploy/cosign.pub)" = "<cid from show>"
 ```
 

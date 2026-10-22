@@ -4,6 +4,16 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-10-22
+
+### Security
+
+- SBOM and provenance attestations are uploaded to the public Rekor transparency log, and the
+  post-publication audit (`hack/audit-image.sh`) now requires log evidence for the signature and
+  every attestation instead of passing `--insecure-ignore-tlog`. Image and chart signatures were
+  already logged by the CI publisher; plain `cosign verify` / `verify-attestation` therefore work
+  without the flag from this release on. Attestations of earlier releases remain unlogged.
+
 ## [0.21.0] - 2026-10-22
 
 ### Added
