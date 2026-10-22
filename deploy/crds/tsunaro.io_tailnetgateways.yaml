@@ -31,8 +31,7 @@ spec:
       openAPIV3Schema:
         description: |-
           TailnetGateway describes a persistent kernel router in the operator namespace.
-          Suspended by default; suspend=false explicitly opts into the fresh writer,
-          not adoption of existing resources.
+          Suspended by default; suspend=false explicitly opts into the fresh writer.
         properties:
           apiVersion:
             description: |-
@@ -54,79 +53,13 @@ spec:
           spec:
             description: |-
               TailnetGatewaySpec is an experimental API contract, suspended by default.
-              Explicit suspend=false opts into the fresh writer, not adoption. Deletion
-              retains everything unless deletionPolicy=Delete explicitly consents to tearing
-              down the operator's own fresh resources; adoption never implies consent to
-              replace a pod, reset state, rename nodes or remove stale nodes.
+              Explicit suspend=false opts into the fresh writer; existing routers are never
+              adopted. Deletion retains everything unless deletionPolicy=Delete explicitly
+              consents to tearing down the operator's own fresh resources.
             properties:
-              adoption:
-                description: |-
-                  GatewayAdoption binds the inventoried node and resources. Admission cannot
-                  establish that a Secret belongs to this node or that a live template is identical.
-                properties:
-                  nodeId:
-                    description: Expected numeric Headscale node ID; never inferred
-                      from hostname alone.
-                    maxLength: 20
-                    pattern: ^[1-9][0-9]*$
-                    type: string
-                  objects:
-                    items:
-                      description: |-
-                        GatewayAdoptionObject inventories an existing object. The runtime must also
-                        verify UID-bound tsunaro.io/adopt-gateway consent on that object.
-                      properties:
-                        apiVersion:
-                          maxLength: 64
-                          type: string
-                        kind:
-                          maxLength: 32
-                          type: string
-                        name:
-                          description: GatewayName is a namespace-local Kubernetes
-                            object name.
-                          maxLength: 253
-                          minLength: 1
-                          pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
-                          type: string
-                        uid:
-                          maxLength: 128
-                          minLength: 1
-                          pattern: ^[a-zA-Z0-9][a-zA-Z0-9._-]*$
-                          type: string
-                      required:
-                      - apiVersion
-                      - kind
-                      - name
-                      - uid
-                      type: object
-                      x-kubernetes-validations:
-                      - message: unsupported adoption object kind or version
-                        rule: (self.apiVersion == 'v1' && self.kind in ['Secret',
-                          'Service', 'ConfigMap', 'ServiceAccount']) || (self.apiVersion
-                          == 'apps/v1' && self.kind == 'StatefulSet') || (self.apiVersion
-                          == 'policy/v1' && self.kind == 'PodDisruptionBudget') ||
-                          (self.apiVersion == 'rbac.authorization.k8s.io/v1' && self.kind
-                          in ['Role', 'RoleBinding'])
-                    maxItems: 16
-                    minItems: 2
-                    type: array
-                    x-kubernetes-list-map-keys:
-                    - kind
-                    - name
-                    x-kubernetes-list-type: map
-                required:
-                - nodeId
-                - objects
-                type: object
-                x-kubernetes-validations:
-                - message: adoption object UIDs must be unique
-                  rule: self.objects.all(a, self.objects.filter(b, b.uid == a.uid).size()
-                    == 1)
               authKeySecretRef:
-                description: |-
-                  Omitted selects persistent key minting in a future controller, never an
-                  ephemeral key. An adopted StatefulSet must retain its existing auth source.
+                description: Omitted selects persistent key minting by the operator,
+                  never an ephemeral key.
                 properties:
                   key:
                     default: TS_AUTHKEY
@@ -151,7 +84,7 @@ spec:
                   Delete records consent through a finalizer: the operator removes only the
                   fresh resources it created (matched by recorded UID or its own gateway-uid
                   label), the Headscale node and the minted bootstrap key, in a fixed order
-                  and fail-closed. Adopted or user-supplied objects are never deleted.
+                  and fail-closed. User-supplied objects are never deleted.
                 enum:
                 - Retain
                 - Delete
@@ -199,9 +132,8 @@ spec:
                     x-kubernetes-list-type: map
                   image:
                     description: |-
-                      GatewayImage requires a version tag or immutable digest. Version tags permit
-                      identical adoption of existing pod templates; runtime must not rewrite them.
-                      Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
+                      GatewayImage requires a version tag or immutable digest; the runtime never
+                      rewrites it. Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
                     maxLength: 512
                     pattern: ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(:[0-9]+)?/)?[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})?@sha256:[a-f0-9]{64}|:v?[0-9]+(\.[0-9]+){2,3}(-[a-zA-Z0-9._-]+)?)$
                     type: string
@@ -222,8 +154,8 @@ spec:
                       rule: isIP(self) && ip(self).isGlobalUnicast() && !ip(self).isLinkLocalUnicast()
                         && string(ip(self)) == self
                   serviceName:
-                    description: Explicit name permits adoption of an existing tailnet-dns
-                      Service.
+                    description: Explicit name of the gateway's DNS Service; pinned
+                      identity.
                     maxLength: 63
                     pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
                     type: string
@@ -319,9 +251,8 @@ spec:
                     || r.target != r.name + ''.'' + self.zone)'
               forwardImage:
                 description: |-
-                  GatewayImage requires a version tag or immutable digest. Version tags permit
-                  identical adoption of existing pod templates; runtime must not rewrite them.
-                  Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
+                  GatewayImage requires a version tag or immutable digest; the runtime never
+                  rewrites it. Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
                 maxLength: 512
                 pattern: ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(:[0-9]+)?/)?[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})?@sha256:[a-f0-9]{64}|:v?[0-9]+(\.[0-9]+){2,3}(-[a-zA-Z0-9._-]+)?)$
                 type: string
@@ -382,9 +313,8 @@ spec:
                 type: string
               image:
                 description: |-
-                  GatewayImage requires a version tag or immutable digest. Version tags permit
-                  identical adoption of existing pod templates; runtime must not rewrite them.
-                  Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
+                  GatewayImage requires a version tag or immutable digest; the runtime never
+                  rewrites it. Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
                 maxLength: 512
                 pattern: ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(:[0-9]+)?/)?[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})?@sha256:[a-f0-9]{64}|:v?[0-9]+(\.[0-9]+){2,3}(-[a-zA-Z0-9._-]+)?)$
                 type: string
@@ -512,14 +442,12 @@ spec:
                 type: object
               suspend:
                 default: true
-                description: Explicit false opts into fresh resource creation; adoption
-                  remains unsupported.
+                description: Explicit false opts into fresh resource creation.
                 type: boolean
               tags:
                 default:
                 - tag:fabric
-                description: Bootstrap tags do not authorize dropping existing tags
-                  on an adopted node.
+                description: Bootstrap tags of the fresh node.
                 items:
                   maxLength: 63
                   pattern: ^tag:[a-z][a-z0-9-]*$
@@ -555,9 +483,6 @@ spec:
             - message: gateway identity references are immutable
               rule: self.tailnetRef == oldSelf.tailnetRef && self.hostname == oldSelf.hostname
                 && self.stateSecretRef == oldSelf.stateSecretRef
-            - message: adoption inventory is immutable
-              rule: has(self.adoption) == has(oldSelf.adoption) && (!has(self.adoption)
-                || self.adoption == oldSelf.adoption)
             - message: auth key and state must use separate Secrets
               rule: '!has(self.authKeySecretRef) || self.authKeySecretRef.name !=
                 self.stateSecretRef.name'
@@ -566,12 +491,6 @@ spec:
             - message: forward ports must be unique
               rule: '!has(self.forwards) || self.forwards.all(a, self.forwards.filter(b,
                 b.port == a.port).size() == 1)'
-            - message: adoption requires one StatefulSet and the referenced state
-                Secret
-              rule: '!has(self.adoption) || (self.adoption.objects.filter(o, o.kind
-                == ''StatefulSet'').size() == 1 && self.adoption.objects.filter(o,
-                o.kind == ''Secret'').size() == 1 && self.adoption.objects.exists(o,
-                o.kind == ''Secret'' && o.name == self.stateSecretRef.name))'
           status:
             description: TailnetGatewayStatus records observations, not desired-state
               success claims.
@@ -680,9 +599,6 @@ spec:
         x-kubernetes-validations:
         - message: name must be a DNS-1035 label of at most 40 characters
           rule: size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z]([-a-z0-9]*[a-z0-9])?$')
-        - message: adopted StatefulSet must have the gateway CR name
-          rule: '!has(self.spec.adoption) || self.spec.adoption.objects.exists(o,
-            o.kind == ''StatefulSet'' && o.name == self.metadata.name)'
         - message: DNS serviceName must not collide with the gateway or headless Service
           rule: self.spec.dns.serviceName != self.metadata.name && self.spec.dns.serviceName
             != self.metadata.name + '-headless'

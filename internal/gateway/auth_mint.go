@@ -17,14 +17,14 @@ var ErrGatewayAuthMint = errors.New("gateway auth bootstrap: persistent key prov
 
 const gatewayKeyLifetime = 24 * time.Hour
 
-// PlanGatewayMint is only for a NEW gateway with no external auth reference or
-// adoption. It returns a request, not a key or permission to create a Pod.
+// PlanGatewayMint is only for a NEW gateway with no external auth reference.
+// It returns a request, not a key or permission to create a Pod.
 // The caller must authenticate the selected Headscale server via the Tailnet
 // API client, persist the returned key in an exclusive Secret, and re-read it
 // before bootstrap. A crash after mint but before persist leaves an orphaned
 // key until this bounded expiration; never infer ownership from a masked list.
 func PlanGatewayMint(g *tnv1.TailnetGateway, now time.Time) (headscale.CreatePreAuthKeyRequest, error) {
-	if g == nil || g.UID == "" || g.Spec.Adoption != nil || g.Spec.AuthKeySecretRef != nil ||
+	if g == nil || g.UID == "" || g.Spec.AuthKeySecretRef != nil ||
 		now.IsZero() || g.DeletionTimestamp != nil || len(g.Spec.Tags) == 0 || len(g.Spec.Tags) > 16 {
 		return headscale.CreatePreAuthKeyRequest{}, ErrGatewayAuthMint
 	}

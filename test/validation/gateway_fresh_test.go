@@ -28,7 +28,7 @@ import (
 
 // Real API validation and authorization only. No StatefulSet controller, kubelet,
 // token projection, GC or data plane runs; this does NOT verify a runnable pod,
-// bootstrap, forwarding, persistence across restart, retention or adoption.
+// bootstrap, forwarding, persistence across restart or retention.
 func TestGatewayFreshResources(t *testing.T) {
 	must := func(err error, message string) {
 		t.Helper()

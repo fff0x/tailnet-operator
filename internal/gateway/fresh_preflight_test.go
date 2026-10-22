@@ -108,7 +108,6 @@ func TestInspectFreshSnapshotsRejectsUnsafeInputs(t *testing.T) {
 			i.PeerGateways = []tnv1.TailnetGateway{{ObjectMeta: metav1.ObjectMeta{Name: "other", UID: "peer"}, Spec: tnv1.TailnetGatewaySpec{Service: tnv1.GatewayService{LoadBalancerIP: "198.51.100.1"}}}}
 		}, ErrFreshConflict},
 		"admission bypass":  {func(i *FreshInspectionInputs) { i.Fresh.Gateway.Spec.Suspend = ptr.To(false) }, ErrFreshSnapshot},
-		"adoption":          {func(i *FreshInspectionInputs) { i.Fresh.Gateway.Spec.Adoption = &tnv1.GatewayAdoption{} }, ErrFreshSnapshot},
 		"historical status": {func(i *FreshInspectionInputs) { i.Fresh.Gateway.Status.NodeID = "42" }, ErrFreshSnapshot},
 	}
 	for name, tc := range cases {

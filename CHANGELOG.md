@@ -18,6 +18,16 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   keeps every agent running. One-time effect: the first upgrade to this version re-rolls the HTTP
   ingress agents once, together with the image rollout that upgrade performs anyway.
 
+### Removed
+
+- `TailnetGateway.spec.adoption` (types `GatewayAdoption`/`GatewayAdoptionObject`, their CEL rules
+  and the internal `PlanAdoption` planner). The field was never wired to a controller — every
+  reconcile path refused a gateway that set it — and the hand-built routers it was meant to take over
+  are gone; all known gateways are fresh. The operator is fresh-only by design; a lost state Secret
+  or receipt is a new node ([no adoption](docs/reference/gateway.md#no-adoption)). CRD upgrade: a
+  stored object that set the field loses it on the next write and, since the field blocked
+  bootstrap, starts its fresh bootstrap afterwards — none is known to exist.
+
 ### Fixed
 
 - Gateway bootstrap survives status and metadata writes on the Gateway and Tailnet CRs. The mint

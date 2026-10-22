@@ -54,7 +54,7 @@ type FreshPlan struct {
 }
 
 // RenderFresh builds a disconnected singleton kernel-router/DNS model. It rejects
-// adoption, historical identity, implicit bootstrap, forward zones and TCP forwards.
+// historical identity, implicit bootstrap, forward zones and TCP forwards.
 // It performs no I/O and grants no additional permissions to the operator itself.
 // Render success is not evidence of kernel forwarding, bootstrap or reachability.
 func RenderFresh(in FreshInputs) (FreshPlan, error) {
@@ -65,7 +65,7 @@ func RenderFresh(in FreshInputs) (FreshPlan, error) {
 		len(validation.IsDNS1123Label(in.Namespace)) != 0 ||
 		!g.DeletionTimestamp.IsZero() || !tn.DeletionTimestamp.IsZero() ||
 		string(g.Spec.TailnetRef.Name) != tn.Name || tn.Name == "" ||
-		g.Spec.Adoption != nil || g.Status.NodeID != "" || g.Status.IPv4 != "" || g.Status.ServiceIP != "" ||
+		g.Status.NodeID != "" || g.Status.IPv4 != "" || g.Status.ServiceIP != "" ||
 		len(g.Status.RoutesAdvertised) != 0 || len(g.Status.RoutesApproved) != 0 ||
 		g.Status.RoutePlan.AppliedHash != "" || len(g.Status.StaleNodes) != 0 ||
 		g.Spec.Replicas != 1 || len(g.Spec.Forwards) != 0 ||

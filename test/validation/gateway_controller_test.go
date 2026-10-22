@@ -37,7 +37,7 @@ import (
 
 // Exercises production manager registration and the generated chart RBAC against
 // a disposable API server. No kubelet, router, DNS server or GC controller runs:
-// this is not a pod/data-plane or real adoption/retention gate.
+// this is not a pod/data-plane or retention gate.
 func TestGatewaySuspendedController(t *testing.T) {
 	must := func(err error, message string) {
 		t.Helper()

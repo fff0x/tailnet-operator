@@ -150,7 +150,6 @@ func TestGatewayFreshWriter(t *testing.T) {
 		f.g.Spec.Service.LoadBalancerIP = tnv1.GatewayIP(fmt.Sprintf("198.51.100.%d", serial+20))
 		f.g.Spec.Tags = []string{"tag:mesh", "tag:fabric"}
 		f.g.Spec.AuthKeySecretRef = nil
-		f.g.Spec.Adoption = nil
 		gatewayWriterMust(t, admin.Create(ctx, f.g), "admit writer gateway")
 		f.writes = &gatewayWriterClient{Client: admin}
 		f.r = &controller.TailnetGatewayReconciler{Client: f.writes, RuntimeClient: f.writes, OperatorNamespace: name, Recorder: record.NewFakeRecorder(16)}

@@ -72,12 +72,6 @@ func TestGatewayAdmission(t *testing.T) {
 	set := func(o *unstructured.Unstructured, path string, value any) {
 		must(unstructured.SetNestedField(o.Object, value, strings.Split(path, ".")...))
 	}
-	adoption := func() map[string]any {
-		return map[string]any{"nodeId": "42", "objects": []any{
-			map[string]any{"apiVersion": "apps/v1", "kind": "StatefulSet", "name": "gateway", "uid": "sts-uid"},
-			map[string]any{"apiVersion": "v1", "kind": "Secret", "name": "router-state", "uid": "state-uid"},
-		}}
-	}
 	forward := func(port, target int64) []any {
 		return []any{map[string]any{"name": "api", "port": port, "targetAddress": "10.0.0.2", "targetPort": target}}
 	}
@@ -287,33 +281,8 @@ func TestGatewayAdmission(t *testing.T) {
 			check(t, o, false)
 		}
 	})
-	t.Run("adoption-inventory", func(t *testing.T) {
-		o := fresh()
-		set(o, "spec.adoption", adoption())
-		check(t, o, true)
-		for _, mutation := range []func(map[string]any){
-			func(a map[string]any) { a["objects"] = a["objects"].([]any)[:1] },
-			func(a map[string]any) { a["objects"].([]any)[1].(map[string]any)["name"] = "wrong-state" },
-			func(a map[string]any) { a["objects"].([]any)[0].(map[string]any)["name"] = "wrong-router" },
-			func(a map[string]any) { a["objects"].([]any)[1].(map[string]any)["uid"] = "sts-uid" },
-			func(a map[string]any) { a["objects"].([]any)[1].(map[string]any)["uid"] = "" },
-			func(a map[string]any) { a["objects"].([]any)[0].(map[string]any)["kind"] = "Deployment" },
-			func(a map[string]any) { a["objects"].([]any)[0].(map[string]any)["apiVersion"] = "apps/v2" },
-			func(a map[string]any) {
-				a["objects"] = append(a["objects"].([]any), map[string]any{"apiVersion": "v1", "kind": "Secret", "name": "router-state", "uid": "other-uid"})
-			},
-			func(a map[string]any) { a["nodeId"] = "0" },
-		} {
-			a := adoption()
-			mutation(a)
-			o = fresh()
-			set(o, "spec.adoption", a)
-			check(t, o, false)
-		}
-	})
 	t.Run("storage-status-and-immutability", func(t *testing.T) {
 		o := fresh()
-		set(o, "spec.adoption", adoption())
 		set(o, "spec.service.loadBalancerClass", "example.com/router")
 		mapping, err := c.RESTMapper().RESTMapping(o.GroupVersionKind().GroupKind(), o.GroupVersionKind().Version)
 		must(err)
@@ -347,7 +316,7 @@ func TestGatewayAdmission(t *testing.T) {
 			t.Fatal("routing update or status isolation failed")
 		}
 		must(c.Get(ctx, key, o))
-		for path, value := range map[string]any{"tailnetRef.name": "other", "hostname": "other", "stateSecretRef.name": "other", "service.loadBalancerIP": "10.1.0.54", "dns.serviceName": "other-dns", "dns.serviceClusterIP": "10.96.0.54", "adoption.nodeId": "43", "service.loadBalancerClass": "example.com/other"} {
+		for path, value := range map[string]any{"tailnetRef.name": "other", "hostname": "other", "stateSecretRef.name": "other", "service.loadBalancerIP": "10.1.0.54", "dns.serviceName": "other-dns", "dns.serviceClusterIP": "10.96.0.54", "service.loadBalancerClass": "example.com/other"} {
 			copy := o.DeepCopy()
 			set(copy, "spec."+path, value)
 			if err := c.Update(ctx, copy); !apierrors.IsInvalid(err) {
@@ -358,18 +327,6 @@ func TestGatewayAdmission(t *testing.T) {
 		unstructured.RemoveNestedField(copy.Object, "spec", "service", "loadBalancerClass")
 		if err := c.Update(ctx, copy); !apierrors.IsInvalid(err) {
 			t.Errorf("remove class: want Invalid, got %v", err)
-		}
-		copy = o.DeepCopy()
-		unstructured.RemoveNestedField(copy.Object, "spec", "adoption")
-		if err := c.Update(ctx, copy); !apierrors.IsInvalid(err) {
-			t.Errorf("remove adoption: want Invalid, got %v", err)
-		}
-		copy = o.DeepCopy()
-		a := adoption()
-		a["objects"].([]any)[1].(map[string]any)["uid"] = "replacement-uid"
-		set(copy, "spec.adoption", a)
-		if err := c.Update(ctx, copy); !apierrors.IsInvalid(err) {
-			t.Errorf("replace inventory: want Invalid, got %v", err)
 		}
 		plain := fresh()
 		plain.SetName("plain")
@@ -383,12 +340,6 @@ func TestGatewayAdmission(t *testing.T) {
 		set(copy, "spec.service.loadBalancerClass", "example.com/router")
 		if err := c.Update(ctx, copy); !apierrors.IsInvalid(err) {
 			t.Errorf("add class: want Invalid, got %v", err)
-		}
-		a = adoption()
-		a["objects"].([]any)[0].(map[string]any)["name"] = "plain"
-		set(plain, "spec.adoption", a)
-		if err := c.Update(ctx, plain); !apierrors.IsInvalid(err) {
-			t.Errorf("add adoption: want Invalid, got %v", err)
 		}
 		list := &tnv1.TailnetGatewayList{}
 		must(c.List(ctx, list))

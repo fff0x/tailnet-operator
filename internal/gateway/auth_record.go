@@ -33,7 +33,7 @@ var ErrGatewayAuthRecord = errors.New("gateway auth bootstrap: durable mint reco
 func mintRecordScope(g *tnv1.TailnetGateway, tn *tnv1.Tailnet, namespace string) (map[string]string, error) {
 	if g == nil || tn == nil || g.UID == "" || tn.UID == "" || g.ResourceVersion == "" || tn.ResourceVersion == "" ||
 		g.Namespace != "" || tn.Namespace != "" || g.DeletionTimestamp != nil || tn.DeletionTimestamp != nil ||
-		g.Spec.Suspend == nil || *g.Spec.Suspend || g.Spec.Adoption != nil || g.Spec.AuthKeySecretRef != nil ||
+		g.Spec.Suspend == nil || *g.Spec.Suspend || g.Spec.AuthKeySecretRef != nil ||
 		string(g.Spec.TailnetRef.Name) != tn.Name || len(validation.IsDNS1035Label(g.Name)) != 0 || len(g.Name) > 40 ||
 		len(validation.IsDNS1123Label(namespace)) != 0 || tn.Spec.DNS.HostsConfigMap == g.Name+"-auth-receipt" {
 		return nil, ErrGatewayAuthRecord

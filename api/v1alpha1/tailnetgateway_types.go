@@ -20,9 +20,8 @@ type GatewayPrefix string
 // +kubebuilder:validation:XValidation:rule="isIP(self) && ip(self).isGlobalUnicast() && !ip(self).isLinkLocalUnicast() && string(ip(self)) == self",message="address must be a canonical unicast IP literal"
 type GatewayIP string
 
-// GatewayImage requires a version tag or immutable digest. Version tags permit
-// identical adoption of existing pod templates; runtime must not rewrite them.
-// Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
+// GatewayImage requires a version tag or immutable digest; the runtime never
+// rewrites it. Kernel Tailscale, CoreDNS and socat use separate images, not the agent image.
 // +kubebuilder:validation:MaxLength=512
 // +kubebuilder:validation:Pattern=`^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(:[0-9]+)?/)?[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})?@sha256:[a-f0-9]{64}|:v?[0-9]+(\.[0-9]+){2,3}(-[a-zA-Z0-9._-]+)?)$`
 // +kubebuilder:validation:XValidation:rule="[self.split('@')[0]].all(n, [n.split('/')[n.split('/').size()-1]].all(p, !p.contains(':') ? n.size() <= 255 : p.split(':')[1].size() <= 128 && n.size()-p.split(':')[1].size()-1 <= 255))",message="image repository name or tag is too long"
@@ -129,7 +128,7 @@ type GatewayServiceName string
 // +kubebuilder:validation:XValidation:rule="!has(self.staticRecords) || self.staticRecords.all(r, !has(r.target) || r.target != r.name + '.' + self.zone)",message="static record target must differ from its own FQDN"
 type GatewayDNS struct {
 	Zone GatewayName `json:"zone"`
-	// Explicit name permits adoption of an existing tailnet-dns Service.
+	// Explicit name of the gateway's DNS Service; pinned identity.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="DNS serviceName is immutable"
 	ServiceName GatewayServiceName `json:"serviceName"`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="DNS serviceClusterIP is immutable"
@@ -167,37 +166,6 @@ type GatewayForward struct {
 	TargetPort int32 `json:"targetPort"`
 }
 
-// GatewayAdoptionObject inventories an existing object. The runtime must also
-// verify UID-bound tsunaro.io/adopt-gateway consent on that object.
-// +kubebuilder:validation:XValidation:rule="(self.apiVersion == 'v1' && self.kind in ['Secret', 'Service', 'ConfigMap', 'ServiceAccount']) || (self.apiVersion == 'apps/v1' && self.kind == 'StatefulSet') || (self.apiVersion == 'policy/v1' && self.kind == 'PodDisruptionBudget') || (self.apiVersion == 'rbac.authorization.k8s.io/v1' && self.kind in ['Role', 'RoleBinding'])",message="unsupported adoption object kind or version"
-type GatewayAdoptionObject struct {
-	// +kubebuilder:validation:MaxLength=64
-	APIVersion string `json:"apiVersion"`
-	// +kubebuilder:validation:MaxLength=32
-	Kind string      `json:"kind"`
-	Name GatewayName `json:"name"`
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=128
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`
-	UID string `json:"uid"`
-}
-
-// GatewayAdoption binds the inventoried node and resources. Admission cannot
-// establish that a Secret belongs to this node or that a live template is identical.
-// +kubebuilder:validation:XValidation:rule="self.objects.all(a, self.objects.filter(b, b.uid == a.uid).size() == 1)",message="adoption object UIDs must be unique"
-type GatewayAdoption struct {
-	// Expected numeric Headscale node ID; never inferred from hostname alone.
-	// +kubebuilder:validation:MaxLength=20
-	// +kubebuilder:validation:Pattern=`^[1-9][0-9]*$`
-	NodeID string `json:"nodeId"`
-	// +kubebuilder:validation:MinItems=2
-	// +kubebuilder:validation:MaxItems=16
-	// +listType=map
-	// +listMapKey=kind
-	// +listMapKey=name
-	Objects []GatewayAdoptionObject `json:"objects"`
-}
-
 // Values of TailnetGatewaySpec.DeletionPolicy.
 const (
 	GatewayDeletionPolicyRetain = "Retain"
@@ -205,16 +173,13 @@ const (
 )
 
 // TailnetGatewaySpec is an experimental API contract, suspended by default.
-// Explicit suspend=false opts into the fresh writer, not adoption. Deletion
-// retains everything unless deletionPolicy=Delete explicitly consents to tearing
-// down the operator's own fresh resources; adoption never implies consent to
-// replace a pod, reset state, rename nodes or remove stale nodes.
+// Explicit suspend=false opts into the fresh writer; existing routers are never
+// adopted. Deletion retains everything unless deletionPolicy=Delete explicitly
+// consents to tearing down the operator's own fresh resources.
 // +kubebuilder:validation:XValidation:rule="self.tailnetRef == oldSelf.tailnetRef && self.hostname == oldSelf.hostname && self.stateSecretRef == oldSelf.stateSecretRef",message="gateway identity references are immutable"
-// +kubebuilder:validation:XValidation:rule="has(self.adoption) == has(oldSelf.adoption) && (!has(self.adoption) || self.adoption == oldSelf.adoption)",message="adoption inventory is immutable"
 // +kubebuilder:validation:XValidation:rule="!has(self.authKeySecretRef) || self.authKeySecretRef.name != self.stateSecretRef.name",message="auth key and state must use separate Secrets"
 // +kubebuilder:validation:XValidation:rule="!has(self.forwards) || self.forwards.size() == 0 || has(self.forwardImage)",message="forwardImage is required for forwards"
 // +kubebuilder:validation:XValidation:rule="!has(self.forwards) || self.forwards.all(a, self.forwards.filter(b, b.port == a.port).size() == 1)",message="forward ports must be unique"
-// +kubebuilder:validation:XValidation:rule="!has(self.adoption) || (self.adoption.objects.filter(o, o.kind == 'StatefulSet').size() == 1 && self.adoption.objects.filter(o, o.kind == 'Secret').size() == 1 && self.adoption.objects.exists(o, o.kind == 'Secret' && o.name == self.stateSecretRef.name))",message="adoption requires one StatefulSet and the referenced state Secret"
 type TailnetGatewaySpec struct {
 	TailnetRef GatewayLocalReference `json:"tailnetRef"`
 	// Explicit until a cluster-name convention is introduced; no inferred identity.
@@ -222,13 +187,10 @@ type TailnetGatewaySpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Hostname       string                `json:"hostname"`
 	StateSecretRef GatewayLocalReference `json:"stateSecretRef"`
-	// Omitted selects persistent key minting in a future controller, never an
-	// ephemeral key. An adopted StatefulSet must retain its existing auth source.
+	// Omitted selects persistent key minting by the operator, never an ephemeral key.
 	// +optional
 	AuthKeySecretRef *GatewayAuthKeyReference `json:"authKeySecretRef,omitempty"`
-	// +optional
-	Adoption *GatewayAdoption `json:"adoption,omitempty"`
-	// Explicit false opts into fresh resource creation; adoption remains unsupported.
+	// Explicit false opts into fresh resource creation.
 	// +kubebuilder:default=true
 	// +optional
 	Suspend *bool `json:"suspend,omitempty"`
@@ -240,12 +202,12 @@ type TailnetGatewaySpec struct {
 	// Delete records consent through a finalizer: the operator removes only the
 	// fresh resources it created (matched by recorded UID or its own gateway-uid
 	// label), the Headscale node and the minted bootstrap key, in a fixed order
-	// and fail-closed. Adopted or user-supplied objects are never deleted.
+	// and fail-closed. User-supplied objects are never deleted.
 	// +kubebuilder:default=Retain
 	// +kubebuilder:validation:Enum=Retain;Delete
 	// +optional
 	DeletionPolicy string `json:"deletionPolicy,omitempty"`
-	// Bootstrap tags do not authorize dropping existing tags on an adopted node.
+	// Bootstrap tags of the fresh node.
 	// +kubebuilder:default={"tag:fabric"}
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
@@ -312,11 +274,9 @@ type TailnetGatewayStatus struct {
 // +kubebuilder:printcolumn:name="Suspended",type=boolean,JSONPath=`.spec.suspend`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z]([-a-z0-9]*[a-z0-9])?$')",message="name must be a DNS-1035 label of at most 40 characters"
-// +kubebuilder:validation:XValidation:rule="!has(self.spec.adoption) || self.spec.adoption.objects.exists(o, o.kind == 'StatefulSet' && o.name == self.metadata.name)",message="adopted StatefulSet must have the gateway CR name"
 // +kubebuilder:validation:XValidation:rule="self.spec.dns.serviceName != self.metadata.name && self.spec.dns.serviceName != self.metadata.name + '-headless'",message="DNS serviceName must not collide with the gateway or headless Service"
 // TailnetGateway describes a persistent kernel router in the operator namespace.
-// Suspended by default; suspend=false explicitly opts into the fresh writer,
-// not adoption of existing resources.
+// Suspended by default; suspend=false explicitly opts into the fresh writer.
 type TailnetGateway struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

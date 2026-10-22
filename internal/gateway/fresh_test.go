@@ -215,7 +215,7 @@ func TestRenderFreshRejectsUnsupported(t *testing.T) {
 	for name, mutate := range map[string]func(*FreshInputs){
 		"missing gateway": func(i *FreshInputs) { i.Gateway = nil }, "missing tailnet": func(i *FreshInputs) { i.Tailnet = nil },
 		"namespace": func(i *FreshInputs) { i.Namespace = "bad/value" }, "scope": func(i *FreshInputs) { i.Tailnet.Name = "foreign" },
-		"uid": func(i *FreshInputs) { i.Gateway.UID = "" }, "adoption": func(i *FreshInputs) { i.Gateway.Spec.Adoption = &tnv1.GatewayAdoption{} },
+		"uid":        func(i *FreshInputs) { i.Gateway.UID = "" },
 		"historical": func(i *FreshInputs) { i.Gateway.Status.NodeID = "17" }, "bootstrap missing": func(i *FreshInputs) { i.Gateway.Spec.AuthKeySecretRef = nil },
 		"secrets shared":    func(i *FreshInputs) { i.Gateway.Spec.AuthKeySecretRef.Name = i.Gateway.Spec.StateSecretRef.Name },
 		"replicas":          func(i *FreshInputs) { i.Gateway.Spec.Replicas = 2 },

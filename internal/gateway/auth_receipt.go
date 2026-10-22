@@ -19,7 +19,7 @@ var ErrGatewayAuthReceipt = errors.New("gateway auth bootstrap: stored mint rece
 // GatewayAuthReceipt contains NO credential. It can identify the immutable
 // operator-created Secret for a future pod projection, but is not proof that
 // Headscale still accepts the full key, or that a later state Secret belongs
-// to any particular node. Never turn it alone into Ready or adoption consent.
+// to any particular node. Never turn it alone into Ready.
 type GatewayAuthReceipt struct {
 	SecretName string
 	UID        types.UID
@@ -51,7 +51,7 @@ func readRetainedGatewayAuthReceipt(secret *corev1.Secret, g *tnv1.TailnetGatewa
 func readGatewayAuthReceipt(secret *corev1.Secret, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, namespace string, expectedUID types.UID, now time.Time, requireUnexpired bool) (GatewayAuthReceipt, error) {
 	bad := func() (GatewayAuthReceipt, error) { return GatewayAuthReceipt{}, ErrGatewayAuthReceipt }
 	if secret == nil || g == nil || tn == nil || g.UID == "" || tn.UID == "" || now.IsZero() ||
-		g.Spec.AuthKeySecretRef != nil || g.Spec.Adoption != nil || string(g.Spec.TailnetRef.Name) != tn.Name ||
+		g.Spec.AuthKeySecretRef != nil || string(g.Spec.TailnetRef.Name) != tn.Name ||
 		secret.Name != g.Name+"-auth" || secret.Namespace != namespace || expectedUID == "" || secret.UID != expectedUID || secret.ResourceVersion == "" ||
 		secret.DeletionTimestamp != nil || secret.Immutable == nil || !*secret.Immutable ||
 		secret.Type != corev1.SecretTypeOpaque || len(secret.OwnerReferences) != 0 || len(secret.StringData) != 0 ||

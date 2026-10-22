@@ -5,7 +5,7 @@ description: "Fresh-only writer: bootstrap chain, receipts, immutable identity, 
 ---
 
 Status: stable; scope is deliberately narrow —
-fresh IPv4 gateways only, no adoption of existing nodes ([adoption and retention](#adoption-and-retention)),
+fresh IPv4 gateways only, no adoption of existing nodes ([no adoption](#no-adoption)),
 no IPv6. The contract below (receipts, immutable identity, `OnDelete` StatefulSet) is stable since v0.11.0.
 This page is the contract; the operator-facing path is [Run the gateway](../how-to/gateway.md)
 (wiring) and [the worked example](../how-to/gateway.md#worked-example) (worked example),
@@ -108,7 +108,7 @@ There is no configurable target namespace or arbitrary Pod/Corefile/shell templa
 | `image` | Kernel Tailscale image with a concrete version tag or SHA256 digest, not the userspace agent image |
 | `replicas` | Exactly `1`, also the default |
 | `deletionPolicy` | `Retain` (default): CR deletion leaves every resource, the Headscale node and the key in place. `Delete`: consent to the fail-closed teardown below |
-| `tags` | Bootstrap tags, default `[tag:fabric]`; not authority to drop existing tags during adoption |
+| `tags` | Bootstrap tags of the fresh node, default `[tag:fabric]` |
 | `routes.lan[]` | 1–128 canonical masked non-default IPv4/IPv6 prefixes |
 | `routes.advertiseEgressTargets` | Default `true`; literal IPv4/IPv6 targets yield /32 or /128; DNS targets are not resolved |
 | `service.loadBalancerIP` | Stable unicast IP, immutable and inside `tailnetLBCIDR` |
@@ -126,9 +126,8 @@ There is no configurable target namespace or arbitrary Pod/Corefile/shell templa
 
 The CR name must be a DNS-1035 label of at most 40 characters, because it also
 names the gateway Service. `dns.serviceName` must be a DNS-1035 label of at most
-63 characters. Version tags such as `v1.102.4` and `1.8.0.3-r2` preserve existing
-pod templates during adoption; bare images, `latest`, and major-only tags are rejected.
-A digest pin is preferable for new workloads, but must not force an adoption rollout.
+63 characters. Version tags such as `v1.102.4` and `1.8.0.3-r2` are accepted; bare images,
+`latest`, and major-only tags are rejected. A digest pin is preferable.
 
 Forward listeners cannot use DNS/sidecar ports `53`, `8080`, `8181` or `9153`.
 Subnet prefixes cannot intersect unspecified, loopback or multicast ranges;
@@ -766,31 +765,20 @@ default-denies DNS or WireGuard on a CNI whose LoadBalancer source handling diff
 needs it, a site-owned policy that whitelists 53, the WireGuard port, 8080 and the scrape peers is
 the complete rule set; the operator will not render half of it.
 
-## Adoption and retention
+## No adoption
 
-`adoption` is optional but immutable once the CR is created. It contains:
+The operator never adopts an existing subnet router, state Secret or Headscale node — by design,
+not as a gap. A foreign node's state cannot be verified, and taking over a running Pod without a
+Create-UID chain would undermine the completion receipt that every later write trusts. The
+`TailnetGateway` API therefore has no adoption field: `suspend: false` always means a fresh node.
 
-- `nodeId`: the inventoried numeric Headscale node ID.
-- `objects[]`: explicit `apiVersion`, `kind`, `name`, and `uid` references.
-
-The inventory must include exactly one StatefulSet named after the gateway CR
-and exactly one Secret matching `stateSecretRef`. Additional allowed objects are
-Services, ConfigMaps, ServiceAccounts, Roles, RoleBindings and a PodDisruptionBudget.
-UIDs and kind/name pairs must be unique. Only the reviewed stable API versions are
-accepted. This list is not a substitute for a complete runtime dependency inventory.
-
-The eventual controller must verify every object's
-`tsunaro.io/adopt-gateway: <gateway-CR-UID>` annotation. A name alone is not consent.
-First adoption must preserve the existing defaulted payloads, pod template,
-Service addresses and state bytes; configuration differences block takeover.
-The first operation must not restart the gateway or install garbage-collection
-owner references. Existing tags must not be silently replaced by bootstrap defaults.
-
-Admission cannot verify any of those live conditions or bind a Secret to a
-Headscale node. The read-only planner also does not implement transactional
-multi-object takeover. A future writer must revalidate snapshots, use UID/resource-
-version preconditions, preserve externally owned credentials, and coordinate with
-GitOps. Ephemeral-agent duplicate deletion and node renaming must not be reused.
+Replacing a hand-built router: run the operator gateway next to it with its own addresses, move the
+split-DNS target and the subnet routes over, then retire the old one
+([how-to](../how-to/gateway.md#replace-a-hand-built-gateway)). Recovering a gateway whose
+`-state` Secret or receipt is gone: that is a new node — delete the CR with `deletionPolicy: Delete`
+and recreate it ([rollback](#rollback), [state and backup](../operations/state-backup.md)).
+Pinned LoadBalancer and DNS Service addresses survive the recreation; route approvals follow from
+the policy.
 
 ## Status
 

@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/headscale"
 )
 
@@ -55,15 +54,11 @@ func TestGatewayMintPlanAndResponse(t *testing.T) {
 	}
 }
 
-func TestGatewayMintRejectsExternalOrAdopted(t *testing.T) {
+func TestGatewayMintRejectsExternalOrInvalid(t *testing.T) {
 	now := time.Now()
 	for name, mutate := range map[string]func(*FreshInputs){
 		"external ref": func(i *FreshInputs) {},
-		"adoption": func(i *FreshInputs) {
-			i.Gateway.Spec.Adoption = &tnv1.GatewayAdoption{}
-			i.Gateway.Spec.AuthKeySecretRef = nil
-		},
-		"no tags": func(i *FreshInputs) { i.Gateway.Spec.Tags = nil; i.Gateway.Spec.AuthKeySecretRef = nil },
+		"no tags":      func(i *FreshInputs) { i.Gateway.Spec.Tags = nil; i.Gateway.Spec.AuthKeySecretRef = nil },
 		"bad tag": func(i *FreshInputs) {
 			i.Gateway.Spec.Tags = []string{"tag:fabric --override"}
 			i.Gateway.Spec.AuthKeySecretRef = nil

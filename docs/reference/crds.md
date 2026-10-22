@@ -156,46 +156,39 @@ TailnetEgressStatus is the observed state.
 
 `tailnetgateways.tsunaro.io` · scope **Cluster** · short name `tngw` · `v1alpha1`
 
-TailnetGateway describes a persistent kernel router in the operator namespace. Suspended by default; suspend=false explicitly opts into the fresh writer, not adoption of existing resources.
+TailnetGateway describes a persistent kernel router in the operator namespace. Suspended by default; suspend=false explicitly opts into the fresh writer.
 
 ### Spec
 
-TailnetGatewaySpec is an experimental API contract, suspended by default. Explicit suspend=false opts into the fresh writer, not adoption. Deletion retains everything unless deletionPolicy=Delete explicitly consents to tearing down the operator's own fresh resources; adoption never implies consent to replace a pod, reset state, rename nodes or remove stale nodes.
+TailnetGatewaySpec is an experimental API contract, suspended by default. Explicit suspend=false opts into the fresh writer; existing routers are never adopted. Deletion retains everything unless deletionPolicy=Delete explicitly consents to tearing down the operator's own fresh resources.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `adoption` | object | no | GatewayAdoption binds the inventoried node and resources. Admission cannot establish that a Secret belongs to this node or that a live template is identical. |
-| `adoption.nodeId` | string | yes | Expected numeric Headscale node ID; never inferred from hostname alone. Max length 20. |
-| `adoption.objects[]` | []object | yes | Items 2–16. |
-| `adoption.objects[].apiVersion` | string | yes | Max length 64. |
-| `adoption.objects[].kind` | string | yes | Max length 32. |
-| `adoption.objects[].name` | string | yes | GatewayName is a namespace-local Kubernetes object name. Max length 253. |
-| `adoption.objects[].uid` | string | yes | Max length 128. |
-| `authKeySecretRef` | object | no | Omitted selects persistent key minting in a future controller, never an ephemeral key. An adopted StatefulSet must retain its existing auth source. |
+| `authKeySecretRef` | object | no | Omitted selects persistent key minting by the operator, never an ephemeral key. |
 | `authKeySecretRef.key` | string | no | Default `TS_AUTHKEY`. Max length 253. |
 | `authKeySecretRef.name` | string | yes | GatewayName is a namespace-local Kubernetes object name. Max length 253. |
-| `deletionPolicy` | string | no | Retain leaves every resource, node and key in place when the CR is deleted. Delete records consent through a finalizer: the operator removes only the fresh resources it created (matched by recorded UID or its own gateway-uid label), the Headscale node and the minted bootstrap key, in a fixed order and fail-closed. Adopted or user-supplied objects are never deleted. Default `Retain`. One of `Retain`, `Delete`. |
+| `deletionPolicy` | string | no | Retain leaves every resource, node and key in place when the CR is deleted. Delete records consent through a finalizer: the operator removes only the fresh resources it created (matched by recorded UID or its own gateway-uid label), the Headscale node and the minted bootstrap key, in a fixed order and fail-closed. User-supplied objects are never deleted. Default `Retain`. One of `Retain`, `Delete`. |
 | `dns` | object | yes | GatewayDNS leaves the cluster CoreDNS Corefile and Headscale split-DNS config externally managed. Dynamic hosts remain owned by the existing DNS reconciler. |
 | `dns.extraZones[]` | []object | no | Items ≤ 16. |
 | `dns.extraZones[].upstreams[]` | []string | yes | Items 1–8. |
 | `dns.extraZones[].zone` | string | yes | GatewayName is a namespace-local Kubernetes object name. Max length 253. |
-| `dns.image` | string | yes | GatewayImage requires a version tag or immutable digest. Version tags permit identical adoption of existing pod templates; runtime must not rewrite them. Kernel Tailscale, CoreDNS and socat use separate images, not the agent image. Max length 512. |
+| `dns.image` | string | yes | GatewayImage requires a version tag or immutable digest; the runtime never rewrites it. Kernel Tailscale, CoreDNS and socat use separate images, not the agent image. Max length 512. |
 | `dns.serviceClusterIP` | string | yes | GatewayIP is an unzoned unicast IP literal, not a hostname or a prefix. Max length 45. |
-| `dns.serviceName` | string | yes | Explicit name permits adoption of an existing tailnet-dns Service. Max length 63. |
+| `dns.serviceName` | string | yes | Explicit name of the gateway's DNS Service; pinned identity. Max length 63. |
 | `dns.staticRecords[]` | []object | no | Items ≤ 128. |
 | `dns.staticRecords[].address` | string | no | GatewayIP is an unzoned unicast IP literal, not a hostname or a prefix. Max length 45. |
 | `dns.staticRecords[].name` | string | yes | Relative single label below dns.zone. Max length 63. |
 | `dns.staticRecords[].target` | string | no | Target FQDN of a CNAME. Must be equal to dns.zone or end with ".<dns.zone>" and must differ from this record's own FQDN. Never resolved by the operator; CoreDNS answers from the authoritative zone (CNAME + target RRset when known, bare CNAME when the target is not yet in the hosts source). Max length 253. |
 | `dns.wildcardAddress` | string | no | Optional file-zone fallback, never a template plugin that shadows hosts. Max length 45. |
 | `dns.zone` | string | yes | GatewayName is a namespace-local Kubernetes object name. Max length 253. |
-| `forwardImage` | string | no | GatewayImage requires a version tag or immutable digest. Version tags permit identical adoption of existing pod templates; runtime must not rewrite them. Kernel Tailscale, CoreDNS and socat use separate images, not the agent image. Max length 512. |
+| `forwardImage` | string | no | GatewayImage requires a version tag or immutable digest; the runtime never rewrites it. Kernel Tailscale, CoreDNS and socat use separate images, not the agent image. Max length 512. |
 | `forwards[]` | []object | no | Items ≤ 16. |
 | `forwards[].name` | string | yes | Max length 50. |
 | `forwards[].port` | integer | yes | DNS, health, readiness and metrics ports are reserved by the sidecar. Range 1–65535. Format `int32`. |
 | `forwards[].targetAddress` | string | yes | IP literal avoids DNS/SNI ambiguity and arbitrary socat address expressions. Max length 45. |
 | `forwards[].targetPort` | integer | yes | Range 1–65535. Format `int32`. |
 | `hostname` | string | yes | Explicit until a cluster-name convention is introduced; no inferred identity. Max length 63. |
-| `image` | string | yes | GatewayImage requires a version tag or immutable digest. Version tags permit identical adoption of existing pod templates; runtime must not rewrite them. Kernel Tailscale, CoreDNS and socat use separate images, not the agent image. Max length 512. |
+| `image` | string | yes | GatewayImage requires a version tag or immutable digest; the runtime never rewrites it. Kernel Tailscale, CoreDNS and socat use separate images, not the agent image. Max length 512. |
 | `replicas` | integer | no | Default `1`. Format `int32`. |
 | `routes` | object | yes | GatewayRoutes adds literal-IP egress destinations from this Tailnet in the operator namespace. DNS targets are explicitly skipped, not resolved. |
 | `routes.advertiseEgressTargets` | boolean | no | Default `true`. |
@@ -207,8 +200,8 @@ TailnetGatewaySpec is an experimental API contract, suspended by default. Explic
 | `service.tailnetLBCIDR` | string | yes | GatewayPrefix is a canonical, non-default subnet route. Network ownership and reachability still require runtime validation against the selected Tailnet. Max length 49. |
 | `stateSecretRef` | object | yes | GatewayLocalReference is always resolved in the operator namespace. |
 | `stateSecretRef.name` | string | yes | GatewayName is a namespace-local Kubernetes object name. Max length 253. |
-| `suspend` | boolean | no | Explicit false opts into fresh resource creation; adoption remains unsupported. Default `true`. |
-| `tags[]` | []string | no | Bootstrap tags do not authorize dropping existing tags on an adopted node. Default `[tag:fabric]`. Items 1–16. |
+| `suspend` | boolean | no | Explicit false opts into fresh resource creation. Default `true`. |
+| `tags[]` | []string | no | Bootstrap tags of the fresh node. Default `[tag:fabric]`. Items 1–16. |
 | `tailnetRef` | object | yes | GatewayLocalReference is always resolved in the operator namespace. |
 | `tailnetRef.name` | string | yes | GatewayName is a namespace-local Kubernetes object name. Max length 253. |
 

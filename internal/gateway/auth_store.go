@@ -34,7 +34,7 @@ const gatewayAuthKeyField = "TS_AUTHKEY"
 func storeGatewayMint(ctx context.Context, c client.Client, namespace string, g *tnv1.TailnetGateway, tn *tnv1.Tailnet, req headscale.CreatePreAuthKeyRequest, issued *headscale.PreAuthKey, now time.Time) (GatewayAuthReceipt, error) {
 	if c == nil || len(validation.IsDNS1123Label(namespace)) != 0 || g == nil || tn == nil || g.UID == "" || g.ResourceVersion == "" || tn.UID == "" || tn.ResourceVersion == "" ||
 		g.Namespace != "" || tn.Namespace != "" || g.Spec.Suspend == nil || *g.Spec.Suspend ||
-		g.DeletionTimestamp != nil || tn.DeletionTimestamp != nil || g.Spec.Adoption != nil || g.Spec.AuthKeySecretRef != nil ||
+		g.DeletionTimestamp != nil || tn.DeletionTimestamp != nil || g.Spec.AuthKeySecretRef != nil ||
 		string(g.Spec.TailnetRef.Name) != tn.Name || ValidateGatewayMint(req, issued, now) != nil {
 		return GatewayAuthReceipt{}, ErrGatewayAuthStore
 	}

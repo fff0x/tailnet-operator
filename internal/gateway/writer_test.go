@@ -98,7 +98,6 @@ func TestFreshCompletionScope(t *testing.T) {
 	for name, mutate := range map[string]func(*tnv1.TailnetGateway){
 		"suspended":    func(g *tnv1.TailnetGateway) { g.Spec.Suspend = ptr.To(true) },
 		"externalAuth": func(g *tnv1.TailnetGateway) { g.Spec.AuthKeySecretRef = &tnv1.GatewayAuthKeyReference{Name: "foreign"} },
-		"adoption":     func(g *tnv1.TailnetGateway) { g.Spec.Adoption = &tnv1.GatewayAdoption{NodeID: "1"} },
 	} {
 		t.Run("refused/"+name, func(t *testing.T) {
 			cg := g.DeepCopy()
