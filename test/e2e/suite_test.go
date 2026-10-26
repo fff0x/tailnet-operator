@@ -13,6 +13,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -26,6 +27,7 @@ const namespace = "operator-e2e"
 
 var (
 	kube     client.Client // uncached assertions against the disposable API server
+	apiCfg   *rest.Config  // the disposable API server itself (host + CA), for spoke kubeconfigs
 	versions []string
 	root     string
 	// Never tee raw manager logs to stderr: redaction tests inspect this private capture first.
@@ -86,6 +88,7 @@ func runSuite(m *testing.M) (code int) {
 		fmt.Fprintln(os.Stderr, "start isolated envtest:", err)
 		return
 	}
+	apiCfg = cfg
 	ctrl.SetLogger(zap.New(zap.WriteTo(&operatorLogs)))
 	mgr, err := manager.New(cfg, manager.Options{
 		Namespace: namespace, Image: "example.invalid/operator:e2e",

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
@@ -32,6 +33,7 @@ type Metrics struct {
 	ready, condition, target, expose, generated                            *prometheus.GaugeVec
 	apiExpiry, authExpiry, routesMissing, ingressExpiry, backends, applied *prometheus.GaugeVec
 	pending, userConflicts                                                 *prometheus.GaugeVec
+	spokeReachable, spokeValid, spokePending                               *prometheus.GaugeVec
 	nodeOnline, nodeLastSeen                                               *prometheus.GaugeVec
 	policyApplyErrors                                                      *prometheus.CounterVec
 	approvals, requests                                                    *prometheus.CounterVec
@@ -64,6 +66,9 @@ func New() *Metrics {
 	m.generated = gauge("tailnet_policy_generated", "Generated entries in persisted policy status.", "tailnet", "kind")
 	m.userConflicts = gauge("tailnet_headscale_user_conflicts", "Number of Headscale user names carried by more than one user (status.userConflicts); such a collision makes Headscale reject every policy write. Absent without a current UsersUnique verdict.", "tailnet")
 	m.pending = gauge("tailnet_policy_pending", "One when Apply mode has a nonempty persisted rendered hash different from the applied hash; zero otherwise. Absent without policy status.", "tailnet")
+	m.spokeReachable = gauge("tailnet_spoke_reachable", "One when the last fetch of this spoke's fragment succeeded (condition SpokeReachable); zero otherwise. Absent without a current observation.", "tailnet", "spoke")
+	m.spokeValid = gauge("tailnet_spoke_fragment_valid", "One when the last fetched fragment passed the hub's validation (condition SpokeFragmentValid); zero otherwise.", "tailnet", "spoke")
+	m.spokePending = gauge("tailnet_spoke_fragment_pending", "One while a fetched fragment waits for approval (status.spokes[].pendingHash set); zero otherwise.", "tailnet", "spoke")
 	m.writeDuration = histogram("tailnet_policy_write_duration_seconds", "SetPolicy operation latency including failures.", "tailnet")
 	m.approvals = counter("tailnet_route_approvals_replayed_total", "New routes successfully approved by replay, counted per route, not per request.", "tailnet")
 	m.requests = counter("tailnet_headscale_api_requests_total", "Headscale operations; code 0 means no response.", "tailnet", "method", "path_template", "code")
@@ -163,13 +168,21 @@ func (m *Metrics) delete(id identity) {
 		m.applied.DeleteLabelValues(id.name)
 		m.pending.DeleteLabelValues(id.name)
 		m.userConflicts.DeleteLabelValues(id.name)
+		m.deleteSpokes(id.name)
 	}
 	delete(m.objects, id)
 }
 
+func (m *Metrics) deleteSpokes(tailnet string) {
+	labels := prometheus.Labels{"tailnet": tailnet}
+	m.spokeReachable.DeletePartialMatch(labels)
+	m.spokeValid.DeletePartialMatch(labels)
+	m.spokePending.DeletePartialMatch(labels)
+}
+
 func conditionType(s string) string {
 	switch s {
-	case "Ready", "ApiKeyValid", "ApiReachable", "PolicyMode", "HeadscaleCompatible", "SplitDNS", "UsersUnique", "PolicyRendered", "PolicyApplied", "TagKnown", "Registered", "ServiceConflict", "RoutesGranted", "TargetsReachable", "BackendsReachable", "PolicyGranted", "TLSReady", "TLSCleanup", "RouteConflict", "UnmanagedOverlap", "Advertised", "Approved",
+	case "Ready", "ApiKeyValid", "ApiReachable", "PolicyMode", "HeadscaleCompatible", "SplitDNS", "UsersUnique", "PolicyRendered", "PolicyApplied", "SpokesReady", "TagKnown", "Registered", "ServiceConflict", "RoutesGranted", "TargetsReachable", "BackendsReachable", "PolicyGranted", "TLSReady", "TLSCleanup", "RouteConflict", "UnmanagedOverlap", "Advertised", "Approved",
 		"RoutesInSync", "DNSReady", "StaleNodes", "ClusterDNSForward", "WorkloadCurrent", "ServiceReady":
 		return s
 	default:
@@ -188,7 +201,8 @@ func reason(s string) string {
 		"DNSEgressAliasAmbiguous", "DNSClaimIdentityInvalid", "DNSClaimInputInvalid",
 		"OverlapsReserved", "OverlapsSite", "Unmanaged", "None", "NotObserved", "Advertised", "Approved", "RouteConflict",
 		"FreshBlocked", "IdentityChanged", "Provisioning", "FreshRuntimeReady", "RuntimeUnavailable", "ExternallyManaged",
-		"DNSInSync", "DNSUpdateConflict", "DNSUpdateBlocked", "LBPending", "LoadBalancerAssigned":
+		"DNSInSync", "DNSUpdateConflict", "DNSUpdateBlocked", "LBPending", "LoadBalancerAssigned",
+		"FragmentMissing", "FragmentInvalid", "Export", "AllMerged", "SpokeUnreachable", "SpokeFragmentInvalid", "ApprovalPending", "NothingApproved":
 		return s
 	default:
 		return "Other"
@@ -288,6 +302,16 @@ func (m *Metrics) Observe(obj metav1.Object) {
 		m.applied.DeleteLabelValues(o.Name)
 		m.pending.DeleteLabelValues(o.Name)
 		m.userConflicts.DeleteLabelValues(o.Name)
+		m.deleteSpokes(o.Name)
+		for _, s := range o.Status.Spokes {
+			if c := meta.FindStatusCondition(s.Conditions, "SpokeReachable"); c != nil && c.ObservedGeneration == o.Generation {
+				m.spokeReachable.WithLabelValues(o.Name, s.Name).Set(truth(c.Status == metav1.ConditionTrue))
+			}
+			if c := meta.FindStatusCondition(s.Conditions, "SpokeFragmentValid"); c != nil && c.ObservedGeneration == o.Generation {
+				m.spokeValid.WithLabelValues(o.Name, s.Name).Set(truth(c.Status == metav1.ConditionTrue))
+			}
+			m.spokePending.WithLabelValues(o.Name, s.Name).Set(truth(s.PendingHash != ""))
+		}
 		for _, c := range conditions {
 			if c.Type == "UsersUnique" && c.ObservedGeneration == o.Generation && c.Status != metav1.ConditionUnknown {
 				m.userConflicts.WithLabelValues(o.Name).Set(float64(o.Status.UserConflicts))

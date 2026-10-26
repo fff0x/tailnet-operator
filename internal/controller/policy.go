@@ -166,6 +166,22 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			})
 		}
 	}
+	// Fragments pulled from spoke clusters; each is validated and gated per spoke, an unreachable
+	// or invalid spoke keeps its last approved fragment.
+	spokeFrags, spokeStatuses, err := r.spokeFragments(ctx, &tn, []byte(base), in)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	frags = append(frags, spokeFrags...)
+	spokesCond := func(t *tnv1.Tailnet) {
+		t.Status.Spokes = spokeStatuses
+		if len(spec.Spokes) == 0 {
+			meta.RemoveStatusCondition(&t.Status.Conditions, "SpokesReady")
+			return
+		}
+		s, reason, msg := spokesReady(spokeStatuses)
+		setCond(&t.Status.Conditions, t.Generation, "SpokesReady", s, reason, msg)
+	}
 	rendered, sum, err := policy.Render([]byte(base), in, frags...)
 	if err != nil {
 		reason := "BaseInvalid"
@@ -177,6 +193,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		l.Error(err, "policy not rendered; nothing written", "reason", reason)
 		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
+			spokesCond(t)
 			setCond(&t.Status.Conditions, t.Generation, "PolicyRendered", metav1.ConditionFalse, reason, err.Error())
 		})
 	}
@@ -213,6 +230,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		msg += "; skipped (name-addressed target without grant, gateway routes that do not plan, or blocked site): " + strings.Join(skipped, ", ")
 	}
 	renderedCond := func(t *tnv1.Tailnet) {
+		spokesCond(t)
 		if t.Status.Policy == nil {
 			t.Status.Policy = &tnv1.PolicyStatus{}
 		}
@@ -398,7 +416,7 @@ func (r *TailnetPolicyReconciler) export(ctx context.Context, tn *tnv1.Tailnet) 
 		t.Status.Policy.Generated = tnv1.PolicyGenerated{Tags: sum.Tags, Grants: sum.Grants, Routes: sum.Routes}
 		setCond(&t.Status.Conditions, t.Generation, "PolicyRendered", metav1.ConditionTrue, "Rendered", msg)
 		setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionFalse, "Export",
-			fmt.Sprintf("mode Export: commit ConfigMap %s/%s to the hub and list it in policy.fragmentConfigMaps", r.OperatorNamespace, outName))
+			fmt.Sprintf("mode Export: waiting for the hub to merge ConfigMap %s/%s (policy.spokes pull or a committed fragmentConfigMaps entry)", r.OperatorNamespace, outName))
 	})
 }
 
@@ -466,7 +484,8 @@ func (r *TailnetPolicyReconciler) off(ctx context.Context, tn *tnv1.Tailnet) err
 	}
 	return r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 		t.Status.Policy = nil
-		for _, c := range []string{"PolicyRendered", "PolicyApplied"} {
+		t.Status.Spokes = nil
+		for _, c := range []string{"PolicyRendered", "PolicyApplied", "SpokesReady"} {
 			if i := condIndex(t.Status.Conditions, c); i >= 0 {
 				t.Status.Conditions = append(t.Status.Conditions[:i], t.Status.Conditions[i+1:]...)
 			}
@@ -661,7 +680,8 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("tailnetpolicy").
 		// A preflight mode change matters; unrelated status writes must not re-trigger the render.
-		For(&tnv1.Tailnet{}, builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.Funcs{
+		// An approve-spoke annotation is the admin's gate for a pending spoke fragment.
+		For(&tnv1.Tailnet{}, builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.AnnotationChangedPredicate{}, predicate.Funcs{
 			CreateFunc:  func(event.CreateEvent) bool { return false },
 			DeleteFunc:  func(event.DeleteEvent) bool { return false },
 			GenericFunc: func(event.GenericEvent) bool { return false },
