@@ -22,7 +22,7 @@ are published in the release notes and as Radicle issues labelled `security`.
 | --- | --- | --- |
 | Kubernetes administrator | Operator installation, RBAC, CRDs, bootstrap Secret, base policy | Can read every credential and replace workloads; the operator cannot defend against its own administrator. |
 | Headscale administrator | Node identities, grants, route approvals, API keys | API keys are bearer credentials with full control-server access, not per-controller capabilities. |
-| `Tailnet` writer | Control endpoints, bootstrap Secret reference, policy inputs | Administrative. Do not delegate cluster-scoped `Tailnet` writes to tenants. A `policy.fragmentConfigMaps` entry is another cluster's grants — its only gate is the GitOps review that lands the fragment in the operator namespace, so treat those ConfigMaps as trust-policy changes. |
+| `Tailnet` writer | Control endpoints, bootstrap Secret reference, policy inputs | Administrative. Do not delegate cluster-scoped `Tailnet` writes to tenants. A `policy.fragmentConfigMaps` entry is another cluster's grants — the GitOps review that lands the fragment in the operator namespace is its gate, and the hub additionally refuses a fragment that steps outside its limits (owners, approvers, allowlist, tcp ports, reserved networks), so treat those ConfigMaps as trust-policy changes. |
 | `TailnetEgress` / `TailnetIngress` writer | Agent identity, tag, backends, `allowFrom` | Not a hostile-tenant boundary: custom tags and cross-namespace backends require trusted writers; `allowFrom` is an allowlist, not isolation. |
 | `TailnetGateway` writer | Persistent kernel identity, image pins, routes and retained resources | Administrative. Explicit activation creates a NET_ADMIN workload; never delegate this cluster-scoped CR to tenants. |
 | Agent pod | Ephemeral tsnet identity, reusable preauth key, no Kubernetes client | Container compromise exposes the key and that identity's network access until the key expires. |
@@ -42,7 +42,10 @@ Service references can still resolve to administrator-controlled endpoints or Ex
 
 - The bootstrap API key stays in the operator-namespace Secret you create; the operator only reads
   it and mints its own working key, rotated at half-life after the replacement has been verified.
-- Agent preauth keys are reusable until expiry. Protect Secret read access and restrict CR writers.
+- Agent preauth keys are reusable until expiry. A key is expired on the server once it is replaced
+  (half-life rotation, changed tag or server) or its CR is deleted; the Secret records the key's
+  Headscale ID for that, and a Headscale that is unreachable never blocks the delete — the key then
+  ages out at its own expiry. Protect Secret read access and restrict CR writers.
 - Image-pull Secrets are referenced by name in the agent's namespace; credentials are never copied.
 - Status, Events, metrics and logs never contain whole credentials; Headscale error bodies are
   withheld because they can echo them. Tests cover known fixture credentials and malformed inputs.

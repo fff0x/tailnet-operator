@@ -31,7 +31,7 @@ bindings: a RoleBinding limits its role to that namespace, a ClusterRoleBinding 
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetgateways` | `get`, `list`, `patch`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses/finalizers`, `tailnets/finalizers` | `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses/status` | `get`, `patch`, `update` | all names | — |
-| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses` | `get`, `list`, `watch` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses` | `get`, `list`, `patch`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnets/status` | `get`, `patch`, `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnets` | `get`, `list`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetsites/status` | `get`, `patch`, `update` | all names | — |
@@ -54,7 +54,7 @@ bindings: a RoleBinding limits its role to that namespace, a ClusterRoleBinding 
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `rbac.authorization.k8s.io` | `rolebindings`, `roles` | `create`, `delete`, `get` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tsunaro.io` | `tailnetegresses/finalizers` | `update` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tsunaro.io` | `tailnetegresses/status` | `get`, `patch`, `update` | all names | — |
-| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tsunaro.io` | `tailnetegresses` | `get`, `list`, `watch` | all names | — |
+| `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `tsunaro.io` | `tailnetegresses` | `get`, `list`, `patch`, `watch` | all names | — |
 
 ## Bindings
 

@@ -343,7 +343,8 @@ func TestRBACPrivilegesExact(t *testing.T) {
 				grant{"apps", "statefulsets", "get create update delete"},
 				grant{"policy", "poddisruptionbudgets", "get create delete"},
 				grant{"rbac.authorization.k8s.io", "roles rolebindings", "get create delete"},
-				grant{"tsunaro.io", "tailnetegresses", read},
+				// patch only carries the authkey finalizer that expires the pre-auth key on delete.
+				grant{"tsunaro.io", "tailnetegresses", read + " patch"},
 				grant{"tsunaro.io", "tailnetegresses/status", status},
 				grant{"tsunaro.io", "tailnetegresses/finalizers", "update"})
 			if election {
@@ -351,9 +352,10 @@ func TestRBACPrivilegesExact(t *testing.T) {
 			}
 			expected := map[string][]grant{
 				"ClusterRole/tailnet-operator-crds": {
-					{"tsunaro.io", "tailnets tailnetingresses tailnetsites", read},
-					// patch only carries the teardown finalizer; spec is CEL-guarded.
-					{"tsunaro.io", "tailnetgateways", read + " patch"},
+					{"tsunaro.io", "tailnets tailnetsites", read},
+					// patch only carries a finalizer (gateway teardown, ingress authkey expiry);
+					// spec is CEL-guarded.
+					{"tsunaro.io", "tailnetgateways tailnetingresses", read + " patch"},
 					{"tsunaro.io", "tailnets/status tailnetingresses/status tailnetgateways/status tailnetsites/status", status},
 					{"tsunaro.io", "tailnets/finalizers tailnetingresses/finalizers", "update"},
 				},

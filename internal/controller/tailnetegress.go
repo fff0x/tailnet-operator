@@ -54,6 +54,12 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	if !eg.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, releaseAuthKey(ctx, r.Client, r.OperatorNamespace, &eg, eg.Spec.TailnetRef.Name, r.Metrics.Headscale(eg.Spec.TailnetRef.Name))
+	}
+	if err := ensureAuthKeyFinalizer(ctx, r.Client, &eg); err != nil {
+		return ctrl.Result{}, err
+	}
 	ns := eg.Namespace
 
 	// Resolve the Tailnet and its working API key (minted by the Tailnet controller).
@@ -228,7 +234,9 @@ func (r *TailnetEgressReconciler) ensureAuthKey(ctx context.Context, eg *tnv1.Ta
 
 	binding := authKeyBinding(tn, tag)
 	var cur corev1.Secret
+	var superseded *corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: eg.Namespace, Name: authKeySecretName(eg.Name)}, &cur); err == nil {
+		superseded = &cur
 		if reuse, relabel := authKeyReuse(&cur, binding, lifetime, now); reuse {
 			if relabel {
 				// Legacy or transferred Secret, or a re-created Tailnet CR: record the binding without rotating.
@@ -259,11 +267,16 @@ func (r *TailnetEgressReconciler) ensureAuthKey(ctx context.Context, eg *tnv1.Ta
 		return nil, fmt.Errorf("mint pre-auth key: %w", err)
 	}
 	sec := authKeySecret(eg, eg.Namespace, pak.Key, exp.UTC().Format(time.RFC3339), binding)
+	sec.Annotations[annAuthKeyID] = pak.ID
 	if err := controllerutil.SetControllerReference(eg, sec, r.Scheme); err != nil {
 		return nil, err
 	}
 	if err := ssaApply(ctx, r.Client, sec); err != nil {
 		return nil, err
+	}
+	// The new key is in place; the old one must not keep registering nodes.
+	if superseded != nil {
+		expireAuthKey(ctx, hs, superseded)
 	}
 	return &exp, nil
 }

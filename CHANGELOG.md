@@ -4,6 +4,22 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Security
+
+- Hub `policy.fragmentConfigMaps`: a fragment is now validated against the hub's limits before
+  it is merged, not only for unexpected top-level blocks — tag owners must come from the hub's
+  `policy.tagOwners`, route approvers from the fragment's own tags or `policy.routeApprovers`,
+  grant sources from its own tags or `policy.ingressSourceAllowlist`, destinations are own tags or
+  canonical CIDRs, ports `tcp:<n>` only, and nothing may touch `spec.reservedNetworks`. A fragment
+  that breaks a limit fails the render closed with `PolicyRendered=False/FragmentInvalid` naming
+  the ConfigMap and the offending path.
+- Agent pre-auth keys are expired on Headscale when they are superseded (half-life rotation,
+  changed tag or server) and when their `TailnetEgress`/`TailnetIngress` is deleted. The authkey
+  Secret records the key's Headscale ID (`tsunaro.io/authkey-id`); a finalizer `tsunaro.io/authkey`
+  performs the delete-time expiry best-effort — an unreachable Headscale never blocks the delete.
+  The operator gains `patch` on `tailnetegresses` and `tailnetingresses` for that finalizer; keys
+  minted by earlier releases carry no ID and age out at their own expiry as before.
+
 ## [0.21.1] - 2026-10-22
 
 ### Security

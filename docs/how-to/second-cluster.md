@@ -168,6 +168,6 @@ dig +short shop-shop-dev.prod-2.tailnet.example.internal
 | --- | --- | --- |
 | spoke CR `TagKnown=False/Unknown` | hub has not applied the fragment yet, or it is not listed | commit/refresh the fragment, check `fragmentConfigMaps` |
 | hub `PolicyRendered=False/FragmentMissing` | listed ConfigMap absent in the operator namespace | ship the ConfigMap, or remove it from the list first |
-| hub `PolicyRendered=False/FragmentInvalid` | fragment carries `groups`/`acls`/`ssh`/… | export again; never hand-edit the fragment beyond review |
+| hub `PolicyRendered=False/FragmentInvalid` | fragment carries `groups`/`acls`/`ssh`/…, or a grant/owner/route outside the hub's limits (the message names the path) | export again; never hand-edit the fragment beyond review; widen the hub's `tagOwners`/`routeApprovers`/`ingressSourceAllowlist` only deliberately |
 | spoke `PolicyRendered` message lists `denied …` | `allowFrom` outside the spoke's `ingressSourceAllowlist` | align the allowlist with the hub |
 | spoke egress `RoutesGranted=False`, target reason `NotAdvertised` | no router advertises a route covering the host | add the `/32` or its subnet to a gateway's routes or a `TailnetSite` |

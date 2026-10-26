@@ -24,8 +24,8 @@ import (
 const hubBase = `{"tagOwners":{"tag:base":["group:admins"]},"groups":{"group:admins":["admin@"]},` +
 	`"grants":[{"src":["group:admins"],"dst":["tag:base"],"ip":["*"]}]}`
 
-// a valid spoke fragment: only the three additive blocks.
-const spokeFragment = `{"tagOwners":{"tag:egress-spoke-db":["group:operator"]},` +
+// a valid spoke fragment: only the three additive blocks, owners within the hub's tagOwners.
+const spokeFragment = `{"tagOwners":{"tag:egress-spoke-db":["group:admins"]},` +
 	`"autoApprovers":{"routes":{"10.9.0.5/32":["tag:fabric"]}},` +
 	`"grants":[{"src":["tag:egress-spoke-db"],"dst":["10.9.0.5/32"],"ip":["tcp:5432"]}]}`
 
@@ -94,6 +94,9 @@ func TestPolicyHubFragments(t *testing.T) {
 		{"merged", spokeFragment, "Applied", true, 1, true},
 		{"missing", "", "FragmentMissing", false, 0, false},
 		{"invalid", `{"acls":[{"action":"accept"}]}`, "FragmentInvalid", true, 0, false},
+		// Structurally wrong content fails closed too: a foreign owner alias, a wildcard destination.
+		{"foreign owner", `{"tagOwners":{"tag:egress-spoke-db":["autogroup:member"]}}`, "FragmentInvalid", true, 0, false},
+		{"wildcard dst", `{"grants":[{"src":["tag:egress-spoke-db"],"dst":["*"],"ip":["tcp:5432"]}]}`, "FragmentInvalid", true, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var written string

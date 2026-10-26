@@ -58,6 +58,12 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	if !in.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, releaseAuthKey(ctx, r.Client, r.OperatorNamespace, &in, in.Spec.TailnetRef.Name, r.Metrics.Headscale(in.Spec.TailnetRef.Name))
+	}
+	if err := ensureAuthKeyFinalizer(ctx, r.Client, &in); err != nil {
+		return ctrl.Result{}, err
+	}
 	legacy, err := r.retireLegacyIngressWorkload(ctx, &in)
 	if err != nil {
 		return r.fail(ctx, &in, "WorkloadMigrationBlocked", err)
@@ -283,7 +289,9 @@ func (r *TailnetIngressReconciler) ensureAuthKey(ctx context.Context, in *tnv1.T
 
 	binding := authKeyBinding(tn, tag)
 	var cur corev1.Secret
+	var superseded *corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: in.Namespace, Name: authKeySecretName(in.Name)}, &cur); err == nil {
+		superseded = &cur
 		if reuse, relabel := authKeyReuse(&cur, binding, lifetime, now); reuse {
 			if relabel {
 				// Legacy or transferred Secret, or a re-created Tailnet CR: record the binding without rotating.
@@ -314,11 +322,16 @@ func (r *TailnetIngressReconciler) ensureAuthKey(ctx context.Context, in *tnv1.T
 		return nil, fmt.Errorf("mint pre-auth key: %w", err)
 	}
 	sec := ingressAuthKeySecret(in, in.Namespace, pak.Key, exp.UTC().Format(time.RFC3339), binding)
+	sec.Annotations[annAuthKeyID] = pak.ID
 	if err := controllerutil.SetControllerReference(in, sec, r.Scheme); err != nil {
 		return nil, err
 	}
 	if err := ssaApply(ctx, r.Client, sec); err != nil {
 		return nil, err
+	}
+	// The new key is in place; the old one must not keep registering nodes.
+	if superseded != nil {
+		expireAuthKey(ctx, hs, superseded)
 	}
 	return &exp, nil
 }

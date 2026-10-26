@@ -242,9 +242,14 @@ spec:
 ```
 
 The hub renders base → its own CRs → fragments; base and hub entries win, fragments only add. A
-spoke may only add `tagOwners`, `autoApprovers.routes` and `grants` — a fragment carrying any other
-block (`acls`, `groups`, `ssh`, …) is rejected with `PolicyRendered=False/FragmentInvalid` and
-nothing is written. A **listed fragment that is missing** fails the render closed
+spoke may only add `tagOwners`, `autoApprovers.routes` and `grants`, and only within the hub's
+limits: tag owners from the hub's `policy.tagOwners`, route approvers from its own tags or
+`policy.routeApprovers`, grant sources from its own tags or `policy.ingressSourceAllowlist`, grant
+destinations that are its own tags or canonical CIDRs, `tcp:<port>` only, and no route or
+destination inside `spec.reservedNetworks`. A fragment that carries any other block (`acls`,
+`groups`, `ssh`, …) or breaks one of these limits is rejected with
+`PolicyRendered=False/FragmentInvalid` naming the ConfigMap and the offending path, and nothing is
+written. A **listed fragment that is missing** fails the render closed
 (`PolicyRendered=False/FragmentMissing`): the live policy keeps the spoke's grants rather than
 silently dropping them, so delete the fragment from `fragmentConfigMaps` before you delete its
 ConfigMap.

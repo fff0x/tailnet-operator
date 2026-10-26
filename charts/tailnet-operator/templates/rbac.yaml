@@ -13,9 +13,11 @@ rules:
   - apiGroups: ["tsunaro.io"]
     resources: [tailnets/status]
     verbs: [get, update, patch]
+  # patch exists only to add/remove the authkey finalizer that expires the CR's
+  # pre-auth key on delete; the code never patches spec.
   - apiGroups: ["tsunaro.io"]
     resources: [tailnetingresses]
-    verbs: [get, list, watch]
+    verbs: [get, list, watch, patch]
   - apiGroups: ["tsunaro.io"]
     resources: [tailnetingresses/status]
     verbs: [get, update, patch]
@@ -109,9 +111,11 @@ rules:
     resources: [leases]
     verbs: [get, list, watch, create, update, patch]
   {{- end }}
+  # patch exists only to add/remove the authkey finalizer that expires the CR's
+  # pre-auth key on delete; the code never patches spec.
   - apiGroups: ["tsunaro.io"]
     resources: [tailnetegresses]
-    verbs: [get, list, watch]
+    verbs: [get, list, watch, patch]
   - apiGroups: ["tsunaro.io"]
     resources: [tailnetegresses/status]
     verbs: [get, update, patch]

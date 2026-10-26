@@ -154,6 +154,18 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				fmt.Sprintf("fragment ConfigMap %s/%s not found or has no key %q", r.OperatorNamespace, missing, policyKey))
 		})
 	}
+	// A fragment is another cluster's grants: whoever wrote the ConfigMap, it may only add what the
+	// hub's limits allow (own tags, hub owners/approvers/allowlist, tcp ports, no reserved space).
+	gitRules := fragmentRules(&tn, []byte(base), in, gitFragmentPatterns, nil, false)
+	for i, f := range frags {
+		if err := policy.ValidateFragment(f, gitRules); err != nil {
+			l.Error(err, "fragment rejected; nothing written", "configmap", spec.FragmentConfigMaps[i])
+			return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
+				setCond(&t.Status.Conditions, t.Generation, "PolicyRendered", metav1.ConditionFalse, "FragmentInvalid",
+					fmt.Sprintf("fragment ConfigMap %s: %v", spec.FragmentConfigMaps[i], err))
+			})
+		}
+	}
 	rendered, sum, err := policy.Render([]byte(base), in, frags...)
 	if err != nil {
 		reason := "BaseInvalid"
