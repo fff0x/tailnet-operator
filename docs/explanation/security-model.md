@@ -117,7 +117,7 @@ bound together independently of the registry:
 
 ```sh
 rad clone rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX && cd tailnet-operator
-rad-artifact show v0.21.1 --pretty          # creator must be a delegate; shows image/chart digests
+rad-artifact show v0.22.0 --pretty          # creator must be a delegate; shows image/chart digests
 test "$(rad-artifact cid deploy/cosign.pub)" = "<cid from show>"
 ```
 

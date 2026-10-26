@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-26
+
 ### Added
 
 - `Tailnet.spec.policy.spokes[]`: the hub pulls a spoke's exported policy fragment from the
