@@ -51,6 +51,16 @@ TailnetSpec describes a control server and how the operator authenticates to it.
 | `policy.mode` | string | no | DryRun renders into renderedConfigMap only; Apply also writes the control server when the live policy differs; Export renders only this Tailnet's generated entries (no base, no write) into renderedConfigMap so a hub operator can merge them via fragmentConfigMaps. Start with DryRun, compare, then switch. Default `DryRun`. One of `DryRun`, `Apply`, `Export`. |
 | `policy.renderedConfigMap` | string | no | ConfigMap (operator namespace, key "policy") that receives the rendered policy (Apply/DryRun) or the exported fragment (Export) for review. Empty → "<baseConfigMap>-rendered" (Apply/DryRun) or "<tailnet>-policy-fragment" (Export). |
 | `policy.routeApprovers[]` | []string | no | Approvers for the generated autoApprovers.routes entries (one /32 per egress target), i.e. the tag your subnet routers carry, e.g. ["tag:fabric"]. Required when on. |
+| `policy.spokes[]` | []object | no | Spoke clusters whose exported fragment this hub pulls itself (instead of a committed fragmentConfigMaps entry): the hub reads the spoke's fragment ConfigMap with the kubeconfig in kubeconfigSecretRef, validates it against this hub's limits and the spoke's tagPatterns / routeAllowlist, and merges it per the spoke's approval mode. Only valid alongside baseConfigMap; never in mode Export. Items ≤ 32. |
+| `policy.spokes[].approval` | string | no | Auto merges every valid fetched fragment at once. Manual merges the last approved fragment only and reports a changed fetch as pending until an admin annotates the Tailnet with "tsunaro.io/approve-spoke.<name>: <pendingHash>". Default `Auto`. One of `Auto`, `Manual`. |
+| `policy.spokes[].configMap` | string | no | Fragment ConfigMap on the spoke (key "policy"). Empty → "<name>-policy-fragment". Max length 253. |
+| `policy.spokes[].kubeconfigSecretRef` | object | yes | Secret (operator namespace) holding a kubeconfig for the spoke's API server. Mint it for a ServiceAccount that may only get/list/watch the fragment ConfigMap (the chart's policy.fragmentReader on the spoke renders exactly that). |
+| `policy.spokes[].kubeconfigSecretRef.key` | string | no | Default `kubeconfig`. |
+| `policy.spokes[].kubeconfigSecretRef.name` | string | yes | Max length 253. |
+| `policy.spokes[].name` | string | yes | Spoke name; used in status, events, metrics and the approve annotation "tsunaro.io/approve-spoke.<name>". Max length 63. |
+| `policy.spokes[].namespace` | string | no | Namespace on the spoke holding the fragment ConfigMap. Empty → this operator's namespace. Max length 63. |
+| `policy.spokes[].routeAllowlist[]` | []string | no | Prefixes (besides this hub's TailnetSites) a spoke route or grant destination that is not a host address may lie within. Host routes (/32, /128) are always accepted unless reserved. Items ≤ 64. |
+| `policy.spokes[].tagPatterns[]` | []string | no | Glob patterns the spoke's own tags must match, e.g. ["tag:*-prod-2-*"]; tags already owned by the hub's base document are exempt. Empty → ["tag:*-<name>-*"]. Items ≤ 16. |
 | `policy.tagOwners[]` | []string | no | Owners of the generated tags (tagOwners value), e.g. ["group:operator"]. Required when on. |
 | `proxy` | object | no | ProxySpec are the defaults for the per-CR agent pods this Tailnet spawns. A TailnetEgress may override image and resources. |
 | `proxy.image` | string | no | Container image carrying the tailnet-agent binary. Empty → the operator's own image, so a single pushed image serves both control and data plane. |
@@ -76,7 +86,7 @@ TailnetStatus is the observed state of the control server binding.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `apiKeyExpiresAt` | string | no | Expiry of the current working API key, drives the ApiKeyValid condition and its metric. Format `date-time`. |
-| `conditions[]` | []object | no | Conditions: ApiReachable, ApiKeyValid, HeadscaleCompatible, PolicyMode, SplitDNS, UsersUnique, PolicyRendered, PolicyApplied. |
+| `conditions[]` | []object | no | Conditions: ApiReachable, ApiKeyValid, HeadscaleCompatible, PolicyMode, SplitDNS, UsersUnique, PolicyRendered, PolicyApplied, SpokesReady (only with policy.spokes). |
 | `conditions[].lastTransitionTime` | string | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. Format `date-time`. |
 | `conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. Max length 32768. |
 | `conditions[].observedGeneration` | integer | no | observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance. Range ≥ 0. Format `int64`. |
@@ -92,6 +102,28 @@ TailnetStatus is the observed state of the control server binding.
 | `policy.generated.routes` | integer | yes |  |
 | `policy.generated.tags` | integer | yes |  |
 | `policy.renderedHash` | string | no | sha256 of the canonical rendered policy. |
+| `spokes[]` | []object | no | One entry per policy.spokes[] item; condition SpokesReady summarises them. |
+| `spokes[].approvedAt` | string | no | Format `date-time`. |
+| `spokes[].approvedHash` | string | no | sha256 of the fragment currently merged into the hub policy, and when it was adopted. |
+| `spokes[].conditions[]` | []object | no | Conditions: SpokeReachable, SpokeFragmentValid, SpokeFragmentApproved. |
+| `spokes[].conditions[].lastTransitionTime` | string | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. Format `date-time`. |
+| `spokes[].conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. Max length 32768. |
+| `spokes[].conditions[].observedGeneration` | integer | no | observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance. Range ≥ 0. Format `int64`. |
+| `spokes[].conditions[].reason` | string | yes | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. Max length 1024. |
+| `spokes[].conditions[].status` | string | yes | status of the condition, one of True, False, Unknown. One of `True`, `False`, `Unknown`. |
+| `spokes[].conditions[].type` | string | yes | type of condition in CamelCase or in foo.example.com/CamelCase. Max length 316. |
+| `spokes[].fetchedAt` | string | no | Format `date-time`. |
+| `spokes[].fetchedHash` | string | no | sha256 of the last fragment fetched and found valid, and when. |
+| `spokes[].name` | string | yes |  |
+| `spokes[].pendingDelta` | object | no | SpokeDelta counts the entries a pending fragment adds (+) and removes (-) against the approved one. |
+| `spokes[].pendingDelta.grantsAdded` | integer | yes |  |
+| `spokes[].pendingDelta.grantsRemoved` | integer | yes |  |
+| `spokes[].pendingDelta.routesAdded` | integer | yes |  |
+| `spokes[].pendingDelta.routesRemoved` | integer | yes |  |
+| `spokes[].pendingDelta.tagsAdded` | integer | yes |  |
+| `spokes[].pendingDelta.tagsRemoved` | integer | yes |  |
+| `spokes[].pendingHash` | string | no | Manual approval only: hash of a valid fetch that differs from approvedHash, since when, and what it would add or remove. Annotate the Tailnet with "tsunaro.io/approve-spoke.<name>: <pendingHash>" to adopt it. |
+| `spokes[].pendingSince` | string | no | Format `date-time`. |
 | `userConflicts` | integer | no | Headscale user names that more than one user carries. Such a collision makes Headscale reject every policy write ("multiple users found"); condition UsersUnique reports it. Only the count is published, never a name. Format `int32`. |
 | `version` | string | no | Reported control-server version, for the operator log and the printcolumn. |
 

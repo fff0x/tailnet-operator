@@ -76,6 +76,7 @@ type DNSSpec struct {
 // +kubebuilder:validation:XValidation:rule="!((has(self.baseConfigMap) && size(self.baseConfigMap) > 0) || (has(self.mode) && self.mode == 'Export')) || (has(self.tagOwners) && size(self.tagOwners) > 0 && has(self.routeApprovers) && size(self.routeApprovers) > 0)",message="policy.tagOwners and policy.routeApprovers are required when baseConfigMap is set or mode is Export"
 // +kubebuilder:validation:XValidation:rule="!(has(self.mode) && self.mode == 'Export') || ((!has(self.baseConfigMap) || size(self.baseConfigMap) == 0) && (!has(self.fragmentConfigMaps) || size(self.fragmentConfigMaps) == 0))",message="mode Export is a spoke: leave baseConfigMap and fragmentConfigMaps empty"
 // +kubebuilder:validation:XValidation:rule="!has(self.fragmentConfigMaps) || size(self.fragmentConfigMaps) == 0 || (has(self.baseConfigMap) && size(self.baseConfigMap) > 0)",message="policy.fragmentConfigMaps requires baseConfigMap"
+// +kubebuilder:validation:XValidation:rule="!has(self.spokes) || size(self.spokes) == 0 || ((has(self.baseConfigMap) && size(self.baseConfigMap) > 0) && (!has(self.mode) || self.mode != 'Export'))",message="policy.spokes requires baseConfigMap and is not allowed in mode Export"
 type PolicySpec struct {
 	// ConfigMap (operator namespace, key "policy") holding the base policy in HuJSON.
 	// Empty → the feature is off and nothing is rendered or written.
@@ -104,6 +105,16 @@ type PolicySpec struct {
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	// +listType=set
 	FragmentConfigMaps []string `json:"fragmentConfigMaps,omitempty"`
+	// Spoke clusters whose exported fragment this hub pulls itself (instead of a committed
+	// fragmentConfigMaps entry): the hub reads the spoke's fragment ConfigMap with the kubeconfig
+	// in kubeconfigSecretRef, validates it against this hub's limits and the spoke's tagPatterns /
+	// routeAllowlist, and merges it per the spoke's approval mode. Only valid alongside
+	// baseConfigMap; never in mode Export.
+	// +optional
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=map
+	// +listMapKey=name
+	Spokes []SpokeRef `json:"spokes,omitempty"`
 	// Owners of the generated tags (tagOwners value), e.g. ["group:operator"]. Required when on.
 	// +optional
 	TagOwners []string `json:"tagOwners,omitempty"`
@@ -118,6 +129,58 @@ type PolicySpec struct {
 	// +kubebuilder:validation:items:MaxLength=253
 	// +kubebuilder:validation:items:Pattern=`^((group:|tag:|autogroup:)[^[:space:]]+|[^@[:space:]]+@[^@[:space:]]+)$`
 	IngressSourceAllowlist []string `json:"ingressSourceAllowlist,omitempty"`
+}
+
+// SpokeRef is one spoke cluster the hub pulls a policy fragment from.
+type SpokeRef struct {
+	// Spoke name; used in status, events, metrics and the approve annotation
+	// "tsunaro.io/approve-spoke.<name>".
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// Secret (operator namespace) holding a kubeconfig for the spoke's API server. Mint it for a
+	// ServiceAccount that may only get/list/watch the fragment ConfigMap (the chart's
+	// policy.fragmentReader on the spoke renders exactly that).
+	KubeconfigSecretRef SpokeKubeconfigRef `json:"kubeconfigSecretRef"`
+	// Namespace on the spoke holding the fragment ConfigMap. Empty → this operator's namespace.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$`
+	Namespace string `json:"namespace,omitempty"`
+	// Fragment ConfigMap on the spoke (key "policy"). Empty → "<name>-policy-fragment".
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$`
+	ConfigMap string `json:"configMap,omitempty"`
+	// Glob patterns the spoke's own tags must match, e.g. ["tag:*-prod-2-*"]; tags already owned
+	// by the hub's base document are exempt. Empty → ["tag:*-<name>-*"].
+	// +optional
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^tag:[^[:space:]]+$`
+	TagPatterns []string `json:"tagPatterns,omitempty"`
+	// Prefixes (besides this hub's TailnetSites) a spoke route or grant destination that is not a
+	// host address may lie within. Host routes (/32, /128) are always accepted unless reserved.
+	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	// +listType=set
+	RouteAllowlist []GatewayPrefix `json:"routeAllowlist,omitempty"`
+	// Auto merges every valid fetched fragment at once. Manual merges the last approved fragment
+	// only and reports a changed fetch as pending until an admin annotates the Tailnet with
+	// "tsunaro.io/approve-spoke.<name>: <pendingHash>".
+	// +kubebuilder:validation:Enum=Auto;Manual
+	// +kubebuilder:default=Auto
+	Approval string `json:"approval,omitempty"`
+}
+
+// SpokeKubeconfigRef names the Secret key holding a spoke kubeconfig.
+type SpokeKubeconfigRef struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+	// +kubebuilder:default="kubeconfig"
+	Key string `json:"key,omitempty"`
 }
 
 // HeadscaleSpec describes the external control server. Version is an optional operator-supplied
@@ -225,11 +288,55 @@ type PolicyStatus struct {
 	Generated PolicyGenerated `json:"generated,omitempty"`
 }
 
+// SpokeStatus reports one pulled spoke fragment: what was fetched, what is merged, what waits.
+type SpokeStatus struct {
+	Name string `json:"name"`
+	// sha256 of the last fragment fetched and found valid, and when.
+	// +optional
+	FetchedHash string `json:"fetchedHash,omitempty"`
+	// +optional
+	FetchedAt *metav1.Time `json:"fetchedAt,omitempty"`
+	// sha256 of the fragment currently merged into the hub policy, and when it was adopted.
+	// +optional
+	ApprovedHash string `json:"approvedHash,omitempty"`
+	// +optional
+	ApprovedAt *metav1.Time `json:"approvedAt,omitempty"`
+	// Manual approval only: hash of a valid fetch that differs from approvedHash, since when, and
+	// what it would add or remove. Annotate the Tailnet with
+	// "tsunaro.io/approve-spoke.<name>: <pendingHash>" to adopt it.
+	// +optional
+	PendingHash string `json:"pendingHash,omitempty"`
+	// +optional
+	PendingSince *metav1.Time `json:"pendingSince,omitempty"`
+	// +optional
+	PendingDelta *SpokeDelta `json:"pendingDelta,omitempty"`
+	// Conditions: SpokeReachable, SpokeFragmentValid, SpokeFragmentApproved.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// SpokeDelta counts the entries a pending fragment adds (+) and removes (-) against the approved one.
+type SpokeDelta struct {
+	TagsAdded     int `json:"tagsAdded"`
+	TagsRemoved   int `json:"tagsRemoved"`
+	GrantsAdded   int `json:"grantsAdded"`
+	GrantsRemoved int `json:"grantsRemoved"`
+	RoutesAdded   int `json:"routesAdded"`
+	RoutesRemoved int `json:"routesRemoved"`
+}
+
 // TailnetStatus is the observed state of the control server binding.
 type TailnetStatus struct {
 	// Policy rendering/apply state; conditions PolicyRendered and PolicyApplied carry the reasons.
 	// +optional
 	Policy *PolicyStatus `json:"policy,omitempty"`
+	// One entry per policy.spokes[] item; condition SpokesReady summarises them.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Spokes []SpokeStatus `json:"spokes,omitempty"`
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 	// Reported control-server version, for the operator log and the printcolumn.
@@ -244,7 +351,7 @@ type TailnetStatus struct {
 	// +optional
 	UserConflicts int32 `json:"userConflicts,omitempty"`
 	// Conditions: ApiReachable, ApiKeyValid, HeadscaleCompatible, PolicyMode, SplitDNS,
-	// UsersUnique, PolicyRendered, PolicyApplied.
+	// UsersUnique, PolicyRendered, PolicyApplied, SpokesReady (only with policy.spokes).
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -260,6 +367,7 @@ type TailnetStatus struct {
 // +kubebuilder:printcolumn:name="Expires",type=string,JSONPath=`.status.apiKeyExpiresAt`
 // +kubebuilder:printcolumn:name="Compat",type=string,JSONPath=`.status.conditions[?(@.type=="HeadscaleCompatible")].reason`
 // +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.status.conditions[?(@.type=="PolicyApplied")].reason`
+// +kubebuilder:printcolumn:name="Spokes",type=string,JSONPath=`.status.conditions[?(@.type=="SpokesReady")].reason`
 // +kubebuilder:printcolumn:name="DNS",type=string,JSONPath=`.status.conditions[?(@.type=="SplitDNS")].reason`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

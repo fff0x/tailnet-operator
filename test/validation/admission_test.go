@@ -167,6 +167,81 @@ func TestAdmission(t *testing.T) {
 		accept(t, hub)
 	})
 
+	// The rule: spokes[] is a hub-only field — it needs a base and is refused in mode Export; each
+	// entry is a DNS label with a kubeconfig Secret, its approval is Auto or Manual and defaults to
+	// Auto, tag patterns are tag globs.
+	t.Run("policy-spokes", func(t *testing.T) {
+		withSpokes := func(spokes ...map[string]any) *unstructured.Unstructured {
+			obj := templates["tailnet"].DeepCopy()
+			obj.SetName("hub-spokes")
+			policy := obj.Object["spec"].(map[string]any)["policy"].(map[string]any)
+			policy["mode"] = "Apply"
+			list := make([]any, 0, len(spokes))
+			for _, s := range spokes {
+				list = append(list, s)
+			}
+			policy["spokes"] = list
+			return obj
+		}
+		spoke := func(name string) map[string]any {
+			return map[string]any{"name": name, "kubeconfigSecretRef": map[string]any{"name": name + "-kubeconfig"}}
+		}
+		reject := func(t *testing.T, obj *unstructured.Unstructured, message string) {
+			t.Helper()
+			err := c.Create(ctx, obj, client.DryRunAll)
+			if !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), message) {
+				t.Fatalf("want Invalid containing %q, got %v", message, err)
+			}
+		}
+
+		full := spoke("prod-2")
+		full["namespace"] = "tailnet-system"
+		full["configMap"] = "prod-2-policy-fragment"
+		full["tagPatterns"] = []any{"tag:*-prod-2-*", "tag:prod2-*"}
+		full["routeAllowlist"] = []any{"192.0.2.0/24", "2001:db8::/32"}
+		full["approval"] = "Manual"
+		accept(t, withSpokes(spoke("edge"), full))
+
+		// Defaults land in the persisted object.
+		stored := withSpokes(spoke("edge"))
+		if err := c.Create(ctx, stored); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Delete(ctx, stored) })
+		got := &unstructured.Unstructured{}
+		got.SetGroupVersionKind(stored.GroupVersionKind())
+		if err := c.Get(ctx, client.ObjectKeyFromObject(stored), got); err != nil {
+			t.Fatal(err)
+		}
+		entry := got.Object["spec"].(map[string]any)["policy"].(map[string]any)["spokes"].([]any)[0].(map[string]any)
+		if entry["approval"] != "Auto" || entry["kubeconfigSecretRef"].(map[string]any)["key"] != "kubeconfig" {
+			t.Fatalf("spoke defaults: %v", entry)
+		}
+
+		noBase := withSpokes(spoke("edge"))
+		delete(noBase.Object["spec"].(map[string]any)["policy"].(map[string]any), "baseConfigMap")
+		reject(t, noBase, "policy.spokes requires baseConfigMap")
+
+		export := withSpokes(spoke("edge"))
+		exportPolicy := export.Object["spec"].(map[string]any)["policy"].(map[string]any)
+		delete(exportPolicy, "baseConfigMap")
+		exportPolicy["mode"] = "Export"
+		reject(t, export, "policy.spokes requires baseConfigMap and is not allowed in mode Export")
+
+		reject(t, withSpokes(spoke("edge"), spoke("edge")), "Duplicate value")
+		reject(t, withSpokes(spoke("Prod_2")), "should match")
+		reject(t, withSpokes(map[string]any{"name": "edge"}), "Required value")
+		bad := spoke("edge")
+		bad["approval"] = "Ask"
+		reject(t, withSpokes(bad), "Unsupported value")
+		bad = spoke("edge")
+		bad["tagPatterns"] = []any{"group:*"}
+		reject(t, withSpokes(bad), "should match")
+		bad = spoke("edge")
+		bad["routeAllowlist"] = []any{"not-a-prefix"}
+		reject(t, withSpokes(bad), "")
+	})
+
 	t.Run("image-pull-secrets", func(t *testing.T) {
 		for _, tt := range []struct {
 			name  string

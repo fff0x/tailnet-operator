@@ -32,6 +32,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="PolicyApplied")].reason
       name: Policy
       type: string
+    - jsonPath: .status.conditions[?(@.type=="SpokesReady")].reason
+      name: Spokes
+      type: string
     - jsonPath: .status.conditions[?(@.type=="SplitDNS")].reason
       name: DNS
       type: string
@@ -262,6 +265,106 @@ spec:
                     items:
                       type: string
                     type: array
+                  spokes:
+                    description: |-
+                      Spoke clusters whose exported fragment this hub pulls itself (instead of a committed
+                      fragmentConfigMaps entry): the hub reads the spoke's fragment ConfigMap with the kubeconfig
+                      in kubeconfigSecretRef, validates it against this hub's limits and the spoke's tagPatterns /
+                      routeAllowlist, and merges it per the spoke's approval mode. Only valid alongside
+                      baseConfigMap; never in mode Export.
+                    items:
+                      description: SpokeRef is one spoke cluster the hub pulls a policy
+                        fragment from.
+                      properties:
+                        approval:
+                          default: Auto
+                          description: |-
+                            Auto merges every valid fetched fragment at once. Manual merges the last approved fragment
+                            only and reports a changed fetch as pending until an admin annotates the Tailnet with
+                            "tsunaro.io/approve-spoke.<name>: <pendingHash>".
+                          enum:
+                          - Auto
+                          - Manual
+                          type: string
+                        configMap:
+                          description: Fragment ConfigMap on the spoke (key "policy").
+                            Empty → "<name>-policy-fragment".
+                          maxLength: 253
+                          pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$
+                          type: string
+                        kubeconfigSecretRef:
+                          description: |-
+                            Secret (operator namespace) holding a kubeconfig for the spoke's API server. Mint it for a
+                            ServiceAccount that may only get/list/watch the fragment ConfigMap (the chart's
+                            policy.fragmentReader on the spoke renders exactly that).
+                          properties:
+                            key:
+                              default: kubeconfig
+                              type: string
+                            name:
+                              maxLength: 253
+                              minLength: 1
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        name:
+                          description: |-
+                            Spoke name; used in status, events, metrics and the approve annotation
+                            "tsunaro.io/approve-spoke.<name>".
+                          maxLength: 63
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        namespace:
+                          description: Namespace on the spoke holding the fragment
+                            ConfigMap. Empty → this operator's namespace.
+                          maxLength: 63
+                          pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$
+                          type: string
+                        routeAllowlist:
+                          description: |-
+                            Prefixes (besides this hub's TailnetSites) a spoke route or grant destination that is not a
+                            host address may lie within. Host routes (/32, /128) are always accepted unless reserved.
+                          items:
+                            description: |-
+                              GatewayPrefix is a canonical, non-default subnet route. Network ownership and
+                              reachability still require runtime validation against the selected Tailnet.
+                            maxLength: 49
+                            type: string
+                            x-kubernetes-validations:
+                            - message: route must be a canonical masked non-default
+                                CIDR
+                              rule: isCIDR(self) && cidr(self).prefixLength() > 0
+                                && string(cidr(self).masked()) == self
+                            - message: route must not overlap unspecified loopback
+                                or multicast ranges or use mapped IPv4
+                              rule: isCIDR(self) && !self.startsWith('::ffff:') &&
+                                ['0.0.0.0/32', '127.0.0.0/8', '224.0.0.0/4', '::/128',
+                                '::1/128', 'ff00::/8'].all(r, !cidr(self).containsIP(cidr(r).ip())
+                                && !cidr(r).containsCIDR(cidr(self)))
+                          maxItems: 64
+                          type: array
+                          x-kubernetes-list-type: set
+                        tagPatterns:
+                          description: |-
+                            Glob patterns the spoke's own tags must match, e.g. ["tag:*-prod-2-*"]; tags already owned
+                            by the hub's base document are exempt. Empty → ["tag:*-<name>-*"].
+                          items:
+                            maxLength: 253
+                            pattern: ^tag:[^[:space:]]+$
+                            type: string
+                          maxItems: 16
+                          type: array
+                      required:
+                      - kubeconfigSecretRef
+                      - name
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                   tagOwners:
                     description: Owners of the generated tags (tagOwners value), e.g.
                       ["group:operator"]. Required when on.
@@ -285,6 +388,11 @@ spec:
                   rule: '!has(self.fragmentConfigMaps) || size(self.fragmentConfigMaps)
                     == 0 || (has(self.baseConfigMap) && size(self.baseConfigMap) >
                     0)'
+                - message: policy.spokes requires baseConfigMap and is not allowed
+                    in mode Export
+                  rule: '!has(self.spokes) || size(self.spokes) == 0 || ((has(self.baseConfigMap)
+                    && size(self.baseConfigMap) > 0) && (!has(self.mode) || self.mode
+                    != ''Export''))'
               proxy:
                 description: |-
                   ProxySpec are the defaults for the per-CR agent pods this Tailnet spawns. A TailnetEgress may
@@ -452,7 +560,7 @@ spec:
               conditions:
                 description: |-
                   Conditions: ApiReachable, ApiKeyValid, HeadscaleCompatible, PolicyMode, SplitDNS,
-                  UsersUnique, PolicyRendered, PolicyApplied.
+                  UsersUnique, PolicyRendered, PolicyApplied, SpokesReady (only with policy.spokes).
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -544,6 +652,131 @@ spec:
                     description: sha256 of the canonical rendered policy.
                     type: string
                 type: object
+              spokes:
+                description: One entry per policy.spokes[] item; condition SpokesReady
+                  summarises them.
+                items:
+                  description: 'SpokeStatus reports one pulled spoke fragment: what
+                    was fetched, what is merged, what waits.'
+                  properties:
+                    approvedAt:
+                      format: date-time
+                      type: string
+                    approvedHash:
+                      description: sha256 of the fragment currently merged into the
+                        hub policy, and when it was adopted.
+                      type: string
+                    conditions:
+                      description: 'Conditions: SpokeReachable, SpokeFragmentValid,
+                        SpokeFragmentApproved.'
+                      items:
+                        description: Condition contains details for one aspect of
+                          the current state of this API Resource.
+                        properties:
+                          lastTransitionTime:
+                            description: |-
+                              lastTransitionTime is the last time the condition transitioned from one status to another.
+                              This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                            format: date-time
+                            type: string
+                          message:
+                            description: |-
+                              message is a human readable message indicating details about the transition.
+                              This may be an empty string.
+                            maxLength: 32768
+                            type: string
+                          observedGeneration:
+                            description: |-
+                              observedGeneration represents the .metadata.generation that the condition was set based upon.
+                              For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                              with respect to the current state of the instance.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          reason:
+                            description: |-
+                              reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                              Producers of specific condition types may define expected values and meanings for this field,
+                              and whether the values are considered a guaranteed API.
+                              The value should be a CamelCase string.
+                              This field may not be empty.
+                            maxLength: 1024
+                            minLength: 1
+                            pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                            type: string
+                          status:
+                            description: status of the condition, one of True, False,
+                              Unknown.
+                            enum:
+                            - "True"
+                            - "False"
+                            - Unknown
+                            type: string
+                          type:
+                            description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                            maxLength: 316
+                            pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                            type: string
+                        required:
+                        - lastTransitionTime
+                        - message
+                        - reason
+                        - status
+                        - type
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - type
+                      x-kubernetes-list-type: map
+                    fetchedAt:
+                      format: date-time
+                      type: string
+                    fetchedHash:
+                      description: sha256 of the last fragment fetched and found valid,
+                        and when.
+                      type: string
+                    name:
+                      type: string
+                    pendingDelta:
+                      description: SpokeDelta counts the entries a pending fragment
+                        adds (+) and removes (-) against the approved one.
+                      properties:
+                        grantsAdded:
+                          type: integer
+                        grantsRemoved:
+                          type: integer
+                        routesAdded:
+                          type: integer
+                        routesRemoved:
+                          type: integer
+                        tagsAdded:
+                          type: integer
+                        tagsRemoved:
+                          type: integer
+                      required:
+                      - grantsAdded
+                      - grantsRemoved
+                      - routesAdded
+                      - routesRemoved
+                      - tagsAdded
+                      - tagsRemoved
+                      type: object
+                    pendingHash:
+                      description: |-
+                        Manual approval only: hash of a valid fetch that differs from approvedHash, since when, and
+                        what it would add or remove. Annotate the Tailnet with
+                        "tsunaro.io/approve-spoke.<name>: <pendingHash>" to adopt it.
+                      type: string
+                    pendingSince:
+                      format: date-time
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               userConflicts:
                 description: |-
                   Headscale user names that more than one user carries. Such a collision makes Headscale
