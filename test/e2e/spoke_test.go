@@ -83,7 +83,7 @@ func spokeStatus(tn *tnv1.Tailnet, name string) *tnv1.SpokeStatus {
 // Forbidden while the approved fragment stays live; the stored token never shows up in status.
 func TestHubSpokePull(t *testing.T) {
 	ctx := testContext(t)
-	hs := startHeadscale(t, ctx, "v0.29.3", "database", false)
+	hs := startHeadscale(t, ctx, "v0.29.6", "database", false)
 	name := createTailnet(t, ctx, hs)
 	// The base owns tag:fabric (Headscale validates route approvers against tagOwners) and
 	// defines group:ops, the only tag owner this hub allows (Headscale refuses autogroups there).

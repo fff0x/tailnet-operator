@@ -30,6 +30,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 - The spoke's `PolicyApplied=False/Export` message now names both ways the hub can take the
   fragment (`policy.spokes` pull or a committed `fragmentConfigMaps` entry).
+- The Headscale test matrix row 0.29.3 is now 0.29.6 (Tier 1 binaries, the kind image pinned by
+  digest, the projection runner's fixture). 0.29.4–0.29.6 change nothing the operator depends on
+  (release notes: rejected policies no longer pass the filter, re-authentication after key expiry,
+  long-poll shutdown for deleted nodes, Go 1.27.3 / x/net security fixes); the capability matrix
+  stays `0.29.x`.
 
 ### Security
 

@@ -82,7 +82,7 @@ func TestNoSecretsInOutput(t *testing.T) {
 	for _, version := range versions {
 		t.Run(version, func(t *testing.T) {
 			if version == "v0.28.0" {
-				t.Skip("unsupported capability row; real manager/key lifecycle redaction exercise requires v0.29.3")
+				t.Skip("unsupported capability row; real manager/key lifecycle redaction exercise requires v0.29.6")
 			}
 			var credentials []string
 			// Registered first: include fixture cleanup logs, not only the snapshot before cleanup.

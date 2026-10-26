@@ -39,8 +39,8 @@ func siteCond(s *tnv1.TailnetSite, typ string, status metav1.ConditionStatus, re
 func TestSiteApprovalReplay(t *testing.T) {
 	for _, version := range versions {
 		t.Run(version, func(t *testing.T) {
-			if version != "v0.29.3" {
-				t.Skip("unsupported capability row; route fixture is verified only on v0.29.3")
+			if version != "v0.29.6" {
+				t.Skip("unsupported capability row; route fixture is verified only on v0.29.6")
 			}
 			ctx := testContext(t)
 			hs := startHeadscale(t, ctx, version, "database", false)

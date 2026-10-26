@@ -153,7 +153,7 @@ func gatewayFixtureImageIDs(t *testing.T, images map[string]string) map[string][
 	return out
 }
 
-// Headscale CLI v0.29.3 uses encoding/json on protobuf structs: numeric IDs
+// Headscale CLI v0.29.6 uses encoding/json on protobuf structs: numeric IDs
 // and snake_case fields. Kept for the unchanged independent forwarding proof.
 func decodeGatewayCLINodes(b []byte) ([]headscale.Node, bool) {
 	var rows []struct {

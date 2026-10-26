@@ -8,15 +8,15 @@ case "$(uname -s)/$(uname -m)" in
   Linux/aarch64 | Linux/arm64) arch=arm64 ;;
   *) echo 'Tier 1 currently supports Linux amd64/arm64 only' >&2; exit 1 ;;
 esac
-raw_versions="${HEADSCALE_VERSIONS:-v0.28.0 v0.29.3}"
+raw_versions="${HEADSCALE_VERSIONS:-v0.28.0 v0.29.6}"
 read -r -a versions <<< "${raw_versions//$'\n'/ }"
 if [[ ${#versions[@]} == 0 ]]; then
   echo 'select at least one HEADSCALE_VERSIONS row' >&2; exit 1
 fi
 for version in "${versions[@]}"; do
   case "$version" in
-    v0.28.0 | v0.29.3) ;;
-    *) echo 'HEADSCALE_VERSIONS only supports v0.28.0 and v0.29.3' >&2; exit 1 ;;
+    v0.28.0 | v0.29.6) ;;
+    *) echo 'HEADSCALE_VERSIONS only supports v0.28.0 and v0.29.6' >&2; exit 1 ;;
   esac
 done
 export HEADSCALE_VERSIONS="${versions[*]}"

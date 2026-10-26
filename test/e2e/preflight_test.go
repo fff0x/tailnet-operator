@@ -23,7 +23,7 @@ func TestPreflight(t *testing.T) {
 						tn.Spec.Headscale.Version = "999.0.0"
 					})
 					status, reason := metav1.ConditionFalse, "Incompatible"
-					if version == "v0.29.3" && mode == "database" {
+					if version == "v0.29.6" && mode == "database" {
 						status, reason = metav1.ConditionTrue, "Compatible"
 					}
 					waitCondition(t, ctx, name, "HeadscaleCompatible", status, reason)

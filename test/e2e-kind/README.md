@@ -25,7 +25,7 @@ nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- bash hack
   kind reports it missing and never changes sysctls, services or delegation itself.
 - Go builds use the populated module cache with downloads disabled (`GOMODCACHE` if it differs from
   `~/.local/state/go/pkg/mod`).
-- Headscale 0.29.3 binary at `~/.cache/tailnet-operator-e2e/headscale/0.29.3/headscale-linux-<arch>`
+- Headscale 0.29.6 binary at `~/.cache/tailnet-operator-e2e/headscale/0.29.6/headscale-linux-<arch>`
   (SHA256-checked; copied into the fixture image, never executed on the host).
 - For the projection runner: cert-manager v1.21.2 chart and images under
   `~/.cache/tailnet-operator-e2e/cert-manager/v1.21.2/immutable-ref/linux-<arch>/` —
@@ -64,14 +64,14 @@ timings) is written under `~/.local/state/tailnet-operator/evidence/`; nothing i
   runner rejects root and remote Podman.
 - No credentials or raw fixture logs are printed; Headscale keys travel through captured CLI stdout
   and the Kubernetes API only. Failure diagnostics are counts, booleans and fixed categories.
-- Images are pinned by digest (`kindest/node:v1.36.1`, `ghcr.io/juanfont/headscale:0.29.3`,
+- Images are pinned by digest (`kindest/node:v1.36.1`, `ghcr.io/juanfont/headscale:0.29.6`,
   cert-manager v1.21.2); the operator image is built from the checkout per run and never published.
 - Fixture subprocesses are cancelled by process-group pidfd (Linux ≥ 6.9); older kernels fail closed.
 
 ## What the tests cover
 
 **`TestInstall`** — Helm install of the local chart, CRDs established, manager ready; real Headscale
-0.29.3 (SQLite, embedded DERP, no update checks or logtail) in the cluster; `HeadscaleCompatible=True`
+0.29.6 (SQLite, embedded DERP, no update checks or logtail) in the cluster; `HeadscaleCompatible=True`
 and `PolicyApplied=True/InSync`; the live policy read over Headscale's Unix socket equals the
 rendered/applied hashes and the base ACL.
 
@@ -179,7 +179,7 @@ and long-lived WebSockets across rotation/retirement.
 Bounded negative observations are not exhaustive ACL coverage.
 
 **`TestGatewayFreshPod`** is a separate opt-in selection with real kernel Tailscale
-1.102.4, CoreDNS 1.14.6 and the same gated HTTPS Headscale 0.29.3 fixture, without
+1.102.4, CoreDNS 1.14.6 and the same gated HTTPS Headscale 0.29.6 fixture, without
 an HTTP peer or agent admission webhook. The fixture drives the production reconciler
 in-process against the real API and Headscale REST endpoint. The controller creates
 state, mints the non-ephemeral key, persists provenance and creates the rendered

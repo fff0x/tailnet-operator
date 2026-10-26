@@ -31,7 +31,7 @@ See [the runner's safety boundaries](https://app.radicle.xyz/nodes/seed.this-is-
 
 The complete local run is `task e2e-full`: the exact CI gate (`hack/ci-test.sh` — gofmt/vet,
 govulncheck, unit, chart, admission against envtest 1.31, Tier 1 against real Headscale 0.28.0 and
-0.29.3) followed by every Tier-2 kind suite (`hack/e2e-kind.sh`, the projection runner with its
+0.29.6) followed by every Tier-2 kind suite (`hack/e2e-kind.sh`, the projection runner with its
 default, `--rest-only`, `--gateway-preflight-only` and `--gateway-fresh-only` selections). Budget
 about 75 minutes; a failing stage stops the run. Each kind stage needs the delegated scope, so
 start the whole task inside one:

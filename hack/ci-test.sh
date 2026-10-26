@@ -17,7 +17,7 @@ unset LIVE_CR_FILE KUBEBUILDER_ASSETS E2E_HEADSCALE_DIR
 # GOTOOLCHAIN stays local in the CI image (Dockerfile ENV); a developer whose system Go is older
 # than go.mod may export GOTOOLCHAIN=auto for a local run.
 export USE_EXISTING_CLUSTER=false GOTOOLCHAIN="${GOTOOLCHAIN:-local}" GOFLAGS=-mod=readonly
-export HEADSCALE_VERSIONS='v0.28.0 v0.29.3'
+export HEADSCALE_VERSIONS='v0.28.0 v0.29.6'
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export KUBECONFIG="$tmp/unused-kubeconfig"
@@ -59,5 +59,5 @@ done
 
 printf '\n== Kubernetes 1.31 admission and gateway persistence ==\n'
 go test -tags=integration ./test/validation ./internal/gateway -count=1 -v -timeout=10m
-printf '\n== Tier 1: real Headscale 0.28.0 / 0.29.3 ==\n'
+printf '\n== Tier 1: real Headscale 0.28.0 / 0.29.6 ==\n'
 bash hack/e2e.sh

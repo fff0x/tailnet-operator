@@ -82,8 +82,8 @@ podman build --network=none --pull=never --tag "$E2E_KIND_IMAGE" \
   --file "$root/test/e2e-kind/Dockerfile" "$work/image"
 podman save --format docker-archive --output "$work/operator.tar" "$E2E_KIND_IMAGE"
 kind load image-archive "$work/operator.tar" --name "$cluster"
-# Verified using skopeo inspect --no-creds against the official v0.29.3 GHCR release.
-headscale_source=ghcr.io/juanfont/headscale:0.29.3@sha256:0e7f1c6e4ce6c2a2a001103ecd3fa645a045adf30ac8a5234fe037b43000cd72
+# Verified using skopeo inspect --no-creds against the official v0.29.6 GHCR release.
+headscale_source=ghcr.io/juanfont/headscale:0.29.6@sha256:cabe84f0699913dbca9320f0883dca7565dd08df3c5be29edfabbebeff763966
 podman pull "$headscale_source"
 podman image inspect --format 'Headscale provenance: {{.RepoDigests}}' "$headscale_source"
 podman tag "$headscale_source" "$E2E_KIND_HEADSCALE_IMAGE"

@@ -325,8 +325,8 @@ func installFixture(t *testing.T) *fixture {
 	t.Log("gate: real Headscale readiness and bootstrap")
 	f.kubectl(t, strings.ReplaceAll(headscaleManifest, "HEADSCALE_IMAGE", hsImage), "apply", "-f", "-")
 	f.kubectl(t, "", "wait", "--for=condition=Ready", "--timeout=90s", "pod/headscale")
-	if !strings.Contains(string(f.headscale(t, "version")), "0.29.3") {
-		t.Fatal("Headscale runtime version is not 0.29.3")
+	if !strings.Contains(string(f.headscale(t, "version")), "0.29.6") {
+		t.Fatal("Headscale runtime version is not 0.29.6")
 	}
 	f.headscale(t, "policy", "set", "--file", "/etc/headscale/seed-policy.json")
 	var key string
@@ -374,7 +374,7 @@ func installFixture(t *testing.T) *fixture {
 		return c != nil && c.Status == metav1.ConditionTrue && c.Reason == "InSync" && c.ObservedGeneration == tn.Generation
 	})
 	// Independent live-policy read through the real server's Unix CLI, not only CR status.
-	// v0.29.3 policy get prints raw HuJSON; it deliberately ignores --output.
+	// v0.29.6 policy get prints raw HuJSON; it deliberately ignores --output.
 	canonical, err := policy.Normalize(f.headscale(t, "policy", "get"))
 	if err != nil {
 		t.Fatal("live policy is not valid JSON")

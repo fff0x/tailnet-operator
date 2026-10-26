@@ -152,7 +152,7 @@ func startHeadscale(t *testing.T, ctx context.Context, version, mode string, see
 		"disable_check_updates": true, "logtail": map[string]any{"enabled": false},
 		"log": map[string]any{"level": "warn", "format": "json"},
 	}
-	if version == "v0.29.3" {
+	if version == "v0.29.6" {
 		cfg["node"] = map[string]any{"routes": map[string]any{"ha": map[string]any{"probe_interval": "0s"}}}
 	}
 	configJSON, err := json.Marshal(cfg)
@@ -274,7 +274,7 @@ func (h *headscaleProcess) cli(t *testing.T, ctx context.Context, args ...string
 	return h.runChild(t, ctx, h.binary, append([]string{"--config", h.configPath}, args...), "")
 }
 
-// registerRouteNode uses the real v0.29.3 debug registration flow. Unlike REST's string ID,
+// registerRouteNode uses the real v0.29.6 debug registration flow. Unlike REST's string ID,
 // CLI JSON uses a numeric ID (and snake_case fields). Routes disappear during auth register;
 // seedAdvertisedRoutes restores them offline, not by pretending this is a live tsnet client.
 func (h *headscaleProcess) registerRouteNode(t *testing.T, ctx context.Context, name, tag string) string {
@@ -296,7 +296,7 @@ func (h *headscaleProcess) registerRouteNode(t *testing.T, ctx context.Context, 
 	return id
 }
 
-// seedAdvertisedRoutes is a white-box, v0.29.3-only fixture: no client connects or advertises
+// seedAdvertisedRoutes is a white-box, v0.29.6-only fixture: no client connects or advertises
 // routes over the control protocol. It modifies only nodes.host_info in the stopped fixture's
 // private DB, preserves all other JSON fields, then restarts the same server/config/database.
 // Approval assertions after startup still exercise the real Headscale REST API and operator.

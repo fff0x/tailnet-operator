@@ -50,11 +50,11 @@ func runSuite(m *testing.M) (code int) {
 	}
 	versions = strings.Fields(os.Getenv("HEADSCALE_VERSIONS"))
 	if len(versions) == 0 {
-		versions = []string{"v0.28.0", "v0.29.3"}
+		versions = []string{"v0.28.0", "v0.29.6"}
 	}
 	for _, v := range versions {
-		if v != "v0.28.0" && v != "v0.29.3" {
-			fmt.Fprintln(os.Stderr, "unsupported HEADSCALE_VERSIONS row; use v0.28.0 and/or v0.29.3")
+		if v != "v0.28.0" && v != "v0.29.6" {
+			fmt.Fprintln(os.Stderr, "unsupported HEADSCALE_VERSIONS row; use v0.28.0 and/or v0.29.6")
 			return
 		}
 		if _, err := headscaleBinary(v); err != nil {

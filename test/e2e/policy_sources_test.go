@@ -17,7 +17,7 @@ import (
 func TestTestsSrcResolution(t *testing.T) {
 	for _, version := range versions {
 		t.Run(version, func(t *testing.T) {
-			if version != "v0.29.3" {
+			if version != "v0.29.6" {
 				t.Skip("unsupported capability row; covered by TestPreflight")
 			}
 			ctx, cancel := context.WithTimeout(testContext(t), 60*time.Second)

@@ -150,7 +150,7 @@ func TestHeadscaleHTTPS(t *testing.T) {
 	})
 	releaseFixturePod(t, f, headscale)
 	version, err := f.command(t.Context(), "", "kubectl", "--kubeconfig", f.config, "--context", f.context, "--request-timeout=10s", "-n", namespace, "exec", headscale.Name, "-c", "application", "--", "/headscale", "version")
-	if err != nil || !strings.Contains(string(version), "0.29.3") {
+	if err != nil || !strings.Contains(string(version), "0.29.6") {
 		t.Fatal("pinned Headscale identity unavailable")
 	}
 	probe := func(name, caName string) *corev1.Pod {
@@ -193,7 +193,7 @@ func TestHeadscaleHTTPS(t *testing.T) {
 	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(headscale), headscale) != nil || len(headscale.Status.ContainerStatuses) != 1 || headscale.Status.ContainerStatuses[0].RestartCount != 0 || headscale.Status.ContainerStatuses[0].State.Running == nil {
 		t.Fatal("Headscale restarted during control acceptance")
 	}
-	result := map[string]any{"headscaleVersion": "0.29.3", "verifiedServiceTLS": true, "wrongCARejected": true, "trustedConnectionAfterRejection": true, "startupGatedPods": 3, "headscaleRestarts": 0, "tsnetStarted": false, "derpTrafficTested": false}
+	result := map[string]any{"headscaleVersion": "0.29.6", "verifiedServiceTLS": true, "wrongCARejected": true, "trustedConnectionAfterRejection": true, "startupGatedPods": 3, "headscaleRestarts": 0, "tsnetStarted": false, "derpTrafficTested": false}
 	b, _ := json.Marshal(result)
 	evidence := os.Getenv("E2E_KIND_NET_EVIDENCE")
 	info, err := os.Lstat(evidence)

@@ -40,8 +40,8 @@ func sameRoutes(got []string, want ...string) bool {
 func TestApprovalReplay(t *testing.T) {
 	for _, version := range versions {
 		t.Run(version, func(t *testing.T) {
-			if version != "v0.29.3" {
-				t.Skip("unsupported capability row; route fixture and replay are verified only on v0.29.3")
+			if version != "v0.29.6" {
+				t.Skip("unsupported capability row; route fixture and replay are verified only on v0.29.6")
 			}
 			ctx := testContext(t)
 			hs := startHeadscale(t, ctx, version, "database", false)
@@ -55,7 +55,7 @@ func TestApprovalReplay(t *testing.T) {
 			hs.cli(t, ctx, "users", "create", "fixture", "--output", "json")
 			matching := hs.registerRouteNode(t, ctx, "matching", "tag:route-fixture")
 			unmatched := hs.registerRouteNode(t, ctx, "unmatched", "tag:unmatched")
-			// White-box setup only: v0.29.3's debug/auth flow loses advertised routes.
+			// White-box setup only: v0.29.6's debug/auth flow loses advertised routes.
 			// No tsnet client, packet forwarding, or control-protocol advertisement is tested here.
 			hs.seedAdvertisedRoutes(t, ctx, map[string][]string{
 				matching: {desired, unrelated}, unmatched: {desired},
@@ -111,7 +111,7 @@ func TestApprovalReplay(t *testing.T) {
 			}
 
 			// Normal watched generation change on an ALREADY InSync Tailnet, never direct Reconcile.
-			updateTailnet(t, ctx, name, func(tn *tnv1.Tailnet) { tn.Spec.Headscale.Version = "0.29.3" })
+			updateTailnet(t, ctx, name, func(tn *tnv1.Tailnet) { tn.Spec.Headscale.Version = "0.29.6" })
 			waitCondition(t, ctx, name, "PolicyApplied", metav1.ConditionTrue, "InSync")
 			after := getTailnet(t, ctx, name)
 			if after.Generation <= before.Generation || after.Status.Policy.AppliedHash != before.Status.Policy.AppliedHash {

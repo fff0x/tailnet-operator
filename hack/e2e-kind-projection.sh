@@ -59,13 +59,13 @@ state=${XDG_STATE_HOME:-${HOME:?}/.local/state}
 data=${XDG_DATA_HOME:-$HOME/.local/share}
 modules=${GOMODCACHE:-$state/go/pkg/mod}
 case $(uname -m) in
-    x86_64) hs_arch=amd64; hs_sha=8dc183758024ed7095cf610fedea0790233613c71353bc8be2715d82ba29b92c ;;
-    aarch64) hs_arch=arm64; hs_sha=ecf0099f9aa1efb56e7c74718342a493f7d44a840626a2877ca526e675040f4e ;;
+    x86_64) hs_arch=amd64; hs_sha=7477c374949eea6fb7cf3cbff14dbef49e4d118d9a33557d6764a77ece617e53 ;;
+    aarch64) hs_arch=arm64; hs_sha=7b3c792ebe10e1a81a0c8d9674aee8eb540e7dbb7ccb80a98b71024da4c72a48 ;;
     *) reject ;;
 esac
 cm_cache=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/cert-manager/v1.21.2/immutable-ref/linux-$hs_arch
 gateway_cache=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/gateway/v1.102.4-coredns1.14.6/immutable-ref/linux-$hs_arch
-headscale=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/headscale/0.29.3/headscale-linux-$hs_arch
+headscale=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/headscale/0.29.6/headscale-linux-$hs_arch
 [[ -f $headscale && $(sha256sum "$headscale") == "$hs_sha  $headscale" ]] || reject
 [[ $state == /* && $data == /* && $modules == /* && $modules != *:* ]] || reject
 # Resolve parents before choosing an evidence location; never write under source.

@@ -112,7 +112,7 @@ or no online agent binds the Tailnet. See [preflight](../how-to/install-headscal
 | --- | --- | --- |
 | Unit and chart contracts | `task test`, `task chart` | Policy rendering, key rotation, port assignment, route diagnosis, Helm rendering, alert rules |
 | Admission | `task test-validation` | Every CRD validation rule against a disposable API server (envtest), including the negative fixtures in `deploy/examples/invalid/` |
-| Headscale integration | `task e2e` | The production manager against envtest plus real Headscale 0.28.0 and 0.29.3 binaries: preflight, policy lifecycle, retry/backoff, key rotation, approval replay, DNS hosts rendering, credential redaction |
+| Headscale integration | `task e2e` | The production manager against envtest plus real Headscale 0.28.0 and 0.29.6 binaries: preflight, policy lifecycle, retry/backoff, key rotation, approval replay, DNS hosts rendering, credential redaction |
 | Cluster | `task e2e-kind` | Rootless kind: Helm installation, two-replica leader failover, agent-to-peer HTTPS, Headscale over HTTPS, HTTP ingress with cert-manager issuance and renewal |
 
 `task e2e-full` chains all of the above, in the order CI runs the first three, and then every kind
