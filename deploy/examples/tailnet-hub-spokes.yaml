@@ -1,0 +1,61 @@
+---
+# The hub of a multi-cluster tailnet: the one Tailnet that writes the
+# policy, pulling the fragments other clusters export (policy.mode:
+# Export) through a kubeconfig scoped to one ConfigMap each
+# (docs/how-to/second-cluster.md).
+apiVersion: tsunaro.io/v1alpha1
+kind: Tailnet
+metadata:
+  name: corp
+spec:
+  server: https://ts.example.com
+  apiUrl: http://headscale.tailnet-system.svc:8080
+  apiSecretRef:
+    name: headscale-bootstrap
+    key: apiKey
+  # Every cluster carries its name in its templates so tags and
+  # hostnames stay unique tailnet-wide.
+  tagTemplate: "tag:egress-prod-1-{name}"
+  hostnameTemplate: "prod-1-egress-{name}"
+  ingressTagTemplate: "tag:ingress-prod-1-{name}"
+  ingressHostnameTemplate: "prod-1-{name}"
+  dns:
+    hostsConfigMap: tailnet-dns-hosts
+    ingressNameTemplate: "{name}-{namespace}.prod-1.tailnet.example.internal"
+  policy:
+    baseConfigMap: headscale-policy
+    mode: Apply
+    tagOwners: [group:operator]
+    routeApprovers: [tag:fabric]
+    ingressSourceAllowlist: ["group:*"]
+    spokes:
+      # Secret <kubeconfigSecretRef.name> (operator namespace, key
+      # "kubeconfig") holds a kubeconfig for the spoke's https API server,
+      # minted for the ServiceAccount the spoke chart renders with
+      # policy.fragmentReader.enabled. Fragment: ConfigMap
+      # <configMap> in <namespace> on the spoke (defaults: operator
+      # namespace, "<name>-policy-fragment").
+      - name: prod-2
+        kubeconfigSecretRef: {name: prod-2-kubeconfig}
+        configMap: corp-policy-fragment
+        # Tags this spoke may own (default "tag:*-<name>-*"); tags the
+        # base document already owns are exempt.
+        tagPatterns: ["tag:*-prod-2-*"]
+        # Prefixes its routes and CIDR destinations may lie within, besides
+        # this hub's TailnetSites. Host routes (/32, /128) always pass
+        # unless reserved.
+        routeAllowlist: [10.20.0.0/16]
+        # Manual: a changed fetch is held as <name>-policy-fragment-pending
+        # until `kubectl annotate tailnet corp
+        # tsunaro.io/approve-spoke.prod-2=<status.spokes[].pendingHash>`.
+        approval: Manual
+      # Auto (default) merges every valid fetch at once; the spoke's
+      # tagPatterns and routeAllowlist still bound what it may claim.
+      - name: edge
+        kubeconfigSecretRef: {name: edge-kubeconfig, key: config}
+        namespace: tailnet-edge
+  reservedNetworks:
+    - name: nodes
+      prefixes: [100.64.0.0/16]
+    - name: prod-1
+      prefixes: [192.0.2.0/24, 10.244.0.0/16, 10.96.0.0/12, 198.51.100.0/24]

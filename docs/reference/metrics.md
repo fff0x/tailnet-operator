@@ -23,6 +23,9 @@ credentials, peer addresses or dynamic Headscale paths. How to read them in prac
 | `tailnet_node_last_seen_seconds` | gauge | `kind`, `namespace`, `name` | Unix timestamp of Headscale `lastSeen` for the matching node; absent when unknown. Use `time() - …` for the age. |
 | `tailnet_headscale_user_conflicts` | gauge | `tailnet` | Headscale user names carried by more than one user (`status.userConflicts`); anything above 0 makes Headscale reject every policy write. Absent without a current `UsersUnique` verdict. |
 | `tailnet_policy_pending` | gauge | `tailnet` | 1 only in `Apply` mode while a non-empty `renderedHash` differs from `appliedHash`; 0 otherwise. Absent without policy status. |
+| `tailnet_spoke_reachable` | gauge | `tailnet`, `spoke` | 1 when the hub read the spoke's fragment ConfigMap on the last reconcile (`SpokeReachable=True`), 0 otherwise. One series per `policy.spokes[]` entry; withdrawn when the spoke is removed. |
+| `tailnet_spoke_fragment_valid` | gauge | `tailnet`, `spoke` | 1 when the last fetched fragment passed the hub's validation (`SpokeFragmentValid=True`), 0 when it failed or nothing was fetched. |
+| `tailnet_spoke_fragment_pending` | gauge | `tailnet`, `spoke` | 1 while a valid fetched fragment waits for `tsunaro.io/approve-spoke.<spoke>` (`approval: Manual`); 0 otherwise. |
 | `tailnet_policy_generated` | gauge | `tailnet`, `kind` | Generated entries in the persisted policy status (`kind` ∈ `tags`, `grants`, `routes`). |
 | `tailnet_policy_applied_timestamp_seconds` | gauge | `tailnet` | Unix time the rendered policy was last applied to the control server. An old value alone is healthy. |
 | `tailnet_policy_apply_errors_total` | counter | `tailnet` | Policy writes the control server rejected or that failed. |

@@ -30,6 +30,9 @@ replaces the whole bundled group.
 | `TailnetAPIKeyExpiringSoon` | warning | `tailnet_apikey_expires_seconds` below the API-key threshold for 5 min | [key expiry](../OPERATIONS.md#monitoring-key-expiry) |
 | `TailnetEgressAuthKeyExpiringSoon` | warning | `tailnetegress_authkey_expires_seconds` below the auth-key threshold for 5 min | [key expiry](../OPERATIONS.md#monitoring-key-expiry) |
 | `TailnetIngressAuthKeyExpiringSoon` | warning | `tailnetingress_authkey_expires_seconds` below the auth-key threshold for 5 min | [key expiry](../OPERATIONS.md#monitoring-key-expiry) |
+| `TailnetSpokeUnreachable` | warning | `tailnet_spoke_reachable` has been 0 for 1 h (kubeconfig, RBAC or network) | [spoke unreachable](../OPERATIONS.md#monitoring-spoke-unreachable) |
+| `TailnetSpokeFragmentInvalid` | warning | `tailnet_spoke_fragment_valid` has been 0 for 15 min | [spoke fragment invalid](../OPERATIONS.md#monitoring-spoke-fragment-invalid) |
+| `TailnetSpokeApprovalPending` | info | `tailnet_spoke_fragment_pending` has been 1 for 4 h (`approval: Manual`) | [spoke approval pending](../OPERATIONS.md#monitoring-spoke-approval-pending) |
 
 The `runbook_url` annotation of every rule is the repository-relative path of its runbook
 (`docs/OPERATIONS.md#monitoring-…`); prefix it with your docs base URL in Alertmanager templates.

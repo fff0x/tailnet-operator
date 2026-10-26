@@ -66,6 +66,12 @@ headscale:
     name: ""
     # -- Key of the PEM bundle in that ConfigMap.
     key: ca.crt
+policy:
+  fragmentReader:
+    # -- On a spoke: render a ServiceAccount, a Role limited to get/list/watch on the listed fragment ConfigMaps, a RoleBinding and a long-lived token Secret `<name>-fragment-reader-token`. Build the hub's spoke kubeconfig from that token and this cluster's CA.
+    enabled: false
+    # -- Fragment ConfigMaps (operator namespace) the reader may read; usually the spoke Tailnet's `<tailnet>-policy-fragment`.
+    configMaps: []
 monitoring:
   serviceMonitor:
     # -- Requires Prometheus Operator CRDs. Disabled for a fresh Kubernetes installation.

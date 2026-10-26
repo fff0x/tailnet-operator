@@ -359,10 +359,22 @@ func TestSpokeRemovalAndMissingKubeconfig(t *testing.T) {
 	h := newSpokeHarness(t, api, "Auto", "")
 	h.reconcile()
 	ctx := context.Background()
-	if err := h.c.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "prod-2-kubeconfig", Namespace: "operator"}}); err != nil {
+	var sec corev1.Secret
+	if err := h.c.Get(ctx, types.NamespacedName{Name: "prod-2-kubeconfig", Namespace: "operator"}, &sec); err != nil {
+		t.Fatal(err)
+	}
+	sec.Data["kubeconfig"] = []byte(strings.Replace(string(sec.Data["kubeconfig"]), "https://", "http://", 1))
+	if err := h.c.Update(ctx, &sec); err != nil {
 		t.Fatal(err)
 	}
 	st := h.spoke(h.reconcile())
+	if condReasonOf(st.Conditions, "SpokeReachable") != "KubeconfigInvalid" || st.ApprovedHash == "" {
+		t.Fatalf("plain http status = %+v", st)
+	}
+	if err := h.c.Delete(ctx, &sec); err != nil {
+		t.Fatal(err)
+	}
+	st = h.spoke(h.reconcile())
 	if condReasonOf(st.Conditions, "SpokeReachable") != "KubeconfigMissing" || st.ApprovedHash == "" {
 		t.Fatalf("status = %+v", st)
 	}

@@ -102,6 +102,9 @@ func TestAdmission(t *testing.T) {
 		templates[kind] = obj
 		t.Run("example/"+kind, func(t *testing.T) { accept(t, obj) })
 	}
+	t.Run("example/tailnet-hub-spokes", func(t *testing.T) {
+		accept(t, load(t, filepath.Join(root, "deploy", "examples", "tailnet-hub-spokes.yaml")))
+	})
 
 	t.Run("valid-boundaries", func(t *testing.T) {
 		for _, address := range []string{"10.0.0.1", "2001:db8::1", "printer", "db.magic.example", strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 61)} {

@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -220,6 +221,10 @@ func (r *TailnetPolicyReconciler) fetchSpokeFragment(ctx context.Context, sp *tn
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(raw)
 	if err != nil {
 		return nil, false, "KubeconfigInvalid", "kubeconfig does not parse"
+	}
+	if !rest.IsConfigTransportTLS(*cfg) {
+		// client-go would silently drop the bearer token over plain http.
+		return nil, false, "KubeconfigInvalid", "kubeconfig server must be https: the token is sent over TLS only"
 	}
 	cfg.Timeout = spokeFetchTimeout
 	cfg.UserAgent = fieldOwner + "/spoke-fragment"

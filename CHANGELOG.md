@@ -4,6 +4,33 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- `Tailnet.spec.policy.spokes[]`: the hub pulls a spoke's exported policy fragment from the
+  spoke cluster itself, through a kubeconfig Secret (`kubeconfigSecretRef`) scoped to that one
+  ConfigMap, instead of waiting for the fragment to be committed into the hub repository. Each
+  fetch is validated like a committed fragment and additionally bounded by the spoke's
+  `tagPatterns` (default `tag:*-<spoke>-*`) and `routeAllowlist`. `approval: Auto` (default)
+  merges every valid fetch; `Manual` keeps the last approved fragment merged, publishes a changed
+  fetch as `<spoke>-policy-fragment-pending` with `status.spokes[].pendingDelta`, and adopts it
+  once the Tailnet carries `tsunaro.io/approve-spoke.<spoke>: <pendingHash>` — until then the hub
+  merges approved ∩ fetched, so a spoke's removals land without approval and its additions wait.
+  An unreachable spoke, a forbidden read or an invalid fetch keeps the last approved fragment.
+  New: Tailnet condition `SpokesReady` and printer column `SPOKES`, `status.spokes[]` with
+  `SpokeReachable` / `SpokeFragmentValid` / `SpokeFragmentApproved`, events `SpokeFragmentAdopted`
+  and `SpokeFragmentApproved`, gauges `tailnet_spoke_reachable`, `tailnet_spoke_fragment_valid`,
+  `tailnet_spoke_fragment_pending`, alerts `TailnetSpokeUnreachable`, `TailnetSpokeFragmentInvalid`,
+  `TailnetSpokeApprovalPending`, dashboard row "Spokes", example
+  `deploy/examples/tailnet-hub-spokes.yaml`.
+- Chart `policy.fragmentReader`: on a spoke, renders the ServiceAccount, a Role limited to
+  `get/list/watch` on the named fragment ConfigMaps, the RoleBinding and a token Secret
+  `<release>-fragment-reader-token` from which the hub's spoke kubeconfig is built.
+
+### Changed
+
+- The spoke's `PolicyApplied=False/Export` message now names both ways the hub can take the
+  fragment (`policy.spokes` pull or a committed `fragmentConfigMaps` entry).
+
 ### Security
 
 - Hub `policy.fragmentConfigMaps`: a fragment is now validated against the hub's limits before

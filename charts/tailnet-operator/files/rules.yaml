@@ -141,3 +141,30 @@
         summary: Ingress pre-auth key is nearing expiry
         description: Less than {{ .Values.monitoring.rules.authKeyExpiryWarningSeconds }} seconds remain. Check key rotation before an agent needs to register again. Key expiry alone does not prove an existing node is offline.
         runbook_url: docs/OPERATIONS.md#monitoring-key-expiry
+    - alert: TailnetSpokeUnreachable
+      expr: max by (tailnet, spoke) (tailnet_spoke_reachable) == 0
+      for: 1h
+      labels:
+        severity: warning
+      annotations:
+        summary: A spoke's policy fragment could not be fetched
+        description: The hub has failed to read the spoke's fragment ConfigMap for an hour (condition SpokeReachable names the cause - kubeconfig, RBAC or network). The last approved fragment stays merged; the spoke's newer grants are not.
+        runbook_url: docs/OPERATIONS.md#monitoring-spoke-unreachable
+    - alert: TailnetSpokeFragmentInvalid
+      expr: max by (tailnet, spoke) (tailnet_spoke_fragment_valid) == 0
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: A spoke's fetched fragment breaks the hub's limits
+        description: The fetched fragment has failed validation for fifteen minutes (condition SpokeFragmentValid names the path). The last approved fragment stays merged.
+        runbook_url: docs/OPERATIONS.md#monitoring-spoke-fragment-invalid
+    - alert: TailnetSpokeApprovalPending
+      expr: max by (tailnet, spoke) (tailnet_spoke_fragment_pending) == 1
+      for: 4h
+      labels:
+        severity: info
+      annotations:
+        summary: A spoke fragment has waited for approval for four hours
+        description: Approval mode Manual holds a valid fetched fragment until the Tailnet carries tsunaro.io/approve-spoke.<spoke> with the pending hash. Review the <spoke>-policy-fragment-pending ConfigMap and status.spokes[].pendingDelta.
+        runbook_url: docs/OPERATIONS.md#monitoring-spoke-approval-pending

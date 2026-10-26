@@ -217,19 +217,24 @@ spec:
 ```sh
 kubectl describe tailnet corp | grep -A1 Policy
 #   PolicyRendered  True   Rendered   3 tags, 3 grants, 1 routes exported
-#   PolicyApplied   False  Export     mode Export: commit ConfigMap tailnet-system/corp-policy-fragment to the hub and list it in policy.fragmentConfigMaps
+#   PolicyApplied   False  Export     mode Export: waiting for the hub to merge ConfigMap tailnet-system/corp-policy-fragment (policy.spokes pull or a committed fragmentConfigMaps entry)
 ```
 
-Copy the fragment into the hub cluster as a ConfigMap (key `policy`) and commit it to the hub's
-GitOps repo — that Git review **is** the gate for the spoke's grants, the same review the hand-written
-entries went through:
+The hub takes the fragment one of two ways, both validated identically:
+
+- **Pull** (`policy.spokes[]`): the hub reads the spoke's ConfigMap through a kubeconfig Secret
+  scoped to that one ConfigMap, every reconcile. `approval: Auto` merges each valid fetch; `Manual`
+  holds a changed fetch as `<spoke>-policy-fragment-pending` with a `pendingDelta` until the Tailnet
+  carries `tsunaro.io/approve-spoke.<spoke>: <pendingHash>`. Per-spoke `tagPatterns` (default
+  `tag:*-<spoke>-*`) and `routeAllowlist` narrow what that spoke may claim. Walk-through in
+  [Connect a second cluster](second-cluster.md#2-export-on-the-spoke-pull-on-the-hub).
+- **Commit** (`policy.fragmentConfigMaps`): copy the fragment into the hub's GitOps repo as a
+  ConfigMap (key `policy`); the Git review is the gate.
 
 ```sh
 kubectl -n tailnet-system get cm corp-policy-fragment -o jsonpath='{.data.policy}' > spoke-corp.json
 # review spoke-corp.json, then (in the hub repo) ship it as ConfigMap tailnet-system/spoke-corp-fragment
 ```
-
-On the hub, list the fragment ConfigMaps next to the base:
 
 ```yaml
 spec:
@@ -252,7 +257,10 @@ destination inside `spec.reservedNetworks`. A fragment that carries any other bl
 written. A **listed fragment that is missing** fails the render closed
 (`PolicyRendered=False/FragmentMissing`): the live policy keeps the spoke's grants rather than
 silently dropping them, so delete the fragment from `fragmentConfigMaps` before you delete its
-ConfigMap.
+ConfigMap. A **pulled** fragment fails open the other way: an unreachable spoke, a forbidden read or
+an invalid fetch keeps the last approved copy merged and reports `SpokesReady=False` with the
+spoke's condition (`SpokeReachable`, `SpokeFragmentValid`, `SpokeFragmentApproved`); the render
+itself still succeeds.
 
 Until the hub applies the merged policy, the spoke's own CRs report `TagKnown=False/Unknown` — that
 gap is the review window for the foreign grants. Names, DNS zones, cross-cluster grants and the

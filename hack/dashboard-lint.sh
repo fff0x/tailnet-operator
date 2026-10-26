@@ -12,7 +12,7 @@ for dashboard in "$@"; do
     type == "object" and
     (.title | nonempty) and (.description | nonempty) and
     (.panels | type == "array") and
-    ([.panels[] | select(.type == "row")] | length == 8) and
+    ([.panels[] | select(.type == "row")] | length == 9) and
     ([panels] | length > 8) and
     all(panels; (.description | nonempty) and (.title | nonempty)) and
     ([panels | .id] as $ids | ($ids | unique | length) == ($ids | length)) and

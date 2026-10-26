@@ -1,0 +1,50 @@
+{{- if .Values.policy.fragmentReader.enabled }}
+{{- if not .Values.policy.fragmentReader.configMaps }}
+{{- fail "policy.fragmentReader.configMaps must name at least one fragment ConfigMap" }}
+{{- end }}
+{{- $name := printf "%s-fragment-reader" (include "tailnet-operator.name" .) }}
+{{- $ns := include "tailnet-operator.namespace" . }}
+# A hub pulls this spoke's exported policy fragment with this identity. The Role names the
+# ConfigMaps explicitly: the token can read nothing else in this cluster.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: {{ toJson .Values.policy.fragmentReader.configMaps }}
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name | quote }}
+    namespace: {{ $ns | quote }}
+---
+# The API server fills in `token` and `ca.crt`; copy both into the hub's spoke kubeconfig Secret.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ printf "%s-token" $name | quote }}
+  namespace: {{ $ns | quote }}
+  annotations:
+    kubernetes.io/service-account.name: {{ $name | quote }}
+type: kubernetes.io/service-account-token
+{{- end }}

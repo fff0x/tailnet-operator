@@ -51,7 +51,7 @@ The zone after the placeholders (`prod-2.tailnet.example.internal`) is this clus
 hub uses `prod-1.…`. A CR may still pin `spec.tag` / `spec.hostname` explicitly, as the spoke
 sections of [Ingress: TCP](ingress-tcp.md#tailnet-without-a-policy-writer-spoke-cluster) show.
 
-## 2. Export on the spoke, merge on the hub
+## 2. Export on the spoke, pull on the hub
 
 Spoke `Tailnet`:
 
@@ -67,23 +67,36 @@ spec:
 ```sh
 kubectl describe tailnet corp | grep -A1 Policy
 #   PolicyRendered  True   Rendered   3 tags, 3 grants, 12 routes exported
-#   PolicyApplied   False  Export     mode Export: commit ConfigMap tailnet-system/corp-policy-fragment to the hub …
-kubectl -n tailnet-system get cm corp-policy-fragment -o jsonpath='{.data.policy}' | jq -S . > prod-2-policy-fragment.json
+#   PolicyApplied   False  Export     mode Export: waiting for the hub to merge ConfigMap tailnet-system/corp-policy-fragment …
 ```
 
-Commit the file into the **hub's** repository next to the base policy and ship it as a ConfigMap in
-the operator namespace (key `policy`); then list it on the hub `Tailnet`:
+The hub reads that ConfigMap itself, through a kubeconfig that may read nothing else. On the
+**spoke**, let the chart mint the identity:
 
 ```yaml
-# hub repository, kustomization next to policy.jsonc
-configMapGenerator:
-  - name: headscale-policy
-    files: [policy=policy.jsonc]
-  - name: prod-2-policy-fragment
-    files: [policy=prod-2-policy-fragment.json]
-generatorOptions:
-  disableNameSuffixHash: true
+# spoke Helm values
+policy:
+  fragmentReader:
+    enabled: true
+    configMaps: [corp-policy-fragment]
 ```
+
+```sh
+# spoke → kubeconfig for the hub (ServiceAccount token, scoped to one ConfigMap, this cluster's CA)
+kubectl -n tailnet-system get secret tailnet-operator-fragment-reader-token \
+  -o go-template='apiVersion: v1
+kind: Config
+clusters: [{name: prod-2, cluster: {server: https://api.prod-2.example.com:6443, certificate-authority-data: {{index .data "ca.crt"}}}}]
+users: [{name: reader, user: {token: {{index .data "token" | base64decode}}}}]
+contexts: [{name: prod-2, context: {cluster: prod-2, user: reader}}]
+current-context: prod-2
+' > prod-2-kubeconfig
+# hub
+kubectl -n tailnet-system create secret generic prod-2-kubeconfig --from-file=kubeconfig=prod-2-kubeconfig
+```
+
+The server must be `https`: the operator sends the token only over TLS. Then list the spoke on the
+**hub** `Tailnet`:
 
 ```yaml
 # hub Tailnet
@@ -91,23 +104,48 @@ spec:
   policy:
     baseConfigMap: headscale-policy
     mode: Apply
-    fragmentConfigMaps: [prod-2-policy-fragment]
+    spokes:
+      - name: prod-2
+        kubeconfigSecretRef: {name: prod-2-kubeconfig}   # key "kubeconfig"
+        # namespace / configMap default to the operator namespace and "prod-2-policy-fragment";
+        # the spoke Tailnet above is called corp, so name its ConfigMap:
+        configMap: corp-policy-fragment
+        tagPatterns: ["tag:*-prod-2-*"]                   # default: tag:*-<name>-*
+        routeAllowlist: ["10.20.0.0/16"]                  # site networks of prod-2 the hub has no TailnetSite for
+        approval: Manual                                  # default Auto
 ```
 
-The hub renders base → its own CRs → fragments. Base and hub entries win; a fragment only adds
-`tagOwners`, `autoApprovers.routes` and `grants`. The Git review of the fragment file is the gate for
-the spoke's grants — the same review a hand-written entry gets. Details, failure reasons
-(`FragmentMissing`, `FragmentInvalid`) and the removal order are in
-[Policy § Second cluster](policy.md#second-cluster-export-on-the-spoke-merge-on-the-hub).
+Every reconcile the hub fetches the fragment (10 s timeout), validates it like a committed fragment
+plus the spoke's `tagPatterns` and `routeAllowlist`, and keeps a copy as
+`prod-2-policy-fragment-approved` in its own namespace. `approval: Auto` merges each valid fetch at
+once; `Manual` holds a changed fetch as `prod-2-policy-fragment-pending` and reports it:
 
-Refresh the fragment whenever the spoke adds or removes a CR: until the hub applies the new render,
-a new spoke CR reports `TagKnown=False/Unknown` (no key is minted) — that window is the review.
+```sh
+kubectl get tailnet corp -o jsonpath='{.status.spokes[0]}' | jq .
+# { "name": "prod-2", "fetchedHash": "9f2c…", "approvedHash": "41ab…", "pendingHash": "9f2c…",
+#   "pendingDelta": { "grantsAdded": 1, "routesAdded": 1 }, … }
+kubectl -n tailnet-system get cm prod-2-policy-fragment-pending -o jsonpath='{.data.policy}' | jq .
+kubectl annotate tailnet corp tsunaro.io/approve-spoke.prod-2=9f2c…      # pendingHash verbatim
+```
+
+While a fetch is pending the hub merges the approved fragment **minus** anything the spoke removed:
+a spoke can withdraw its own grants without approval, additions wait. An unreachable spoke, a
+`403`, or an invalid fetch keeps the last approved fragment merged; `SpokesReady` and
+`status.spokes[].conditions` (`SpokeReachable`, `SpokeFragmentValid`, `SpokeFragmentApproved`) say
+which. Removing a spoke from `spokes[]` drops its copies and its entries from the next render.
+
+**Alternative: commit the fragment into the hub repository.** Without a kubeconfig, copy the
+fragment by hand, ship it as a ConfigMap (key `policy`) in the hub's operator namespace and list it
+in `policy.fragmentConfigMaps`; the Git diff is the review. Refresh it whenever the spoke adds or
+removes a CR: until the hub applies the new render, a new spoke CR reports `TagKnown=False/Unknown`
+(no key is minted). Both paths validate the same way; details and failure reasons are in
+[Policy § Second cluster](policy.md#second-cluster-export-on-the-spoke-merge-on-the-hub).
 
 **Changing the base while a fragment is in play.** The hub applies whatever its render says the moment
 the base ConfigMap changes. If you remove hand-written spoke entries from the base in the same
-commit that adds the fragment, make sure the `Tailnet` already lists the fragment *before* the base
-changes — or switch the hub to `DryRun` in a commit of its own first. Otherwise the hub may write one
-intermediate policy without the spoke's tags.
+commit that adds the spoke, make sure the `Tailnet` already lists the spoke (and, with `Manual`, the
+first fetch is approved) *before* the base changes — or switch the hub to `DryRun` in a commit of
+its own first. Otherwise the hub may write one intermediate policy without the spoke's tags.
 
 ## 3. Grants between clusters
 
@@ -146,7 +184,8 @@ resolver; never to the other cluster's.
 | Item | Repository | Why |
 | --- | --- | --- |
 | Base policy (`groups`, `hosts`, site grants, `tests`) | hub | one writer, one review queue |
-| Spoke fragments (`*-policy-fragment.json`) | hub, generated on the spoke | the hub needs them at render time; the diff is the review |
+| Spoke kubeconfig Secret, `spokes[]` entry | hub | the hub pulls the fragment; `approval: Manual` makes the annotation the review |
+| Spoke fragments (`*-policy-fragment.json`, Git path) | hub, generated on the spoke | the hub needs them at render time; the diff is the review |
 | `Tailnet`, CRs, `TailnetGateway`, LB pool, CoreDNS forward | each cluster | cluster-local objects |
 | Headscale `dns.nameservers.split` | Headscale configuration | one entry per zone |
 | Headscale API keys | each cluster's Secret | independent rotation — [Keys and expiry](../operations/keys.md) |
@@ -166,8 +205,11 @@ dig +short shop-shop-dev.prod-2.tailnet.example.internal
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| spoke CR `TagKnown=False/Unknown` | hub has not applied the fragment yet, or it is not listed | commit/refresh the fragment, check `fragmentConfigMaps` |
-| hub `PolicyRendered=False/FragmentMissing` | listed ConfigMap absent in the operator namespace | ship the ConfigMap, or remove it from the list first |
-| hub `PolicyRendered=False/FragmentInvalid` | fragment carries `groups`/`acls`/`ssh`/…, or a grant/owner/route outside the hub's limits (the message names the path) | export again; never hand-edit the fragment beyond review; widen the hub's `tagOwners`/`routeApprovers`/`ingressSourceAllowlist` only deliberately |
+| spoke CR `TagKnown=False/Unknown` | hub has not merged the fragment yet: fetch pending approval, spoke unreachable, or (Git path) not listed | `kubectl get tailnet -o jsonpath='{.status.spokes}'`, approve or fix the spoke; Git path: commit/refresh the fragment, check `fragmentConfigMaps` |
+| hub `SpokesReady=False/SpokeUnreachable` | kubeconfig Secret missing or invalid, token revoked (`HTTP 403`), API server unreachable | the `SpokeReachable` message names which; last approved fragment stays merged |
+| hub `SpokesReady=False/ApprovalPending` | `approval: Manual` and the fetched fragment differs from the approved one | review `<spoke>-policy-fragment-pending` and `pendingDelta`, annotate with the pending hash |
+| hub `SpokesReady=False/NothingApproved` | `Manual` spoke whose first fetch was never approved | annotate once; until then the spoke contributes nothing |
+| hub `PolicyRendered=False/FragmentMissing` | listed `fragmentConfigMaps` entry absent in the operator namespace | ship the ConfigMap, or remove it from the list first |
+| hub `SpokesReady=False/SpokeFragmentInvalid` or `PolicyRendered=False/FragmentInvalid` | fragment carries `groups`/`acls`/`ssh`/…, or a grant/owner/route outside the hub's limits (the message names the path); for a pulled fragment also a tag outside `tagPatterns` or a route outside `routeAllowlist` | export again; never hand-edit the fragment beyond review; widen the hub's `tagOwners`/`routeApprovers`/`ingressSourceAllowlist` only deliberately |
 | spoke `PolicyRendered` message lists `denied …` | `allowFrom` outside the spoke's `ingressSourceAllowlist` | align the allowlist with the hub |
 | spoke egress `RoutesGranted=False`, target reason `NotAdvertised` | no router advertises a route covering the host | add the `/32` or its subnet to a gateway's routes or a `TailnetSite` |

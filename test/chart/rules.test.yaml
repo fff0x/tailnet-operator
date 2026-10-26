@@ -333,3 +333,49 @@ tests:
               summary: A node without an advertiser tag advertises a route overlapping a TailnetSite
               description: Report only; the managed route still ships and clients pick the longest prefix. The condition message names the node.
               runbook_url: docs/OPERATIONS.md#monitoring-unmanaged-route-overlap
+  - name: Spoke alerts fire on sustained failure or pending approval and clear on recovery
+    interval: 1m
+    input_series:
+      - series: 'tailnet_spoke_reachable{tailnet="hub",spoke="prod-2"}'
+        values: '0x70 1x10'
+      - series: 'tailnet_spoke_fragment_valid{tailnet="hub",spoke="prod-2"}'
+        values: '0x20 1x60'
+      - series: 'tailnet_spoke_fragment_pending{tailnet="hub",spoke="prod-2"}'
+        values: '1x250'
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: TailnetSpokeUnreachable
+        exp_alerts: []
+      - eval_time: 61m
+        alertname: TailnetSpokeUnreachable
+        exp_alerts:
+          - exp_labels: {tailnet: hub, spoke: prod-2, severity: warning}
+            exp_annotations:
+              summary: A spoke's policy fragment could not be fetched
+              description: The hub has failed to read the spoke's fragment ConfigMap for an hour (condition SpokeReachable names the cause - kubeconfig, RBAC or network). The last approved fragment stays merged; the spoke's newer grants are not.
+              runbook_url: docs/OPERATIONS.md#monitoring-spoke-unreachable
+      - eval_time: 75m
+        alertname: TailnetSpokeUnreachable
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TailnetSpokeFragmentInvalid
+        exp_alerts:
+          - exp_labels: {tailnet: hub, spoke: prod-2, severity: warning}
+            exp_annotations:
+              summary: A spoke's fetched fragment breaks the hub's limits
+              description: The fetched fragment has failed validation for fifteen minutes (condition SpokeFragmentValid names the path). The last approved fragment stays merged.
+              runbook_url: docs/OPERATIONS.md#monitoring-spoke-fragment-invalid
+      - eval_time: 25m
+        alertname: TailnetSpokeFragmentInvalid
+        exp_alerts: []
+      - eval_time: 239m
+        alertname: TailnetSpokeApprovalPending
+        exp_alerts: []
+      - eval_time: 241m
+        alertname: TailnetSpokeApprovalPending
+        exp_alerts:
+          - exp_labels: {tailnet: hub, spoke: prod-2, severity: info}
+            exp_annotations:
+              summary: A spoke fragment has waited for approval for four hours
+              description: Approval mode Manual holds a valid fetched fragment until the Tailnet carries tsunaro.io/approve-spoke.<spoke> with the pending hash. Review the <spoke>-policy-fragment-pending ConfigMap and status.spokes[].pendingDelta.
+              runbook_url: docs/OPERATIONS.md#monitoring-spoke-approval-pending

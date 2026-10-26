@@ -137,3 +137,31 @@ lifetime for short lifetimes. Bootstrap recovery needs a valid bootstrap key.
 `TailnetNodeOffline`: Headscale has listed the node as offline for 5 min. Check the agent pod,
 registration and control-server connectivity. Offline is not the same as a failed scrape or an
 unreachable backend.
+
+## Monitoring: spoke unreachable
+
+`TailnetSpokeUnreachable`: for 1 h the hub could not read a `policy.spokes[]` fragment. The
+`SpokeReachable` condition in `status.spokes[]` names the cause: `KubeconfigMissing` (Secret or key
+absent in the operator namespace), `KubeconfigInvalid` (does not parse, or names a plain `http://`
+server), `Forbidden` (`HTTP 401/403` — token revoked or the reader Role no longer names the
+ConfigMap), `Unreachable` (dial or timeout against the spoke API server). The last approved fragment
+stays merged, so nothing breaks immediately; the spoke's newer grants are simply not applied. Re-mint
+the reader token on the spoke (`policy.fragmentReader`) and replace the hub Secret.
+
+## Monitoring: spoke fragment invalid
+
+`TailnetSpokeFragmentInvalid`: for 15 min the fetched fragment failed the hub's validation; the
+`SpokeFragmentValid` message names the path (a tag outside `tagPatterns`, a route or destination
+outside `routeAllowlist` and the hub's `TailnetSite`s, a foreign owner, a non-tcp port, a reserved
+network, or a block other than `tagOwners` / `autoApprovers.routes` / `grants`). The last approved
+fragment stays merged. Fix the spoke CR that produced the entry, or widen the spoke's allowlist on
+the hub deliberately.
+
+## Monitoring: spoke approval pending
+
+`TailnetSpokeApprovalPending` (info): a `Manual` spoke's fetched fragment has differed from the
+approved one for 4 h. Review `<spoke>-policy-fragment-pending` in the operator namespace and
+`status.spokes[].pendingDelta`, then
+`kubectl annotate tailnet <hub> tsunaro.io/approve-spoke.<spoke>=<pendingHash>`. Until then the hub
+merges the approved fragment minus anything the spoke removed, so removals land without approval and
+additions wait — a long-pending fetch means a spoke change nobody has looked at.
