@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-10-27
+
 ### Added
 
 - Chart `networkPolicy.spokePeers`, `networkPolicy.spokeCIDRs` and `networkPolicy.spokePorts`
