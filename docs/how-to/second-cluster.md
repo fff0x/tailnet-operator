@@ -81,12 +81,33 @@ policy:
     configMaps: [corp-policy-fragment]
 ```
 
+The hub reaches the spoke's API server only through the tailnet — it is never exposed to the
+internet. On the **hub**, a `TailnetEgress` whose target is the spoke API address (inside a site
+network the spoke's gateway advertises, [Site network](site-network.md)) gives the operator an
+in-cluster Service for it; the grant and the `/32` approval are generated like for any egress:
+
+```yaml
+# hub
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: spoke-prod-2
+spec:
+  tailnetRef: {name: corp}
+  consumerNamespaces: [tailnet-system]      # the operator itself is the consumer
+  targets:
+    - name: prod-2-api
+      address: 203.0.113.10                  # the spoke's API server address
+      port: 6443
+```
+
 ```sh
-# spoke → kubeconfig for the hub (ServiceAccount token, scoped to one ConfigMap, this cluster's CA)
+# spoke → kubeconfig for the hub (ServiceAccount token, scoped to one ConfigMap, this cluster's CA);
+# the server is the hub's egress Service, tls-server-name a SAN of the spoke API certificate
 kubectl -n tailnet-system get secret tailnet-operator-fragment-reader-token \
   -o go-template='apiVersion: v1
 kind: Config
-clusters: [{name: prod-2, cluster: {server: https://api.prod-2.example.com:6443, certificate-authority-data: {{index .data "ca.crt"}}}}]
+clusters: [{name: prod-2, cluster: {server: https://prod-2-api.tailnet-system.svc:6443, tls-server-name: api.prod-2.example.internal, certificate-authority-data: {{index .data "ca.crt"}}}}]
 users: [{name: reader, user: {token: {{index .data "token" | base64decode}}}}]
 contexts: [{name: prod-2, context: {cluster: prod-2, user: reader}}]
 current-context: prod-2
@@ -95,8 +116,8 @@ current-context: prod-2
 kubectl -n tailnet-system create secret generic prod-2-kubeconfig --from-file=kubeconfig=prod-2-kubeconfig
 ```
 
-The server must be `https`: the operator sends the token only over TLS. Then list the spoke on the
-**hub** `Tailnet`:
+The server must be `https`: the operator sends the token only over TLS, and the spoke's certificate
+is still verified against its CA. Then list the spoke on the **hub** `Tailnet`:
 
 ```yaml
 # hub Tailnet
@@ -116,8 +137,8 @@ spec:
 ```
 
 A hub with `networkPolicy.enabled` must allow this dial, which none of the default rules cover.
-A spoke API reached through a `TailnetEgress` is that CR's agent pod on its listen port; an address
-outside the cluster is a CIDR:
+The dial goes to the `spoke-prod-2` egress agent pod on its listen port (an address outside the
+cluster would be a CIDR instead):
 
 ```yaml
 # hub chart values
@@ -198,6 +219,7 @@ resolver; never to the other cluster's.
 | --- | --- | --- |
 | Base policy (`groups`, `hosts`, site grants, `tests`) | hub | one writer, one review queue |
 | Spoke kubeconfig Secret, `spokes[]` entry | hub | the hub pulls the fragment; `approval: Manual` makes the annotation the review |
+| `TailnetEgress` to the spoke API server | hub | the only path to the spoke API; grant and `/32` approval are generated |
 | Spoke fragments (`*-policy-fragment.json`, Git path) | hub, generated on the spoke | the hub needs them at render time; the diff is the review |
 | `Tailnet`, CRs, `TailnetGateway`, LB pool, CoreDNS forward | each cluster | cluster-local objects |
 | Headscale `dns.nameservers.split` | Headscale configuration | one entry per zone |
