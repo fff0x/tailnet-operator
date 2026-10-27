@@ -112,8 +112,8 @@ TailnetStatus is the observed state of the control server binding.
 | `spokes[].conditions[].reason` | string | yes | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. Max length 1024. |
 | `spokes[].conditions[].status` | string | yes | status of the condition, one of True, False, Unknown. One of `True`, `False`, `Unknown`. |
 | `spokes[].conditions[].type` | string | yes | type of condition in CamelCase or in foo.example.com/CamelCase. Max length 316. |
-| `spokes[].fetchedAt` | string | no | Format `date-time`. |
-| `spokes[].fetchedHash` | string | no | sha256 of the last fragment fetched and found valid, and when. |
+| `spokes[].fetchedAt` | string | no | When fetchedHash last changed — not a heartbeat. The SpokeReachable condition is refreshed on every reconcile. Format `date-time`. |
+| `spokes[].fetchedHash` | string | no | sha256 of the last fragment fetched and found valid. |
 | `spokes[].name` | string | yes |  |
 | `spokes[].pendingDelta` | object | no | SpokeDelta counts the entries a pending fragment adds (+) and removes (-) against the approved one. |
 | `spokes[].pendingDelta.grantsAdded` | integer | yes |  |

@@ -291,9 +291,11 @@ type PolicyStatus struct {
 // SpokeStatus reports one pulled spoke fragment: what was fetched, what is merged, what waits.
 type SpokeStatus struct {
 	Name string `json:"name"`
-	// sha256 of the last fragment fetched and found valid, and when.
+	// sha256 of the last fragment fetched and found valid.
 	// +optional
 	FetchedHash string `json:"fetchedHash,omitempty"`
+	// When fetchedHash last changed — not a heartbeat. The SpokeReachable condition is refreshed on
+	// every reconcile.
 	// +optional
 	FetchedAt *metav1.Time `json:"fetchedAt,omitempty"`
 	// sha256 of the fragment currently merged into the hub policy, and when it was adopted.

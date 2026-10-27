@@ -81,10 +81,14 @@ policy:
     configMaps: [corp-policy-fragment]
 ```
 
-The hub reaches the spoke's API server only through the tailnet — it is never exposed to the
-internet. On the **hub**, a `TailnetEgress` whose target is the spoke API address (inside a site
-network the spoke's gateway advertises, [Site network](site-network.md)) gives the operator an
-in-cluster Service for it; the grant and the `/32` approval are generated like for any egress:
+## 2a. Reach the spoke API through the tailnet
+
+The hub's operator reads the spoke's ConfigMap from the spoke's API server, and that server is never
+exposed to the internet. It is reached the way any site host is reached: the spoke API address lies
+in a network that a router carrying one of the `routeApprovers` tags advertises — normally the spoke's
+own `TailnetGateway` ([Run the gateway](gateway.md), [Site network](site-network.md)) — and the hub
+runs a `TailnetEgress` for it. The egress gives the operator an in-cluster Service; its grant and the
+`/32` approval are generated like for any other egress:
 
 ```yaml
 # hub
@@ -100,6 +104,19 @@ spec:
       address: 203.0.113.10                  # the spoke's API server address
       port: 6443
 ```
+
+```sh
+kubectl -n tailnet-system get tailnetegress spoke-prod-2 \
+  -o jsonpath='{range .status.conditions[*]}{.type}={.status}/{.reason}{"\n"}{end}'
+#   TagKnown=True/Known  Registered=True/Registered  RoutesGranted=True/AllGranted
+#   TargetsReachable=True/AllReachable  Ready=True/Ready
+```
+
+Wait for `Ready` before listing the spoke below: until the route to the spoke API is advertised and
+approved, the hub reports `SpokeUnreachable`. From now on the spoke API server is
+`prod-2-api.tailnet-system.svc:6443` inside the hub cluster. The TLS session still terminates at the
+spoke API server; because the kubeconfig now dials a Service name, `tls-server-name` must carry a
+name the spoke API certificate actually holds (one of its SANs), and the CA stays the spoke's:
 
 ```sh
 # spoke → kubeconfig for the hub (ServiceAccount token, scoped to one ConfigMap, this cluster's CA);
@@ -137,8 +154,8 @@ spec:
 ```
 
 A hub with `networkPolicy.enabled` must allow this dial, which none of the default rules cover.
-The dial goes to the `spoke-prod-2` egress agent pod on its listen port (an address outside the
-cluster would be a CIDR instead):
+The dial goes to the agent pod of the `spoke-prod-2` egress from [2a](#2a-reach-the-spoke-api-through-the-tailnet)
+on its listen port (an address outside the cluster would be a CIDR instead):
 
 ```yaml
 # hub chart values
@@ -151,7 +168,10 @@ networkPolicy:
 
 Every reconcile the hub fetches the fragment (10 s timeout), validates it like a committed fragment
 plus the spoke's `tagPatterns` and `routeAllowlist`, and keeps a copy as
-`prod-2-policy-fragment-approved` in its own namespace. `approval: Auto` merges each valid fetch at
+`prod-2-policy-fragment-approved` in its own namespace. `status.spokes[].fetchedAt` is when the
+fetched hash last *changed*, not a heartbeat: with a quiet spoke it stays put for weeks while
+`SpokeReachable` (set on every reconcile) and the metric `tailnet_spoke_reachable` tell you the
+pull still works. `approval: Auto` merges each valid fetch at
 once; `Manual` holds a changed fetch as `prod-2-policy-fragment-pending` and reports it:
 
 ```sh
@@ -241,7 +261,8 @@ dig +short shop-shop-dev.prod-2.tailnet.example.internal
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | spoke CR `TagKnown=False/Unknown` | hub has not merged the fragment yet: fetch pending approval, spoke unreachable, or (Git path) not listed | `kubectl get tailnet -o jsonpath='{.status.spokes}'`, approve or fix the spoke; Git path: commit/refresh the fragment, check `fragmentConfigMaps` |
-| hub `SpokesReady=False/SpokeUnreachable` | kubeconfig Secret missing or invalid, token revoked (`HTTP 403`), API server unreachable — with `networkPolicy.enabled` also a missing `spokePeers`/`spokeCIDRs` entry | the `SpokeReachable` message names which; last approved fragment stays merged |
+| hub `SpokesReady=False/SpokeUnreachable` | kubeconfig Secret missing or invalid, token revoked (`HTTP 403`), API server unreachable — the `TailnetEgress` to the spoke API not `Ready` (route not advertised or approved, [2a](#2a-reach-the-spoke-api-through-the-tailnet)), or with `networkPolicy.enabled` a missing `spokePeers`/`spokeCIDRs` entry | the `SpokeReachable` message names which; check the egress conditions; last approved fragment stays merged |
+| hub `status.spokes[].fetchedAt` unchanged for days | nothing to report: the spoke's fragment has not changed since | normal while `SpokeReachable=True`; the timestamp moves only with a new fetched hash |
 | hub `SpokesReady=False/ApprovalPending` | `approval: Manual` and the fetched fragment differs from the approved one | review `<spoke>-policy-fragment-pending` and `pendingDelta`, annotate with the pending hash |
 | hub `SpokesReady=False/NothingApproved` | `Manual` spoke whose first fetch was never approved | annotate once; until then the spoke contributes nothing |
 | hub `PolicyRendered=False/FragmentMissing` | listed `fragmentConfigMaps` entry absent in the operator namespace | ship the ConfigMap, or remove it from the list first |

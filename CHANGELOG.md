@@ -4,6 +4,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Changed
+
+- `Tailnet.status.spokes[].fetchedAt` is described as the time the fetched hash last changed, not a
+  heartbeat; `SpokeReachable` and `tailnet_spoke_reachable` report every reconcile. The how-to
+  *Connect a second cluster* shows the hub reaching the spoke API server through a `TailnetEgress`
+  (section 2a) instead of a directly reachable endpoint.
+
 ## [0.22.1] - 2026-10-27
 
 ### Added

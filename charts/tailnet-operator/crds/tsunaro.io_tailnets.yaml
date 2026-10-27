@@ -729,11 +729,13 @@ spec:
                       - type
                       x-kubernetes-list-type: map
                     fetchedAt:
+                      description: |-
+                        When fetchedHash last changed — not a heartbeat. The SpokeReachable condition is refreshed on
+                        every reconcile.
                       format: date-time
                       type: string
                     fetchedHash:
-                      description: sha256 of the last fragment fetched and found valid,
-                        and when.
+                      description: sha256 of the last fragment fetched and found valid.
                       type: string
                     name:
                       type: string

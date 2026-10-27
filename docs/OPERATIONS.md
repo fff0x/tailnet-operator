@@ -144,9 +144,13 @@ unreachable backend.
 `SpokeReachable` condition in `status.spokes[]` names the cause: `KubeconfigMissing` (Secret or key
 absent in the operator namespace), `KubeconfigInvalid` (does not parse, or names a plain `http://`
 server), `Forbidden` (`HTTP 401/403` — token revoked or the reader Role no longer names the
-ConfigMap), `Unreachable` (dial or timeout against the spoke API server). The last approved fragment
+ConfigMap), `Unreachable` (dial or timeout against the spoke API server — when the hub reaches it
+through a `TailnetEgress`, check that egress first: its `Ready` condition and the target's reason tell
+whether the route to the spoke API is advertised, approved and probed). The last approved fragment
 stays merged, so nothing breaks immediately; the spoke's newer grants are simply not applied. Re-mint
-the reader token on the spoke (`policy.fragmentReader`) and replace the hub Secret.
+the reader token on the spoke (`policy.fragmentReader`) and replace the hub Secret. A
+`status.spokes[].fetchedAt` that has not moved is not a symptom: it changes only with a new fetched
+hash, while `SpokeReachable` and `tailnet_spoke_reachable` are refreshed on every reconcile.
 
 ## Monitoring: spoke fragment invalid
 
