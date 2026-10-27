@@ -4,6 +4,16 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- Chart `networkPolicy.spokePeers`, `networkPolicy.spokeCIDRs` and `networkPolicy.spokePorts`
+  (default `[443, 6443]`): with `networkPolicy.enabled` the operator's NetworkPolicy /
+  CiliumNetworkPolicy now has a rule for the `Tailnet.spec.policy.spokes[]` fetch — the egress
+  agent pod a spoke API server is reached through (label peers on its listen port) or the spoke
+  API address itself. Both default to empty, so existing renders are unchanged; before, a hub with
+  isolation enabled needed a hand-maintained extra rule and otherwise reported
+  `SpokeReachable=False/Unreachable`.
+
 ## [0.22.0] - 2026-10-26
 
 ### Added

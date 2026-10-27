@@ -140,6 +140,12 @@ networkPolicy:
   headscaleCIDRs: []
   # -- Headscale REST API TCP ports.
   headscalePorts: [443, 8080]
+  # -- Peers (namespaceSelector / podSelector; no ipBlock under provider cilium) the operator may dial for `Tailnet.spec.policy.spokes[]`. A spoke API server reached through a TailnetEgress is that CR's agent pod: select `app.kubernetes.io/name: tailnet-egress` + `app.kubernetes.io/instance: <egress name>` and put its listen port into `spokePorts`. Empty adds nothing.
+  spokePeers: []
+  # -- Spoke API server CIDRs the operator may dial directly (an address outside the cluster). Empty adds nothing.
+  spokeCIDRs: []
+  # -- TCP ports for `spokePeers` and `spokeCIDRs`; an egress agent listens on its target's listen port (first target 10000).
+  spokePorts: [443, 6443]
   # -- DNS NetworkPolicy peers; customize for NodeLocal DNS or a different resolver.
   dnsPeers:
     - namespaceSelector:

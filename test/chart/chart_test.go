@@ -780,6 +780,7 @@ func TestInvalidValues(t *testing.T) {
 		{"network policy without Headscale CIDRs", "networkPolicy: {enabled: true, kubeAPICIDRs: [10.96.0.1/32]}", "headscaleCIDRs"},
 		{"network policy unknown provider", "networkPolicy: {enabled: true, provider: calico}", "provider"},
 		{"cilium policy with ipBlock peer", "networkPolicy: {enabled: true, provider: cilium, dnsPeers: [{ipBlock: {cidr: 10.0.0.0/8}}]}", "ipBlock"},
+		{"cilium policy with ipBlock spoke peer", "networkPolicy: {enabled: true, provider: cilium, spokePeers: [{ipBlock: {cidr: 192.0.2.0/24}}]}", "ipBlock"},
 		{"cilium policy without any Headscale egress", "networkPolicy: {enabled: true, provider: cilium, cilium: {headscalePeers: []}}", "headscaleCIDRs"},
 	}
 	for _, name := range []string{"POD_NAMESPACE", "OPERATOR_IMAGE", "AGENT_IMAGE_PULL_SECRETS", "AGENT_RESOURCES", "SSL_CERT_FILE"} {
@@ -922,6 +923,7 @@ func TestCiliumNetworkPolicy(t *testing.T) {
 	if len(cnp.Spec.Ingress) != 0 {
 		t.Error("provider cilium is egress-only; ingress must stay open")
 	}
+	// Exactly four rules: the spoke dial (spokePeers/spokeCIDRs) adds nothing unless configured.
 	equal(t, "egress rule count", len(cnp.Spec.Egress), 4)
 	hasPort := func(i int, port, protocol string) bool {
 		for _, tp := range cnp.Spec.Egress[i].ToPorts {
@@ -1016,6 +1018,38 @@ func TestCiliumNetworkPolicyRemoteHeadscale(t *testing.T) {
 		if !found {
 			t.Errorf("toCIDR egress missing TCP/443: %#v", e.ToPorts)
 		}
+	}
+}
+
+func TestCiliumNetworkPolicySpokePeers(t *testing.T) {
+	// Hub with policy.spokes[]: one spoke API server is reached through the agent pod of a
+	// TailnetEgress on its listen port, another one directly by address.
+	m := render(t, `networkPolicy:
+  enabled: true
+  provider: cilium
+  spokePeers:
+    - podSelector: {matchLabels: {app.kubernetes.io/name: tailnet-egress, app.kubernetes.io/instance: spoke-corp}}
+  spokeCIDRs: [192.0.2.10/32]
+  spokePorts: [10000]
+`)
+	cnp := decode[ciliumPolicy](t, m.one(t, "CiliumNetworkPolicy"))
+	equal(t, "egress rule count", len(cnp.Spec.Egress), 6)
+	port := func(i int) bool {
+		for _, tp := range cnp.Spec.Egress[i].ToPorts {
+			for _, p := range tp.Ports {
+				if p.Port == "10000" && p.Protocol == "TCP" {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	peers := cnp.Spec.Egress[4].ToEndpoints
+	if len(peers) != 1 || peers[0].MatchLabels["app.kubernetes.io/instance"] != "spoke-corp" || peers[0].MatchLabels["app.kubernetes.io/name"] != "tailnet-egress" || len(peers[0].MatchExpressions) != 0 || !port(4) {
+		t.Errorf("spoke peer must select the egress agent in the operator namespace on spokePorts: %#v", peers)
+	}
+	if !reflect.DeepEqual(cnp.Spec.Egress[5].ToCIDR, []string{"192.0.2.10/32"}) || !port(5) {
+		t.Errorf("spoke CIDR egress must carry the address on spokePorts: %#v", cnp.Spec.Egress[5])
 	}
 }
 
@@ -1125,4 +1159,29 @@ func TestNetworkPolicy(t *testing.T) {
 	if !metrics {
 		t.Error("missing configured metrics ingress on TCP/8080")
 	}
+	t.Run("spoke dial", func(t *testing.T) {
+		m := render(t, `networkPolicy:
+  enabled: true
+  kubeAPICIDRs: [10.96.0.1/32]
+  headscaleCIDRs: [192.0.2.1/32]
+  spokePeers:
+    - podSelector: {matchLabels: {app.kubernetes.io/name: tailnet-egress, app.kubernetes.io/instance: spoke-corp}}
+  spokeCIDRs: [192.0.2.10/32]
+  spokePorts: [10000]
+`)
+		np := decode[networkingv1.NetworkPolicy](t, m.one(t, "NetworkPolicy"))
+		var peer, cidr bool
+		for _, rule := range np.Spec.Egress {
+			if !portsContain(rule.Ports, corev1.ProtocolTCP, 10000) {
+				continue
+			}
+			for _, p := range rule.To {
+				peer = peer || p.PodSelector != nil && p.NamespaceSelector == nil && matches(t, *p.PodSelector, map[string]string{"app.kubernetes.io/name": "tailnet-egress", "app.kubernetes.io/instance": "spoke-corp"})
+				cidr = cidr || p.IPBlock != nil && p.IPBlock.CIDR == "192.0.2.10/32"
+			}
+		}
+		if !peer || !cidr {
+			t.Errorf("spoke dial egress incomplete: peer=%v cidr=%v", peer, cidr)
+		}
+	})
 }

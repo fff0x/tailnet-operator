@@ -58,4 +58,24 @@ spec:
                 values: [tailnet-egress, tailnet-ingress]
       ports:
         - {protocol: TCP, port: 9080}
+    # Spoke API servers for Tailnet.spec.policy.spokes[]: an egress agent pod (label peers on its
+    # listen port) or an address outside the cluster (ipBlock). Nothing by default.
+    {{- with .Values.networkPolicy.spokePeers }}
+    - to:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        {{- range $.Values.networkPolicy.spokePorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.spokeCIDRs }}
+    - to:
+        {{- range . }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports:
+        {{- range $.Values.networkPolicy.spokePorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
 {{- end }}

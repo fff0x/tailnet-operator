@@ -17,8 +17,8 @@ description: "Every condition type per kind, its reasons, how Ready derives its 
 
 `Tailnet.status.spokes[]` (hub with `policy.spokes[]`) = `{name, fetchedHash, fetchedAt, approvedHash,
 approvedAt, pendingHash, pendingSince, pendingDelta{tagsAdded,…,routesRemoved}, conditions}` with
-`SpokeReachable` (`Reachable` / `Unreachable` / `Forbidden` / `KubeconfigMissing` /
-`KubeconfigInvalid`), `SpokeFragmentValid` (`Valid` / `FragmentInvalid` / `FragmentMissing` /
+`SpokeReachable` (`Reachable` / `Unreachable` — network, or the operator's own NetworkPolicy without
+`networkPolicy.spokePeers`/`spokeCIDRs` / `Forbidden` / `KubeconfigMissing` / `KubeconfigInvalid`), `SpokeFragmentValid` (`Valid` / `FragmentInvalid` / `FragmentMissing` /
 `Unknown` — nothing fetched) and `SpokeFragmentApproved` (`Auto`, `Approved`, `ApprovalPending` — a
 newer valid fetch waits for the annotation, `ApprovalStale` — the annotation names a hash that is no
 longer the pending one, `NothingApproved` — `Manual` spoke whose first fetch was never approved).

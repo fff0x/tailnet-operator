@@ -72,7 +72,7 @@
         "folder": {"type": "string", "minLength": 1}, "allowCrossNamespaceImport": {"type": "boolean"}, "datasourceName": {"type": "string", "minLength": 1}
       }}
     }},
-    "networkPolicy": {"type": "object", "additionalProperties": false, "required": ["enabled", "provider", "cilium", "kubeAPICIDRs", "kubeAPIPorts", "headscaleCIDRs", "headscalePorts", "dnsPeers", "metricsPeers"], "properties": {
+    "networkPolicy": {"type": "object", "additionalProperties": false, "required": ["enabled", "provider", "cilium", "kubeAPICIDRs", "kubeAPIPorts", "headscaleCIDRs", "headscalePorts", "spokePeers", "spokeCIDRs", "spokePorts", "dnsPeers", "metricsPeers"], "properties": {
       "enabled": {"type": "boolean"},
       "provider": {"enum": ["kubernetes", "cilium"]},
       "cilium": {"type": "object", "additionalProperties": false, "required": ["headscalePeers"], "properties": {"headscalePeers": {"$ref": "#/definitions/peers"}}},
@@ -80,6 +80,9 @@
       "kubeAPIPorts": {"$ref": "#/definitions/ports"},
       "headscaleCIDRs": {"$ref": "#/definitions/cidrs"},
       "headscalePorts": {"$ref": "#/definitions/ports"},
+      "spokePeers": {"$ref": "#/definitions/peers"},
+      "spokeCIDRs": {"$ref": "#/definitions/cidrs"},
+      "spokePorts": {"$ref": "#/definitions/ports"},
       "dnsPeers": {"$ref": "#/definitions/peers"},
       "metricsPeers": {"$ref": "#/definitions/peers"}
     }}

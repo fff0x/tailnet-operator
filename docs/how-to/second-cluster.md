@@ -115,6 +115,19 @@ spec:
         approval: Manual                                  # default Auto
 ```
 
+A hub with `networkPolicy.enabled` must allow this dial, which none of the default rules cover.
+A spoke API reached through a `TailnetEgress` is that CR's agent pod on its listen port; an address
+outside the cluster is a CIDR:
+
+```yaml
+# hub chart values
+networkPolicy:
+  spokePeers:
+    - podSelector: {matchLabels: {app.kubernetes.io/name: tailnet-egress, app.kubernetes.io/instance: spoke-prod-2}}
+  spokePorts: [10000]            # the egress target's listen port (first target: 10000)
+  # spokeCIDRs: [203.0.113.10/32]  # or: the spoke API server address, with spokePorts: [6443]
+```
+
 Every reconcile the hub fetches the fragment (10 s timeout), validates it like a committed fragment
 plus the spoke's `tagPatterns` and `routeAllowlist`, and keeps a copy as
 `prod-2-policy-fragment-approved` in its own namespace. `approval: Auto` merges each valid fetch at
@@ -206,7 +219,7 @@ dig +short shop-shop-dev.prod-2.tailnet.example.internal
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | spoke CR `TagKnown=False/Unknown` | hub has not merged the fragment yet: fetch pending approval, spoke unreachable, or (Git path) not listed | `kubectl get tailnet -o jsonpath='{.status.spokes}'`, approve or fix the spoke; Git path: commit/refresh the fragment, check `fragmentConfigMaps` |
-| hub `SpokesReady=False/SpokeUnreachable` | kubeconfig Secret missing or invalid, token revoked (`HTTP 403`), API server unreachable | the `SpokeReachable` message names which; last approved fragment stays merged |
+| hub `SpokesReady=False/SpokeUnreachable` | kubeconfig Secret missing or invalid, token revoked (`HTTP 403`), API server unreachable — with `networkPolicy.enabled` also a missing `spokePeers`/`spokeCIDRs` entry | the `SpokeReachable` message names which; last approved fragment stays merged |
 | hub `SpokesReady=False/ApprovalPending` | `approval: Manual` and the fetched fragment differs from the approved one | review `<spoke>-policy-fragment-pending` and `pendingDelta`, annotate with the pending hash |
 | hub `SpokesReady=False/NothingApproved` | `Manual` spoke whose first fetch was never approved | annotate once; until then the spoke contributes nothing |
 | hub `PolicyRendered=False/FragmentMissing` | listed `fragmentConfigMaps` entry absent in the operator namespace | ship the ConfigMap, or remove it from the list first |

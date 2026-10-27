@@ -2,7 +2,7 @@
 {{- if and (not .Values.networkPolicy.cilium.headscalePeers) (not .Values.networkPolicy.headscaleCIDRs) }}
 {{- fail "networkPolicy.provider cilium requires at least one of networkPolicy.cilium.headscalePeers (in-cluster) or networkPolicy.headscaleCIDRs (remote Headscale)" }}
 {{- end }}
-# Egress-only: the operator may reach exactly the four destinations it dials. Ingress (metrics
+# Egress-only: the operator may reach exactly the destinations it dials. Ingress (metrics
 # :8080, health :8081) stays open. If any rule is missing the operator fails silently; keep this
 # in sync with what internal/controller dials.
 apiVersion: cilium.io/v2
@@ -66,4 +66,27 @@ spec:
       toPorts:
         - ports:
             - {port: "9080", protocol: TCP}
+    # 5. spoke API servers — fetch the exported policy fragment (Tailnet.spec.policy.spokes[]).
+    #    A spoke behind a TailnetEgress is reached via that CR's agent pod on its listen port
+    #    (label peers); an API address outside the cluster is a toCIDR. Nothing by default.
+    {{- with .Values.networkPolicy.spokePeers }}
+    - toEndpoints:
+        {{- include "tailnet-operator.ciliumEndpoints" . | trim | nindent 8 }}
+      toPorts:
+        - ports:
+            {{- range $.Values.networkPolicy.spokePorts }}
+            - {port: {{ . | quote }}, protocol: TCP}
+            {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.spokeCIDRs }}
+    - toCIDR:
+        {{- range . }}
+        - {{ . | quote }}
+        {{- end }}
+      toPorts:
+        - ports:
+            {{- range $.Values.networkPolicy.spokePorts }}
+            - {port: {{ . | quote }}, protocol: TCP}
+            {{- end }}
+    {{- end }}
 {{- end }}
