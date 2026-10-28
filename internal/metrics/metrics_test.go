@@ -331,7 +331,7 @@ func TestSiteConditions(t *testing.T) {
 	labels := map[string]string{"kind": "TailnetSite", "name": "branch-a", "namespace": ""}
 	value(t, reg, "tailnet_resource_ready", map[string]string{"kind": "TailnetSite", "name": "branch-a", "tailnet": "hub"}, 0)
 	value(t, reg, "tailnet_resource_condition", map[string]string{"kind": "TailnetSite", "name": "branch-a", "type": "RouteConflict", "reason": "OverlapsSite"}, 1)
-	// The Ready reason must survive the whitelist (hydra probe 2026-10-13 showed "Other").
+	// The Ready reason must survive the whitelist (a production hub showed "Other" on 2026-10-13).
 	value(t, reg, "tailnet_resource_condition", map[string]string{"kind": "TailnetSite", "name": "branch-a", "type": "Ready", "reason": "RouteConflict"}, 1)
 	for _, s := range samples(t, reg, "tailnet_resource_condition") {
 		for _, p := range s.Label {

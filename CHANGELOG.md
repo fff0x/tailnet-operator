@@ -262,7 +262,7 @@ announced in 0.17.0.
   `headscalePorts`, so a cluster whose Headscale control plane lives outside the cluster
   (shared/spoke clusters) is covered by the chart's own CiliumNetworkPolicy and no longer needs a
   side-car CNP. A fail guard rejects `provider: cilium` with both blocks empty. Default values keep
-  the in-cluster label peer and `headscaleCIDRs: []`, so hub clusters (hydra) render byte-identical
+  the in-cluster label peer and `headscaleCIDRs: []`, so existing hub clusters render byte-identical
   specs on upgrade — verified in `test/chart`.
 
 ### Fixed

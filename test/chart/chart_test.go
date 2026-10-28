@@ -957,7 +957,7 @@ func TestCiliumNetworkPolicy(t *testing.T) {
 		t.Errorf("agent scrape rule must cover egress agents and ingress agents in every namespace: %#v", agents)
 	}
 	// Default cilium render must not add a toCIDR egress — spoke clusters opt
-	// in explicitly via headscaleCIDRs; stability for hub clusters (hydra) is
+	// in explicitly via headscaleCIDRs; stability for existing hub clusters is
 	// what makes the operator upgrade safe.
 	for i, e := range cnp.Spec.Egress {
 		if len(e.ToCIDR) != 0 {
@@ -977,7 +977,7 @@ func TestCiliumNetworkPolicyRemoteHeadscale(t *testing.T) {
   headscalePorts: [443]
   cilium:
     headscalePeers: []
-  headscaleCIDRs: [91.98.5.30/32]
+  headscaleCIDRs: [203.0.113.30/32]
   dnsPeers:
     - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
       podSelector: {matchLabels: {k8s-app: kube-dns}}
@@ -996,8 +996,8 @@ func TestCiliumNetworkPolicyRemoteHeadscale(t *testing.T) {
 			}
 		}
 	}
-	if cidrEgress != 1 || !reflect.DeepEqual(cidrs, []string{"91.98.5.30/32"}) {
-		t.Errorf("expected exactly one toCIDR egress with [91.98.5.30/32], got %d rules %v", cidrEgress, cidrs)
+	if cidrEgress != 1 || !reflect.DeepEqual(cidrs, []string{"203.0.113.30/32"}) {
+		t.Errorf("expected exactly one toCIDR egress with [203.0.113.30/32], got %d rules %v", cidrEgress, cidrs)
 	}
 	if labelHeadscale != 0 {
 		t.Error("empty cilium.headscalePeers must not render an in-cluster Headscale toEndpoints rule")

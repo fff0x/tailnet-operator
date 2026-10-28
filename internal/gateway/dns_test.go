@@ -182,8 +182,8 @@ func TestRenderDNSRejectsUnsafeInput(t *testing.T) {
 	}
 }
 
-// The renderer output for a Gateway without extra zones is frozen: hydra and
-// every other pre-v0.15 gateway must keep its content hash (CAS annotation)
+// The renderer output for a Gateway without extra zones is frozen: every
+// pre-v0.15 gateway must keep its content hash (CAS annotation)
 // and ConfigMap keys byte for byte, or the next reconcile would bump serials
 // and rewrite running DNS for a no-op upgrade.
 func TestRenderDNSGoldenWithoutExtraZones(t *testing.T) {
