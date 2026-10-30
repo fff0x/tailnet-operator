@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-10-30
+
 ### Fixed
 
 - The `TailnetGateway` PodDisruptionBudget now sets `maxUnavailable: 1` instead of
