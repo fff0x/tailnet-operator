@@ -167,7 +167,9 @@ func RenderFresh(in FreshInputs) (FreshPlan, error) {
 	account := &corev1.ServiceAccount{ObjectMeta: metadata(g.Name), AutomountServiceAccountToken: ptr.To(false)}
 	role := &rbacv1.Role{ObjectMeta: metadata(g.Name), Rules: []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"secrets"}, ResourceNames: []string{state}, Verbs: []string{"get", "update", "patch"}}}}
 	binding := &rbacv1.RoleBinding{ObjectMeta: metadata(g.Name), RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: g.Name}, Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: g.Name, Namespace: in.Namespace}}}
-	pdb := &policyv1.PodDisruptionBudget{ObjectMeta: metadata(g.Name), Spec: policyv1.PodDisruptionBudgetSpec{MinAvailable: ptr.To(intstr.FromInt32(1)), Selector: &metav1.LabelSelector{MatchLabels: selector()}}}
+	// maxUnavailable, not minAvailable: with one replica the latter forbids every voluntary
+	// eviction and stalls node drains. The singleton restarts elsewhere with a brief interruption.
+	pdb := &policyv1.PodDisruptionBudget{ObjectMeta: metadata(g.Name), Spec: policyv1.PodDisruptionBudgetSpec{MaxUnavailable: ptr.To(intstr.FromInt32(1)), Selector: &metav1.LabelSelector{MatchLabels: selector()}}}
 	pod := freshPod(g, tn.Spec.Server, routes, configName)
 	sts := &appsv1.StatefulSet{ObjectMeta: metadata(g.Name), Spec: appsv1.StatefulSetSpec{
 		Replicas: ptr.To(int32(1)), ServiceName: headless.Name,

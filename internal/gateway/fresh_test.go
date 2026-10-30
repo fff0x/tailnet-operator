@@ -14,6 +14,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -104,6 +105,10 @@ func TestRenderFresh(t *testing.T) {
 			}
 			if obj.Name == "router-dns" && (obj.Spec.ClusterIP != "10.96.0.53" || len(obj.Spec.ClusterIPs) != 1) {
 				t.Fatal("DNS address changed")
+			}
+		case *policyv1.PodDisruptionBudget:
+			if obj.Spec.MinAvailable != nil || obj.Spec.MaxUnavailable == nil || obj.Spec.MaxUnavailable.IntValue() != 1 || !reflect.DeepEqual(obj.Spec.Selector.MatchLabels, map[string]string{gatewayUIDLabel: "fixture-uid"}) {
+				t.Fatal("PDB must allow one voluntary eviction of the singleton (node drains)")
 			}
 		case *appsv1.StatefulSet:
 			if *obj.Spec.Replicas != 1 || obj.Spec.UpdateStrategy.Type != appsv1.OnDeleteStatefulSetStrategyType || obj.Spec.ServiceName != "router-headless" {

@@ -272,6 +272,7 @@ kubectl get tailnetsite prod-1-lan                                              
 | `dns.staticRecords`, `dns.wildcardAddress`, the hosts file | re-rendered live into the zone (and the extra-zone `hosts` key); no Pod change |
 | `service.poolLabels` | set/removed on the Service in place |
 | `deletionPolicy`, `suspend` | lifecycle only; a suspend/resume cycle keeps the identity |
+| operator upgrade | existing children (PDB, RBAC, Services) stay as recorded in the receipt; to pick up a changed child template, recreate the gateway with `deletionPolicy: Delete` |
 | `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `service.loadBalancerIP`, `service.loadBalancerClass`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP`, `dns.extraZones` | identity — admission rejects most, the rest report `IdentityChanged`; recreate with `deletionPolicy: Delete` |
 
 ## Replace a hand-built gateway

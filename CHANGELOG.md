@@ -4,6 +4,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed
+
+- The `TailnetGateway` PodDisruptionBudget now sets `maxUnavailable: 1` instead of
+  `minAvailable: 1`. With a single replica the old budget forbade every voluntary eviction and
+  stalled node drains until the PDB was patched by hand. Gateways created by earlier releases keep
+  their recorded PDB until recreated with `deletionPolicy: Delete`.
+
 ### Changed
 
 - `Tailnet.status.spokes[].fetchedAt` is described as the time the fetched hash last changed, not a

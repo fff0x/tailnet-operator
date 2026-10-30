@@ -160,7 +160,10 @@ It returns nine resources:
 UID-bound selectors isolate gateways. Pool labels affect only the LB Service and
 cannot overwrite identity labels. No resource receives a gateway GC owner reference.
 Retention is the default; the explicit teardown is described under [Deletion](#deletion).
-The PDB blocks voluntary eviction of the singleton and can therefore block drains.
+The PDB sets `maxUnavailable: 1`: a node drain may evict the singleton, which restarts on
+another node after a brief tailnet interruption. A gateway created by an older release keeps
+the PDB recorded in its receipt (`minAvailable: 1`, which blocks drains) until it is recreated
+with `deletionPolicy: Delete`.
 
 State and auth Secrets are deliberately absent from the returned objects. Before
 workload creation, the writer checks these prerequisites:
