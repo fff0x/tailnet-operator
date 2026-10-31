@@ -64,7 +64,7 @@ case $(uname -m) in
     *) reject ;;
 esac
 cm_cache=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/cert-manager/v1.21.2/immutable-ref/linux-$hs_arch
-gateway_cache=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/gateway/v1.102.4-coredns1.14.6/immutable-ref/linux-$hs_arch
+gateway_cache=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/gateway/v1.104.4-coredns1.15.0/immutable-ref/linux-$hs_arch
 headscale=${XDG_CACHE_HOME:-$HOME/.cache}/tailnet-operator-e2e/headscale/0.29.6/headscale-linux-$hs_arch
 [[ -f $headscale && $(sha256sum "$headscale") == "$hs_sha  $headscale" ]] || reject
 [[ $state == /* && $data == /* && $modules == /* && $modules != *:* ]] || reject

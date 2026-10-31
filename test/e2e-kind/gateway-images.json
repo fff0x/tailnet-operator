@@ -2,20 +2,20 @@
   "images": {
     "tailscale": {
       "repository": "ghcr.io/tailscale/tailscale",
-      "version": "v1.102.4",
-      "indexDigest": "sha256:2667499ed87ae29218f292556ba062918402dd5e92e93637af14867e4df12dd3",
+      "version": "v1.104.4",
+      "indexDigest": "sha256:ed6480b33c6eb67c9cbd203ed42b9fb57e361986725b6856def71b7a3d9e276c",
       "platforms": {
-        "amd64": "sha256:9482efa70e5e37180a74ad17e01fb0a43ec4b629cdde1a28a9fb79597bca63e2",
-        "arm64": "sha256:5789311e4ab3bcf6cfb88020def1ce6c8cfebacfd6a369f06b103a8feee0eedc"
+        "amd64": "sha256:519bf6f2c386992052216ea7e9391d5ace3a859d458f4f61bc8db8c58377eb7d",
+        "arm64": "sha256:e041620d7a45e327ca74ecb7c84842b69e962c507c26ef64093e1174e401646d"
       }
     },
     "coredns": {
       "repository": "docker.io/coredns/coredns",
-      "version": "1.14.6",
-      "indexDigest": "sha256:900f9c109f7a33545d3c811516e8376df9019147b750f5ce3e254468769176ea",
+      "version": "1.15.0",
+      "indexDigest": "sha256:0a9d8c8ddf34347eb59aad9a8784f0710de88d6d112726d11d271f9bc6daca26",
       "platforms": {
-        "amd64": "sha256:1ba6f47265602e2e50a9c4669e3a955e4298a0d30dc82f39293d4bf1a851e0ff",
-        "arm64": "sha256:d5cc132a34e034ecfd2d4c73c5bf341e5d8af9a0ba46bd7619d9448beb27e7a2"
+        "amd64": "sha256:3429e3bbffb1e839470c4a3541d4d78aca84a1394c75a539d0200c58c63196ac",
+        "arm64": "sha256:3fcf76a17b938c794a5fa6f2677b51bb194294370c5191164ea67645c4796f72"
       }
     }
   }

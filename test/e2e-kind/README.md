@@ -39,7 +39,7 @@ nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- bash hack
   `python3 -B -I cert-manager-assets.py <cache-dir> <arch>` validates the cache offline.
 
 - For `--gateway-fresh-only`, also provide `tailscale.tar` and `coredns.tar` under
-  `~/.cache/tailnet-operator-e2e/gateway/v1.102.4-coredns1.14.6/immutable-ref/linux-<arch>/`.
+  `~/.cache/tailnet-operator-e2e/gateway/v1.104.4-coredns1.15.0/immutable-ref/linux-<arch>/`.
   Use the platform manifest references from `gateway-images.json`, not its index digests:
 
   ```sh
@@ -179,7 +179,7 @@ and long-lived WebSockets across rotation/retirement.
 Bounded negative observations are not exhaustive ACL coverage.
 
 **`TestGatewayFreshPod`** is a separate opt-in selection with real kernel Tailscale
-1.102.4, CoreDNS 1.14.6 and the same gated HTTPS Headscale 0.29.6 fixture, without
+1.104.4, CoreDNS 1.15.0 and the same gated HTTPS Headscale 0.29.6 fixture, without
 an HTTP peer or agent admission webhook. The fixture drives the production reconciler
 in-process against the real API and Headscale REST endpoint. The controller creates
 state, mints the non-ephemeral key, persists provenance and creates the rendered

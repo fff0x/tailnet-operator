@@ -30,7 +30,7 @@ LOCK_PATH = Path(__file__).with_name("gateway-images.json")
 ROLES = ("tailscale", "coredns")
 REPOSITORIES = {"tailscale": "ghcr.io/tailscale/tailscale",
                 "coredns": "docker.io/coredns/coredns"}
-VERSIONS = {"tailscale": "v1.102.4", "coredns": "1.14.6"}
+VERSIONS = {"tailscale": "v1.104.4", "coredns": "1.15.0"}
 
 
 def _validate_lock(lock):

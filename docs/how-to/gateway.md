@@ -79,7 +79,7 @@ spec:
   hostname: prod-1-gw                    # Headscale node name; immutable
   tags: [tag:fabric]                     # default; must be in policy.routeApprovers for auto-approval
   stateSecretRef: { name: prod-1-gw-state }   # created empty by the operator, holds the node identity
-  image: ghcr.io/tailscale/tailscale:v1.102.4 # kernel tailscale; a version tag or digest, never :latest
+  image: ghcr.io/tailscale/tailscale:v1.104.4 # kernel tailscale; a version tag or digest, never :latest
   routes:
     lan: [192.0.2.0/24]                  # the site LAN; 1–128 IPv4 prefixes
     advertiseEgressTargets: true         # default: every literal TailnetEgress target becomes a /32 route
@@ -92,7 +92,7 @@ spec:
     zone: prod-1.tailnet.example.internal    # = the split zone of Tailnet.spec.dns.ingressNameTemplate
     serviceName: prod-1-gw-dns           # in-cluster DNS Service for the CoreDNS forward
     serviceClusterIP: 10.96.0.54         # stable, must be free in the Service CIDR; immutable
-    image: docker.io/coredns/coredns:1.14.7
+    image: docker.io/coredns/coredns:1.15.0
     staticRecords:
       - name: api                        # api.prod-1.tailnet.example.internal
         target: kube-api-platform.prod-1.tailnet.example.internal   # CNAME to a TailnetIngress name (agents change IP; never pin)
