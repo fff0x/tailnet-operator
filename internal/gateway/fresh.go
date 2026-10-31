@@ -178,5 +178,10 @@ func RenderFresh(in FreshInputs) (FreshPlan, error) {
 		UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType},
 		Template:       corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: maps.Clone(metadata(g.Name).Labels)}, Spec: pod},
 	}}
+	// Stamp the template hash at creation so the first reconcile is a no-op:
+	// without it UpdateWorkloadRevision rewrites the template once, and a
+	// create-time admission mutation would leave the Pod one revision behind
+	// (WorkloadCurrent=False/PodTemplateStale) with nothing to fix it.
+	sts.Annotations = map[string]string{GatewayTemplateHashAnnotation: podTemplateHash(sts.Spec.Template)}
 	return FreshPlan{Routes: routes, Objects: []client.Object{account, role, binding, config, headless, clusterDNS, lb, pdb, sts}}, nil
 }

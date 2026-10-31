@@ -114,6 +114,9 @@ func TestRenderFresh(t *testing.T) {
 			if *obj.Spec.Replicas != 1 || obj.Spec.UpdateStrategy.Type != appsv1.OnDeleteStatefulSetStrategyType || obj.Spec.ServiceName != "router-headless" {
 				t.Fatal("unsafe singleton rollout")
 			}
+			if obj.Annotations[GatewayTemplateHashAnnotation] != podTemplateHash(obj.Spec.Template) {
+				t.Fatal("template hash must be stamped at creation")
+			}
 			p := obj.Spec.Template.Spec
 			if p.OS == nil || p.OS.Name != corev1.Linux || p.NodeSelector["kubernetes.io/os"] != "linux" || p.HostNetwork || p.HostPID || p.HostIPC || p.AutomountServiceAccountToken == nil || *p.AutomountServiceAccountToken || len(p.SecurityContext.Sysctls) != 0 || len(p.Containers) != 2 || len(p.InitContainers) != 1 {
 				t.Fatal("unsafe pod boundary")

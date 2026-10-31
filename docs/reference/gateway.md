@@ -561,12 +561,12 @@ base label can never become removable. A pool key that equals one of the operato
 label keys is refused at render time (`Ready=False/FreshBlocked`). Service and template
 writes are independent: a blocked Service does not stall the routes.
 
-**Images.** Container images (and `TS_ROUTES`) are the only mutable part of the gateway Pod
-template; resources, sysctls, tolerations and every other template field are pinned at creation
-and a change there blocks with `Ready=False/FreshBlocked` until reverted (or the gateway is
-recreated with `deletionPolicy: Delete`). `UpdateWorkloadRevision` rewrites only the container `image` fields and the
-`TS_ROUTES` value of the StatefulSet template, after re-verifying the receipt UID and the image-less digest, with
-the observed `resourceVersion` as CAS. The StatefulSet uses `OnDelete`: the operator
+**Images.** The whole gateway Pod template follows the Gateway spec: `UpdateWorkloadRevision`
+re-renders it (images, `TS_ROUTES`, env, ports) and, when the rendered template differs from the
+`tsunaro.io/template-sha256` annotation stamped on the StatefulSet at creation, rewrites the
+template after re-verifying the receipt UID and the template-less digest, with the observed
+`resourceVersion` as CAS. Admission mutations of the template (sysctls, pull policy, sidecars)
+are therefore tolerated and survive each rewrite. The StatefulSet uses `OnDelete`: the operator
 never restarts the Pod. The `WorkloadCurrent` condition reports the result:
 
 - `True / PodCurrent` — the running Pod already uses the wanted images.
@@ -576,9 +576,8 @@ never restarts the Pod. The `WorkloadCurrent` condition reports the result:
 - `False / WorkloadUpdateBlocked` — StatefulSet or receipt is not verified; nothing is written.
 
 The condition is absent while suspended, terminating or before a completion receipt.
-The StatefulSet digest in the receipt covers everything except container images and `TS_ROUTES`:
-selector, `serviceName`, `updateStrategy`, `replicas` and every other template field
-(command, env, volumes, security context, labels) still trip `FreshBlocked` on drift.
+The StatefulSet digest in the receipt covers everything except `spec.template`: selector,
+`serviceName`, `updateStrategy` and `replicas` still trip `FreshBlocked` on drift.
 
 **LoadBalancer.** `ServiceReady` reports the platform's address allocation, which `Ready` does not
 wait for: `True / LoadBalancerAssigned` lists the assigned addresses, `False / LBPending` means the

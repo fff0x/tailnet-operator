@@ -4,6 +4,14 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed
+
+- The `TailnetGateway` StatefulSet carries its `tsunaro.io/template-sha256` annotation from
+  creation, so the first reconcile no longer rewrites the Pod template. Before, a create-time
+  admission mutation of the template (sysctls, pull policy, sidecars) left the running Pod one
+  revision behind with `WorkloadCurrent=False/PodTemplateStale` and nothing to clear it. Gateways
+  created by earlier releases already carry the annotation after their first rewrite.
+
 ## [0.22.2] - 2026-10-30
 
 ### Fixed

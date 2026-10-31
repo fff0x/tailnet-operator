@@ -192,9 +192,10 @@ func decodeGatewayCLINodes(b []byte) ([]headscale.Node, bool) {
 }
 
 // This wrapper is test-only: production creates every resource. Only the
-// StatefulSet Create payload receives the same fixture changes as the former
-// manually created Pod. Its admitted payload/UID is returned to the real writer
-// and therefore covered by the production completion fingerprint.
+// StatefulSet payload receives the same fixture changes as the former
+// manually created Pod — on Create and on every template rewrite (Update),
+// like a mutating webhook would. Its admitted payload/UID is returned to the
+// real writer and therefore covered by the production completion fingerprint.
 type gatewayFixtureClient struct {
 	client.Client
 	gatewayName         string
@@ -203,30 +204,46 @@ type gatewayFixtureClient struct {
 }
 
 func (c *gatewayFixtureClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
-	if sts, ok := obj.(*appsv1.StatefulSet); ok {
-		if sts.Name != c.gatewayName || sts.Namespace != namespace || sts.Labels["tsunaro.io/gateway-uid"] != string(c.gatewayUID) {
-			return fmt.Errorf("gateway fixture StatefulSet scope rejected")
-		}
-		p := &corev1.Pod{ObjectMeta: *sts.Spec.Template.ObjectMeta.DeepCopy(), Spec: *sts.Spec.Template.Spec.DeepCopy()}
-		if p.Spec.SecurityContext == nil || len(p.Spec.Containers) != 2 || p.Spec.Containers[0].Name != "tailscale" || len(p.Spec.InitContainers) != 1 {
-			return fmt.Errorf("gateway fixture Pod shape rejected")
-		}
-		p.Spec.SecurityContext.Sysctls = []corev1.Sysctl{{Name: "net.ipv4.ip_forward", Value: "1"}}
-		p.Spec.SecurityContext.FSGroup = ptr.To(int64(65532))
-		p.Spec.TerminationGracePeriodSeconds = ptr.To(int64(1))
-		for i := range p.Spec.Containers {
-			p.Spec.Containers[i].ImagePullPolicy = corev1.PullNever
-		}
-		p.Spec.InitContainers[0].ImagePullPolicy = corev1.PullNever
-		p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: "SSL_CERT_FILE", Value: "/control-ca/ca.pem"}, corev1.EnvVar{Name: "TS_NO_LOGS_NO_SUPPORT", Value: "1"})
-		p.Spec.Containers[0].VolumeMounts = append(p.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: "control-ca", MountPath: "/control-ca", ReadOnly: true})
-		p.Spec.Volumes = append(p.Spec.Volumes, fixtureConfigVolume("control-ca", c.publicCA))
-		if err := kindfixture.AddGatewayNetworkGate(p, c.gateImage); err != nil {
-			return fmt.Errorf("gateway fixture startup wiring rejected")
-		}
-		sts.Spec.Template.Spec = p.Spec
+	if err := c.wire(obj); err != nil {
+		return err
 	}
 	return c.Client.Create(ctx, obj, opts...)
+}
+
+func (c *gatewayFixtureClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	if err := c.wire(obj); err != nil {
+		return err
+	}
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+func (c *gatewayFixtureClient) wire(obj client.Object) error {
+	sts, ok := obj.(*appsv1.StatefulSet)
+	if !ok {
+		return nil
+	}
+	if sts.Name != c.gatewayName || sts.Namespace != namespace || sts.Labels["tsunaro.io/gateway-uid"] != string(c.gatewayUID) {
+		return fmt.Errorf("gateway fixture StatefulSet scope rejected")
+	}
+	p := &corev1.Pod{ObjectMeta: *sts.Spec.Template.ObjectMeta.DeepCopy(), Spec: *sts.Spec.Template.Spec.DeepCopy()}
+	if p.Spec.SecurityContext == nil || len(p.Spec.Containers) != 2 || p.Spec.Containers[0].Name != "tailscale" || len(p.Spec.InitContainers) != 1 {
+		return fmt.Errorf("gateway fixture Pod shape rejected")
+	}
+	p.Spec.SecurityContext.Sysctls = []corev1.Sysctl{{Name: "net.ipv4.ip_forward", Value: "1"}}
+	p.Spec.SecurityContext.FSGroup = ptr.To(int64(65532))
+	p.Spec.TerminationGracePeriodSeconds = ptr.To(int64(1))
+	for i := range p.Spec.Containers {
+		p.Spec.Containers[i].ImagePullPolicy = corev1.PullNever
+	}
+	p.Spec.InitContainers[0].ImagePullPolicy = corev1.PullNever
+	p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: "SSL_CERT_FILE", Value: "/control-ca/ca.pem"}, corev1.EnvVar{Name: "TS_NO_LOGS_NO_SUPPORT", Value: "1"})
+	p.Spec.Containers[0].VolumeMounts = append(p.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: "control-ca", MountPath: "/control-ca", ReadOnly: true})
+	p.Spec.Volumes = append(p.Spec.Volumes, fixtureConfigVolume("control-ca", c.publicCA))
+	if err := kindfixture.AddGatewayNetworkGate(p, c.gateImage); err != nil {
+		return fmt.Errorf("gateway fixture startup wiring rejected")
+	}
+	sts.Spec.Template.Spec = p.Spec
+	return nil
 }
 
 // Loopback HTTP is a test-only trust bridge for the unmodified production REST
