@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.22.3] - 2026-10-31
+
 ### Fixed
 
 - The `TailnetGateway` StatefulSet carries its `tsunaro.io/template-sha256` annotation from
@@ -11,6 +13,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   admission mutation of the template (sysctls, pull policy, sidecars) left the running Pod one
   revision behind with `WorkloadCurrent=False/PodTemplateStale` and nothing to clear it. Gateways
   created by earlier releases already carry the annotation after their first rewrite.
+
+### Changed
+
+- The Kind gateway fixture, the `TailnetGateway` example and the gateway how-to pin Tailscale
+  1.104.4 and CoreDNS 1.15.0 (previously 1.102.4 and 1.14.x); the fixture passes with both images.
 
 ## [0.22.2] - 2026-10-30
 
