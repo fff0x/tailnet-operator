@@ -67,7 +67,7 @@ spec:
 ```sh
 kubectl describe tailnet corp | grep -A1 Policy
 #   PolicyRendered  True   Rendered   3 tags, 3 grants, 12 routes exported
-#   PolicyApplied   False  Export     mode Export: waiting for the hub to merge ConfigMap tailnet-system/corp-policy-fragment …
+#   PolicyApplied   False  HubPending hub policy lacks 18 of 18 exported entries (tag:egress-…, …); fragment ConfigMap tailnet-system/corp-policy-fragment awaits merge
 ```
 
 The hub reads that ConfigMap itself, through a kubeconfig that may read nothing else. On the
@@ -250,7 +250,7 @@ resolver; never to the other cluster's.
 ```sh
 # spoke
 kubectl get tailnet corp -o jsonpath='{range .status.conditions[*]}{.type}={.status}/{.reason}{"\n"}{end}'
-#   PolicyRendered=True/Rendered, PolicyApplied=False/Export, TagKnown on each CR True/Known once the hub applied
+#   PolicyRendered=True/Rendered, PolicyApplied=True/HubMerged once the hub applied (False/HubPending before; False/Export while the control server is unreadable), TagKnown on each CR True/Known
 # hub
 kubectl get tailnet corp -o jsonpath='{.status.policy}{"\n"}'          # renderedHash == appliedHash
 kubectl -n tailnet-system get cm headscale-policy-rendered -o jsonpath='{.data.policy}' | jq '.tagOwners | keys'

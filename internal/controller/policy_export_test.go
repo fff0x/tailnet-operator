@@ -82,6 +82,84 @@ func TestPolicyExportSpoke(t *testing.T) {
 	}
 }
 
+// TestPolicyExportSpokeSeesHub: with a working API key the spoke compares its fragment with the
+// live policy — HubPending while entries are missing, HubMerged (with appliedHash) once the hub
+// carries them all, and plain Export when the server cannot be read.
+func TestPolicyExportSpokeSeesHub(t *testing.T) {
+	s := exportScheme(t)
+	live := hubBase
+	var serverUp bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !serverUp {
+			http.Error(w, "down", http.StatusBadGateway)
+			return
+		}
+		if r.URL.Path != "/api/v1/policy" || r.Method != http.MethodGet {
+			t.Errorf("spoke must only read the policy, got %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"policy": live})
+	}))
+	defer srv.Close()
+	tn := &tnv1.Tailnet{ObjectMeta: metav1.ObjectMeta{Name: "corp", UID: "spoke-uid", Generation: 2},
+		Spec: tnv1.TailnetSpec{Server: srv.URL, TagTemplate: "tag:egress-{name}", IngressTagTemplate: "tag:ingress-{name}",
+			Policy: tnv1.PolicySpec{Mode: "Export", TagOwners: []string{"group:admins"}, RouteApprovers: []string{"tag:fabric"}}}}
+	eg := &tnv1.TailnetEgress{ObjectMeta: metav1.ObjectMeta{Name: "spoke-db", Namespace: "operator"},
+		Spec: tnv1.TailnetEgressSpec{TailnetRef: tnv1.TailnetRef{Name: "corp"},
+			Targets: []tnv1.Target{{Name: "db", Address: "10.9.0.5", Port: 5432}}}}
+	key := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: workingSecretName("corp"), Namespace: "operator"},
+		Data: map[string][]byte{apiKeyData: []byte("hskey-api-test")}}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(tn, eg, key).WithStatusSubresource(tn).Build()
+	r := TailnetPolicyReconciler{Client: c, Scheme: s, OperatorNamespace: "operator"}
+	reconcile := func() *tnv1.Tailnet {
+		t.Helper()
+		if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "corp"}}); err != nil {
+			t.Fatal(err)
+		}
+		var got tnv1.Tailnet
+		if err := c.Get(context.Background(), types.NamespacedName{Name: "corp"}, &got); err != nil {
+			t.Fatal(err)
+		}
+		return &got
+	}
+
+	got := reconcile()
+	if condReason(got.Status.Conditions, "PolicyApplied") != "Export" || got.Status.Policy.AppliedHash != "" {
+		t.Fatalf("unreadable server must keep the Export verdict: %+v", got.Status.Conditions)
+	}
+
+	serverUp = true
+	got = reconcile()
+	cond := meta.FindStatusCondition(got.Status.Conditions, "PolicyApplied")
+	if cond.Reason != "HubPending" || cond.Status != metav1.ConditionFalse || !strings.Contains(cond.Message, "tag:egress-spoke-db") || got.Status.Policy.AppliedHash != "" {
+		t.Fatalf("unmerged fragment must report HubPending with the missing entries: %+v", cond)
+	}
+
+	// The hub merged exactly what the spoke exported.
+	var cm corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "operator", Name: "corp-policy-fragment"}, &cm); err != nil {
+		t.Fatal(err)
+	}
+	var base, frag map[string]any
+	if err := json.Unmarshal([]byte(hubBase), &base); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(cm.Data[policyKey]), &frag); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range frag["tagOwners"].(map[string]any) {
+		base["tagOwners"].(map[string]any)[k] = v
+	}
+	base["autoApprovers"] = frag["autoApprovers"]
+	base["grants"] = append(base["grants"].([]any), frag["grants"].([]any)...)
+	merged, _ := json.Marshal(base)
+	live = string(merged)
+	got = reconcile()
+	cond = meta.FindStatusCondition(got.Status.Conditions, "PolicyApplied")
+	if cond.Reason != "HubMerged" || cond.Status != metav1.ConditionTrue || got.Status.Policy.AppliedHash != got.Status.Policy.RenderedHash || got.Status.Policy.AppliedAt == nil {
+		t.Fatalf("merged fragment must report HubMerged with appliedHash: %+v %+v", cond, got.Status.Policy)
+	}
+}
+
 // TestPolicyHubFragments: a hub merges a listed fragment, and fails closed when it is absent or
 // malformed — in both failure cases without writing the server.
 func TestPolicyHubFragments(t *testing.T) {

@@ -408,16 +408,60 @@ func (r *TailnetPolicyReconciler) export(ctx context.Context, tn *tnv1.Tailnet) 
 	if len(skipped) > 0 {
 		msg += "; skipped: " + strings.Join(skipped, ", ")
 	}
+	// The spoke never writes, but it can read: the same API key the agents' TagKnown check uses
+	// tells whether the hub has merged this fragment yet, so the status says so instead of a
+	// standing "waiting". Unreadable stays the plain Export verdict — the fragment is still valid.
+	applied, appliedReason, appliedMsg := metav1.ConditionFalse, "Export",
+		fmt.Sprintf("mode Export: waiting for the hub to merge ConfigMap %s/%s (policy.spokes pull or a committed fragmentConfigMaps entry)", r.OperatorNamespace, outName)
+	if live, err := r.liveSpokePolicy(ctx, tn); err != nil {
+		appliedMsg += "; live policy not readable: " + err.Error()
+	} else if missing, err := policy.MissingFromLive([]byte(live), rendered); err != nil {
+		appliedMsg += "; " + err.Error()
+	} else if len(missing) > 0 {
+		appliedReason = "HubPending"
+		appliedMsg = fmt.Sprintf("hub policy lacks %d of %d exported entries (%s); fragment ConfigMap %s/%s awaits merge",
+			len(missing), sum.Tags+sum.Grants+sum.Routes, strings.Join(truncateList(missing, 5), ", "), r.OperatorNamespace, outName)
+	} else {
+		applied, appliedReason = metav1.ConditionTrue, "HubMerged"
+		appliedMsg = fmt.Sprintf("hub policy carries all %d exported entries", sum.Tags+sum.Grants+sum.Routes)
+	}
+	now := metav1.Now()
 	return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 		if t.Status.Policy == nil {
 			t.Status.Policy = &tnv1.PolicyStatus{}
 		}
 		t.Status.Policy.RenderedHash = hash
 		t.Status.Policy.Generated = tnv1.PolicyGenerated{Tags: sum.Tags, Grants: sum.Grants, Routes: sum.Routes}
+		if applied == metav1.ConditionTrue {
+			if t.Status.Policy.AppliedHash != hash {
+				t.Status.Policy.AppliedHash, t.Status.Policy.AppliedAt = hash, &now
+			}
+		} else {
+			t.Status.Policy.AppliedHash, t.Status.Policy.AppliedAt = "", nil
+		}
 		setCond(&t.Status.Conditions, t.Generation, "PolicyRendered", metav1.ConditionTrue, "Rendered", msg)
-		setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionFalse, "Export",
-			fmt.Sprintf("mode Export: waiting for the hub to merge ConfigMap %s/%s (policy.spokes pull or a committed fragmentConfigMaps entry)", r.OperatorNamespace, outName))
+		setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", applied, appliedReason, appliedMsg)
 	})
+}
+
+// liveSpokePolicy reads the control server's policy with the Tailnet's working API key.
+func (r *TailnetPolicyReconciler) liveSpokePolicy(ctx context.Context, tn *tnv1.Tailnet) (string, error) {
+	apiKey, err := readWorkingKey(ctx, r.Client, r.OperatorNamespace, tn.Name)
+	if err != nil {
+		return "", fmt.Errorf("working api key: %w", err)
+	}
+	apiURL := tn.Spec.APIURL
+	if apiURL == "" {
+		apiURL = tn.Spec.Server
+	}
+	return headscale.New(apiURL, apiKey, r.Metrics.Headscale(tn.Name)).GetPolicy(ctx)
+}
+
+func truncateList(ss []string, n int) []string {
+	if len(ss) <= n {
+		return ss
+	}
+	return append(append([]string(nil), ss[:n]...), "…")
 }
 
 // publishRender writes the rendered policy or fragment to outName under the owner guard. It reports

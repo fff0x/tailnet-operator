@@ -89,7 +89,8 @@ type PolicySpec struct {
 	RenderedConfigMap string `json:"renderedConfigMap,omitempty"`
 	// DryRun renders into renderedConfigMap only; Apply also writes the control server when the
 	// live policy differs; Export renders only this Tailnet's generated entries (no base, no write)
-	// into renderedConfigMap so a hub operator can merge them via fragmentConfigMaps. Start with
+	// into renderedConfigMap so a hub operator can merge them via fragmentConfigMaps; PolicyApplied
+	// reports HubMerged/HubPending by comparing the fragment with the live policy. Start with
 	// DryRun, compare, then switch.
 	// +kubebuilder:validation:Enum=DryRun;Apply;Export
 	// +kubebuilder:default=DryRun
