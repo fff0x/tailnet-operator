@@ -4,6 +4,29 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Changed
+
+- **`TailnetIngress` nodes keep their identity across Pod restarts.** The agent stores its `tsnet`
+  state in a Secret of the ingress namespace (`ingress-<name>-state-<hash>`), written through a
+  ServiceAccount, Role and RoleBinding named `ingress-<name>` that the operator renders per CR; the
+  pre-auth key is reusable and non-ephemeral. A restarted Pod is the same Headscale node with the
+  same tailnet IP. A changed tag, server or hostname is a new identity: new Secret, fresh
+  registration, the previous node deleted by the operator; deleting the CR deletes its node. On
+  upgrade every ingress rolls once; operator and agent images must move together (an older agent
+  ignores `TS_STATE_SECRET`). The `tailnet-operator-workloads` ClusterRole gains `get`/`create`/`patch` on
+  `serviceaccounts`, `roles` and `rolebindings`. Egress agents stay ephemeral.
+- A spoke (`policy.mode: Export`) reads the live policy with its working API key and reports
+  `PolicyApplied=True/HubMerged` (with `status.policy.appliedHash`) once the hub carries every
+  exported tag, route approver and grant, `False/HubPending` listing what is still missing, and
+  the former `False/Export` only while the control server is not readable.
+- *Upgrade and roll back* documents pinning `agentImage` separately so an operator bump does not
+  roll agents; *Compatibility* names the releases that require new agent images.
+
+### Security
+
+- `github.com/klauspost/compress` 1.20.2 (GO-2026-6865, reachable through `tsnet` and the metrics
+  registry).
+
 ## [0.22.3] - 2026-10-31
 
 ### Fixed
