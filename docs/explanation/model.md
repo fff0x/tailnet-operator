@@ -13,7 +13,7 @@ Diagrams of the resulting shape, one per scenario, and the full list of objects 
   endpoint, a read-only bootstrap API key from which the operator mints and **rotates its own working
   key**. Optionally owns the **DNS hosts file** and the **policy** for everything below.
 - **`TailnetEgress`** (operator namespace) — one egress identity: a tag, a reusable ephemeral
-  pre-auth key, a userspace agent pod and one Service per target. Consumers in `consumerNamespaces`
+  pre-auth key (the ingress key is reusable and non-ephemeral), a userspace agent pod and one Service per target. Consumers in `consumerNamespaces`
   dial `<target>.<operator-ns>.svc:<port>`; **aliases** let them dial the real hostname when the far
   end routes by SNI/Host.
 - **`TailnetIngress`** (tenant namespace) — the mirror: expose in-cluster Services *on* the tailnet
@@ -43,9 +43,9 @@ restart to add or remove a target:
 
 - **Tailnet** — mints the working API key from the bootstrap key, rotates it at half-life (new key
   verified before the old one is expired), reports reachability.
-- **Egress / Ingress** — per CR: tag pre-check against the live policy, a reusable ephemeral pre-auth
-  key (rotated at half-life and on server/tag change; a restarted pod re-registers on its own as a
-  new node with a new tailnet IP — the DNS name is the stable handle, the operator prunes the old
+- **Egress / Ingress** — per CR: tag pre-check against the live policy, a reusable pre-auth key
+  (rotated at half-life and on server/tag change; a restarted egress pod re-registers on its own as
+  a new node with a new tailnet IP — the DNS name is the stable handle, the operator prunes the old
   node — and a deleted CR's node ages out),
   one agent Deployment, one Service per target, a NetworkPolicy scoped to `consumerNamespaces`, and a
   status that classifies every target route (`NotAdvertised` / `NotApproved` / `NoGrant`) from the
@@ -70,7 +70,9 @@ restart to add or remove a target:
   on the tailnet and `Dial`s an in-cluster backend; an `http` expose terminates TLS on that listener
   (SNI and Host bound to the ingress DNS name, certificate reloaded from the projected Secret) and
   proxies HTTP/1.1 and HTTP/2 to the backend. Same binary, `io.Copy` with half-close, no SOCKS5, no
-  second container; state is in-memory and ephemeral by design.
+  second container. Egress state is in-memory and ephemeral by design; an ingress keeps its node key
+  in a state Secret of its namespace (written through its own ServiceAccount), so its node ID and
+  tailnet IP survive Pod restarts.
 
 A single image carries both binaries; the operator runs `/tailnet-operator`, each agent pod runs
 `/tailnet-agent`.

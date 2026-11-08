@@ -201,9 +201,11 @@ func setupL4Ingress(t *testing.T, x *httpPeerFixture, hostname string) *l4Ingres
 	if out.target == "" {
 		t.Fatal("shared L4 tailnet IPv4 missing")
 	}
-	if f.kube.Get(t.Context(), client.ObjectKeyFromObject(&out.agent), &out.agent) != nil || len(out.agent.Status.ContainerStatuses) != 1 || !out.agent.Status.ContainerStatuses[0].Ready {
-		t.Fatal("shared L4 agent identity unavailable")
-	}
+	// The CR turns Ready on the node being online and the backends probed; the kubelet's readiness
+	// probe (20s period) may still be behind, so the released pod is awaited, not asserted.
+	eventually(t, "shared L4 agent container Ready", func() bool {
+		return f.kube.Get(t.Context(), client.ObjectKeyFromObject(&out.agent), &out.agent) == nil && len(out.agent.Status.ContainerStatuses) == 1 && out.agent.Status.ContainerStatuses[0].Ready
+	})
 	return out
 }
 
@@ -248,8 +250,9 @@ func conditionStates(conditions []metav1.Condition) map[string]conditionState {
 }
 
 // TestRestartNoFlap is the P0.2 proof: restarting the operator must not flip a healthy CR's
-// conditions. The subject is deliberately the operator, not the agent — an agent restart loses its
-// registration legitimately, and the fixture holds every replacement pod in the startup gate.
+// conditions. The subject is deliberately the operator, not the agent — an agent restart is a real
+// interruption (TestIngressIdentityPersists covers what it keeps), and the fixture holds every
+// replacement pod in the startup gate.
 func TestRestartNoFlap(t *testing.T) {
 	x := newPeerFixture(t, nil, "restart-no-flap")
 	f := x.f

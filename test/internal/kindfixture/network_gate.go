@@ -32,7 +32,7 @@ func AddNetworkGate(pod *corev1.Pod, image string) error {
 
 func networkGateResources(pod *corev1.Pod, image string) (corev1.Volume, corev1.Container, error) {
 	if !ValidNetworkGateImage(image) || pod == nil || len(pod.Spec.Containers) == 0 || len(pod.Spec.InitContainers) != 0 || len(pod.Spec.EphemeralContainers) != 0 || pod.Spec.HostNetwork || pod.Spec.HostPID || pod.Spec.HostIPC ||
-		pod.Spec.ShareProcessNamespace != nil && *pod.Spec.ShareProcessNamespace || pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
+		pod.Spec.ShareProcessNamespace != nil && *pod.Spec.ShareProcessNamespace || !tokenPosture(pod) {
 		return corev1.Volume{}, corev1.Container{}, ErrAgentCA
 	}
 	for _, v := range pod.Spec.Volumes {

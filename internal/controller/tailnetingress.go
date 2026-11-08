@@ -59,7 +59,11 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !in.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, releaseAuthKey(ctx, r.Client, r.OperatorNamespace, &in, in.Spec.TailnetRef.Name, r.Metrics.Headscale(in.Spec.TailnetRef.Name))
+		// The node is persistent, so Headscale will not age it out: remove it with the CR.
+		return ctrl.Result{}, releaseAuthKey(ctx, r.Client, r.OperatorNamespace, &in, in.Spec.TailnetRef.Name, r.Metrics.Headscale(in.Spec.TailnetRef.Name),
+			func(hs *headscale.Client) {
+				deleteOwnNode(ctx, hs, in.Status.NodeID, in.Status.Tag, in.Status.Hostname, false)
+			})
 	}
 	if err := ensureAuthKeyFinalizer(ctx, r.Client, &in); err != nil {
 		return ctrl.Result{}, err
@@ -207,6 +211,7 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		et := metav1.NewTime(*authExp)
 		in.Status.AuthKeyExpiresAt = &et
 	}
+	r.retireIngressNode(ctx, &in, &tn, hs, tag, hostname)
 
 	tlsState := r.prepareIngressTLS(ctx, &in, &tn, time.Now())
 	if transition {
@@ -279,7 +284,7 @@ func (r *TailnetIngressReconciler) readWorkingKey(ctx context.Context, tnName st
 }
 
 // ensureAuthKey mints (or rotates at half-life, or re-mints when server or tag changed) the reusable
-// ephemeral pre-auth key and writes it to the CR's authkey Secret in the CR's own namespace.
+// pre-auth key and writes it to the CR's authkey Secret in the CR's own namespace.
 func (r *TailnetIngressReconciler) ensureAuthKey(ctx context.Context, in *tnv1.TailnetIngress, tn *tnv1.Tailnet, hs *headscale.Client, tag string) (*time.Time, error) {
 	lifetime := tn.Spec.AuthKeyLifetime.Duration
 	if lifetime == 0 {
@@ -312,9 +317,11 @@ func (r *TailnetIngressReconciler) ensureAuthKey(ctx context.Context, in *tnv1.T
 	}
 
 	exp := now.Add(lifetime)
+	// Not ephemeral: the node keeps its identity in the state Secret across restarts, so Headscale
+	// must not age it out while the pod is down. Reusable, so a lost state Secret re-registers.
 	pak, err := hs.CreatePreAuthKey(ctx, headscale.CreatePreAuthKeyRequest{
 		Reusable:   true,
-		Ephemeral:  true,
+		Ephemeral:  false,
 		Expiration: exp,
 		ACLTags:    []string{tag},
 	})
@@ -367,6 +374,19 @@ func (r *TailnetIngressReconciler) applyChildren(ctx context.Context, in *tnv1.T
 	}
 	dep := ingressAgentDeploymentTLS(in, tn, ns, image, r.AgentImagePullSecrets, r.AgentResources, tlsState.plan)
 	np := ingressNetworkPolicy(in, ns, r.OperatorNamespace, r.AgentScrapePeers)
+	// Identity first: the ServiceAccount and state Secret must exist before the pod is created.
+	stateSecret := ingressStateSecretName(in, tn)
+	for _, obj := range ingressIdentityObjects(in, ns, stateSecret) {
+		if err := controllerutil.SetControllerReference(in, obj, r.Scheme); err != nil {
+			return err
+		}
+		if err := ssaApply(ctx, r.Client, obj); err != nil {
+			return err
+		}
+	}
+	if err := r.dropRetiredStateSecrets(ctx, in, ns, stateSecret); err != nil {
+		return err
+	}
 	for _, obj := range []client.Object{cm, dep, np} {
 		if err := controllerutil.SetControllerReference(in, obj, r.Scheme); err != nil {
 			return err
@@ -386,6 +406,69 @@ func (r *TailnetIngressReconciler) applyChildren(ctx context.Context, in *tnv1.T
 		}
 	}
 	return nil
+}
+
+// dropRetiredStateSecrets deletes this CR's state Secrets other than the current one: a tag or
+// server change gave the identity a new Secret name, and the old node key must not linger.
+func (r *TailnetIngressReconciler) dropRetiredStateSecrets(ctx context.Context, in *tnv1.TailnetIngress, ns, current string) error {
+	var list corev1.SecretList
+	sel := ingressSelectorLabels(in.Name)
+	sel[labelIngressState] = "true"
+	if err := r.List(ctx, &list, client.InNamespace(ns), client.MatchingLabels(sel)); err != nil {
+		return err
+	}
+	for i := range list.Items {
+		if s := &list.Items[i]; s.Name != current && metav1.IsControlledBy(s, in) {
+			if err := r.Delete(ctx, s); client.IgnoreNotFound(err) != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// retireIngressNode handles an identity change: the current state Secret does not exist yet, so
+// the next pod registers fresh, and the recorded node — persistent, not aged out by Headscale —
+// must go unless it still matches tag and hostname (then it is this identity's own node, deleted
+// as an offline duplicate by associateNode once the fresh one is online; this keeps the data path
+// up until the replacement registers, also on the upgrade that introduces the state Secret).
+func (r *TailnetIngressReconciler) retireIngressNode(ctx context.Context, in *tnv1.TailnetIngress, tn *tnv1.Tailnet, hs *headscale.Client, tag, hostname string) {
+	if in.Status.NodeID == "" {
+		return
+	}
+	var s corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Namespace: in.Namespace, Name: ingressStateSecretName(in, tn)}, &s); !apierrors.IsNotFound(err) {
+		return
+	}
+	deleteOwnNode(ctx, hs, in.Status.NodeID, tag, hostname, true)
+}
+
+// deleteOwnNode removes node id when Headscale lists it as this CR's: carrying tag or named
+// hostname (or hostname-N). With keepCurrent a node matching both stays. The guard keeps a stale ID
+// on a different control server from hitting a foreign node. Best effort: an API error leaves the
+// node for the next reconcile or the operator's hands.
+func deleteOwnNode(ctx context.Context, hs *headscale.Client, id, tag, hostname string, keepCurrent bool) {
+	if id == "" {
+		return
+	}
+	nodes, err := hs.ListNodes(ctx)
+	if err != nil {
+		return
+	}
+	for _, n := range nodes {
+		if n.ID != id {
+			continue
+		}
+		tagged := hasTag(n.Tags, tag)
+		named := hostname != "" && (n.GivenName == hostname || strings.HasPrefix(n.GivenName, hostname+"-"))
+		if !tagged && !named || keepCurrent && tagged && named {
+			return
+		}
+		if err := hs.DeleteNode(ctx, id); err != nil {
+			log.FromContext(ctx).Info("retired ingress node not deleted", "node", id, "err", err.Error())
+		}
+		return
+	}
 }
 
 // associateNode records this CR's online node and removes offline duplicates carrying the same tag
@@ -487,7 +570,10 @@ func (r *TailnetIngressReconciler) agentPodIP(ctx context.Context, ns, name stri
 func (r *TailnetIngressReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&tnv1.TailnetIngress{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Owns(&corev1.Secret{}).
+		// The agent writes its node key into the state Secret; those updates are not reconcile input.
+		Owns(&corev1.Secret{}, builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
+			return o.GetLabels()[labelIngressState] != "true"
+		}))).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&networkingv1.NetworkPolicy{}).

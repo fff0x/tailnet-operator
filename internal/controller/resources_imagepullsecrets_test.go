@@ -14,9 +14,10 @@ import (
 
 func TestAgentDeploymentImagePullSecrets(t *testing.T) {
 	for _, builder := range []struct {
-		name      string
-		namespace string
-		build     func(*tnv1.Tailnet, []string) *appsv1.Deployment
+		name           string
+		namespace      string
+		serviceAccount string
+		build          func(*tnv1.Tailnet, []string) *appsv1.Deployment
 	}{
 		{
 			name: "egress", namespace: "tailnet-system",
@@ -26,7 +27,7 @@ func TestAgentDeploymentImagePullSecrets(t *testing.T) {
 			},
 		},
 		{
-			name: "ingress", namespace: "tenant-app",
+			name: "ingress", namespace: "tenant-app", serviceAccount: "ingress-app",
 			build: func(tn *tnv1.Tailnet, defaults []string) *appsv1.Deployment {
 				in := &tnv1.TailnetIngress{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "tenant-app"}}
 				return ingressAgentDeployment(in, tn, in.Namespace, "selected-image", defaults, corev1.ResourceRequirements{})
@@ -57,7 +58,7 @@ func TestAgentDeploymentImagePullSecrets(t *testing.T) {
 				if dep.Namespace != builder.namespace || !reflect.DeepEqual(pod.ImagePullSecrets, tt.want) {
 					t.Fatalf("namespace=%s secrets=%v; want %s %v", dep.Namespace, pod.ImagePullSecrets, builder.namespace, tt.want)
 				}
-				if pod.Containers[0].Image != "selected-image" || pod.ServiceAccountName != "" {
+				if pod.Containers[0].Image != "selected-image" || pod.ServiceAccountName != builder.serviceAccount {
 					t.Fatal("image or ServiceAccount changed")
 				}
 				// A second build and the source lists must not share storage with this pod.

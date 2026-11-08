@@ -129,7 +129,7 @@ sequenceDiagram
   CR->>Op: tags, consumers, allowFrom, site networks
   Op->>Op: render base policy + tagOwners, /32 approvals, grants + merge reviewed spoke fragments
   Op->>HS: validate and set policy (mode Apply)
-  Op->>HS: create reusable ephemeral pre-auth key per agent
+  Op->>HS: create reusable pre-auth key per agent (ephemeral for egress, persistent for ingress)
   Op->>HS: list nodes, classify routes (NotAdvertised / NotApproved / NoGrant)
   Op->>HS: approve routes missed by autoApprovers
 ```
@@ -146,7 +146,7 @@ ConfigMap, which the single Apply writer merges after review — see
 | --- | --- | --- | --- |
 | `Tailnet corp` | Secret `corp-apikey` (working key, expiry in annotations); with `dns`: ConfigMap `spec.dns.hostsConfigMap`; with `policy`: ConfigMap `<base>-rendered` | API keys created and expired on rotation; policy written in `Apply` | Secret and ConfigMaps go; the live policy and keys stay as they are |
 | `TailnetEgress billing-dev` | Deployment `billing-dev`, ConfigMap `billing-dev-targets`, Secret `billing-dev-authkey`, one Service per target (named after the target), NetworkPolicy `billing-dev` | Pre-auth key (reusable, ephemeral, rotated); node `egress-billing-dev`; stale offline duplicates removed | Objects are garbage-collected; the ephemeral node ages out |
-| `TailnetIngress shop` | Deployment `ingress-shop`, ConfigMap `shop-targets`, Secret `shop-authkey`, NetworkPolicy `ingress-shop`; `mode: http` with an issuer: cert-manager Certificate and its TLS Secret | Pre-auth key; node `ingress-shop`; DNS name in the hosts file | As egress |
+| `TailnetIngress shop` | Deployment `ingress-shop`, ConfigMap `shop-targets`, Secret `shop-authkey`, NetworkPolicy `ingress-shop`, ServiceAccount/Role/RoleBinding `ingress-shop`, state Secret `ingress-shop-state-<hash>`; `mode: http` with an issuer: cert-manager Certificate and its TLS Secret | Pre-auth key (reusable, non-ephemeral, rotated); persistent node `ingress-shop`; DNS name in the hosts file | Objects are garbage-collected; the operator deletes the node (best effort, before the finalizer is dropped) |
 | `TailnetGateway corp-gateway` | StatefulSet, headless Service, LoadBalancer Service, DNS ClusterIP Service, CoreDNS ConfigMap, ServiceAccount, Role, RoleBinding, PDB; state Secret and auth Secret; receipt ConfigMaps — none with an owner reference | Non-ephemeral bootstrap key; persistent node; approved routes | `Retain` (default): nothing; `Delete`: fail-closed teardown of what this Gateway provably created |
 | `TailnetSite` | none | `autoApprovers` and approvals for the declared network | Rendered policy loses the entries |
 

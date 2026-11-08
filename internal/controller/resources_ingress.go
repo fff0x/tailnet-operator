@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -9,12 +11,18 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
+
+// labelIngressState marks the tsnet state Secrets of an ingress, so the one of a retired identity
+// (other name, same CR labels) can be found and removed.
+const labelIngressState = "tsunaro.io/state"
 
 // ingressSelectorLabels identify one TailnetIngress CR's pods and objects. A distinct name from the
 // egress labels keeps the two data planes' pods, Services and NetworkPolicies from ever selecting
@@ -128,7 +136,7 @@ func ingressExposesConfigMap(in *tnv1.TailnetIngress, ns string, plan ingressTLS
 	}, nil
 }
 
-// ingressAuthKeySecret carries the reusable ephemeral pre-auth key for an ingress node. Same shape
+// ingressAuthKeySecret carries the reusable pre-auth key for an ingress node. Same shape
 // as the egress one; kept separate because it labels and owner-references the TailnetIngress.
 func ingressAuthKeySecret(in *tnv1.TailnetIngress, ns, key, expiresAt string, binding map[string]string) *corev1.Secret {
 	ann := maps.Clone(binding)
@@ -143,6 +151,54 @@ func ingressAuthKeySecret(in *tnv1.TailnetIngress, ns, key, expiresAt string, bi
 		},
 		Type:       corev1.SecretTypeOpaque,
 		StringData: map[string]string{authKeySecretKey: key},
+	}
+}
+
+// ingressStateSecretName names the tsnet state Secret of one ingress identity: control server, tag
+// and hostname. The node key inside belongs to that server and carries the tag; the hostname is
+// the MagicDNS name Headscale fixed at registration (a rename is a re-registration, see
+// associateNode). A change of any of them yields a new, empty Secret and the agent registers fresh
+// instead of reviving the old node. retireIngressNode and dropRetiredStateSecrets remove the rest.
+func ingressStateSecretName(in *tnv1.TailnetIngress, tn *tnv1.Tailnet) string {
+	h := sha256.Sum256([]byte(tn.Spec.Server + "\x00" + ingressTag(tn, in) + "\x00" + in.Status.Hostname))
+	return ingressWorkloadName(in.Name) + "-state-" + hex.EncodeToString(h[:4])
+}
+
+// ingressIdentityObjects are what a persistent ingress node needs besides its Deployment: a
+// ServiceAccount, a Role limited to its one state Secret (get/update/patch — the operator creates the
+// Secret, so the agent never needs create) and the binding. The Secret itself is created empty and
+// only its metadata is managed here; the agent owns the data. Mirrors the gateway's state handling.
+func ingressIdentityObjects(in *tnv1.TailnetIngress, ns, stateSecret string) []client.Object {
+	name := ingressWorkloadName(in.Name)
+	labels := ingressObjLabels(in.Name)
+	stateLabels := ingressObjLabels(in.Name)
+	stateLabels[labelIngressState] = "true"
+	automount := false
+	return []client.Object{
+		&corev1.ServiceAccount{
+			TypeMeta:                     metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"},
+			ObjectMeta:                   metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels},
+			AutomountServiceAccountToken: &automount, // mounted explicitly by the agent pod only
+		},
+		&rbacv1.Role{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "Role"},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels},
+			Rules: []rbacv1.PolicyRule{{
+				APIGroups: []string{""}, Resources: []string{"secrets"}, ResourceNames: []string{stateSecret},
+				Verbs: []string{"get", "update", "patch"},
+			}},
+		},
+		&rbacv1.RoleBinding{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBinding"},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: name},
+			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: name, Namespace: ns}},
+		},
+		&corev1.Secret{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+			ObjectMeta: metav1.ObjectMeta{Name: stateSecret, Namespace: ns, Labels: stateLabels},
+			Type:       corev1.SecretTypeOpaque,
+		},
 	}
 }
 
@@ -178,11 +234,13 @@ func ingressNetworkPolicy(in *tnv1.TailnetIngress, ns, operatorNS string, scrape
 }
 
 // ingressAgentDeployment runs one ingress agent pod (AGENT_MODE=ingress). Same security posture,
-// state emptyDir and health probe as the egress agent; the only behavioural difference is the mode
-// env, which flips the agent from listen-local/dial-tailnet to listen-tailnet/dial-cluster.
+// scratch emptyDir and health probe as the egress agent; it differs in the mode env, which flips
+// the agent from listen-local/dial-tailnet to listen-tailnet/dial-cluster, and in its identity:
+// the tsnet state lives in a Secret (TS_STATE_SECRET, written through the pod's own ServiceAccount),
+// so a restarted pod keeps its node ID and tailnet IP instead of registering anew.
 func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image string, defaultImagePullSecrets []string, defaultResources corev1.ResourceRequirements) *appsv1.Deployment {
 	replicas := int32(1)
-	automount := false
+	automount := true
 	podSec, cSec := nonRoot()
 
 	res := agentResources(in.Spec.Resources, tn.Spec.Proxy.Resources, defaultResources)
@@ -204,6 +262,7 @@ func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image
 				ObjectMeta: metav1.ObjectMeta{Labels: ingressObjLabels(in.Name), Annotations: ingressPodAnnotations(in, tn)},
 				Spec: corev1.PodSpec{
 					SecurityContext:              podSec,
+					ServiceAccountName:           ingressWorkloadName(in.Name),
 					AutomountServiceAccountToken: &automount,
 					ImagePullSecrets:             agentImagePullSecrets(tn.Spec.Proxy.ImagePullSecrets, defaultImagePullSecrets),
 					Containers: []corev1.Container{{
@@ -216,6 +275,7 @@ func ingressAgentDeployment(in *tnv1.TailnetIngress, tn *tnv1.Tailnet, ns, image
 							{Name: "AGENT_MODE", Value: "ingress"},
 							{Name: "CONTROL_URL", Value: tn.Spec.Server},
 							{Name: "TS_HOSTNAME", Value: in.Status.Hostname},
+							{Name: "TS_STATE_SECRET", Value: ingressStateSecretName(in, tn)},
 							{Name: "TS_DEBUG_MTU", Value: fmt.Sprintf("%d", mtu)},
 							{Name: "PROBE_INTERVAL", Value: probeInterval},
 							{Name: "TARGETS_FILE", Value: configMount + "/" + targetsFile},

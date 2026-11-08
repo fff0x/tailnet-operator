@@ -49,8 +49,9 @@ description: "Symptom table with the condition reasons, and the diagnosis cheat 
 
 ### Clients time out right after an agent restart
 
-An agent Pod carries no state: each start registers a new Headscale node with a new tailnet IP
-([Limitations](../reference/limitations.md#data-path-agents)). The operator rewrites the split-DNS zone
+An egress agent Pod carries no state: each start registers a new Headscale node with a new tailnet
+IP ([Limitations](../reference/limitations.md#data-path-agents)); an ingress keeps its node across
+restarts and is not affected. The operator rewrites the split-DNS zone
 within seconds and deletes the old node on its next reconcile, but a client that resolved the name
 just before the restart keeps the old address until the 30 s record TTL expires — connections time
 out for up to that long, on top of the restart itself. It is a symptom of the restart, not a second

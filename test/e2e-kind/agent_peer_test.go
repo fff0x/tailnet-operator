@@ -77,7 +77,7 @@ const httpFixtureUser = "fixture"
 
 // A scope keeps one test's evidence files from colliding with another's; save() opens them O_EXCL.
 // The list stays explicit so an unreviewed caller cannot write outside its own directory.
-var peerEvidenceScopes = []string{"ingress-l4", "gateway-fresh", "restart-no-flap", "magicdns-rename", "egress-reach"}
+var peerEvidenceScopes = []string{"ingress-l4", "gateway-fresh", "restart-no-flap", "magicdns-rename", "egress-reach", "ingress-identity"}
 
 type httpPeerFixture struct {
 	f                       *fixture

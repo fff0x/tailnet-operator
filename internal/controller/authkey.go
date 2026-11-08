@@ -54,8 +54,9 @@ func ensureAuthKeyFinalizer(ctx context.Context, c client.Client, obj client.Obj
 // releaseAuthKey runs when a CR with the finalizer is deleted: expire the recorded key when the
 // Tailnet, its working API key and the authkey Secret are still there, then drop the finalizer.
 // Nothing here blocks the delete — a missing Tailnet, a Secret already collected, or a Headscale
-// that is down all end with the finalizer removed.
-func releaseAuthKey(ctx context.Context, c client.Client, operatorNS string, obj client.Object, tailnetName string, observe headscale.Observer) error {
+// that is down all end with the finalizer removed. also runs with the same client, for cleanup
+// that needs Headscale beyond the key (the ingress deletes its persistent node).
+func releaseAuthKey(ctx context.Context, c client.Client, operatorNS string, obj client.Object, tailnetName string, observe headscale.Observer, also ...func(*headscale.Client)) error {
 	if !controllerutil.ContainsFinalizer(obj, authKeyFinalizer) {
 		return nil
 	}
@@ -70,7 +71,11 @@ func releaseAuthKey(ctx context.Context, c client.Client, operatorNS string, obj
 		if apiURL == "" {
 			apiURL = tn.Spec.Server
 		}
-		expireAuthKey(ctx, headscale.New(apiURL, string(working.Data[apiKeyData]), observe), &sec)
+		hs := headscale.New(apiURL, string(working.Data[apiKeyData]), observe)
+		expireAuthKey(ctx, hs, &sec)
+		for _, f := range also {
+			f(hs)
+		}
 	}
 	before := obj.DeepCopyObject().(client.Object)
 	controllerutil.RemoveFinalizer(obj, authKeyFinalizer)

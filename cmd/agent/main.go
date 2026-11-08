@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"tailscale.com/ipn"
+	"tailscale.com/ipn/store/kubestore"
 	"tailscale.com/ipn/store/mem"
 	"tailscale.com/tsnet"
 )
@@ -67,13 +68,26 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	store, _ := mem.New(nil, "")
+	// Identity: with TS_STATE_SECRET the node key lives in that Kubernetes Secret (same namespace,
+	// RBAC rendered by the operator) and survives Pod restarts — stable node ID and tailnet IP.
+	// Without it the state is memory only and the node is ephemeral: every start is a clean
+	// registration from the authkey and Headscale ages the old node out.
+	var store ipn.StateStore
+	stateSecret := os.Getenv("TS_STATE_SECRET")
+	if stateSecret != "" {
+		var err error
+		if store, err = kubestore.New(log.Printf, stateSecret); err != nil {
+			log.Fatalf("state secret %q: %v", stateSecret, err)
+		}
+	} else {
+		store, _ = mem.New(nil, "")
+	}
 	ts := &tsnet.Server{
 		Hostname:   hostname,
-		Ephemeral:  true, // no volume, no state secret; a lost pod re-registers from the authkey
+		Ephemeral:  stateSecret == "",
 		AuthKey:    authKey,
 		ControlURL: controlURL,
-		Store:      store, // memory only: every start is a clean registration
+		Store:      store,
 		// Explicit Dir: the published image is scratch (no $HOME), so tsnet's default
 		// os.UserConfigDir() would fail. Point it at a writable mount (emptyDir) instead.
 		Dir:  env("TS_STATE_DIR", "/state"),

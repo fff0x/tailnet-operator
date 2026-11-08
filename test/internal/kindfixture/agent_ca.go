@@ -61,8 +61,7 @@ func AgentCAPatch(req *admissionv1.AdmissionRequest, cfg AgentCAConfig) ([]byte,
 	wantMode, known := agentMode(pod.Labels)
 	if d.Decode(&extra) != io.EOF || !known ||
 		pod.Labels["app.kubernetes.io/managed-by"] != "tailnet-operator" || len(pod.Spec.Containers) != 1 ||
-		pod.Spec.HostNetwork || pod.Spec.HostPID || pod.Spec.HostIPC ||
-		pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
+		pod.Spec.HostNetwork || pod.Spec.HostPID || pod.Spec.HostIPC || !tokenPosture(&pod) {
 		return nil, ErrAgentCA
 	}
 	c := pod.Spec.Containers[0]
@@ -158,6 +157,22 @@ func AgentCAHandler(cfg AgentCAConfig) http.Handler {
 // agentMode maps the workload label to the mode that Pod must declare. Returning the pair instead
 // of checking each value on its own keeps out a Pod that claims one role and runs the other, which
 // is what a plain "either label, either mode" widening would have allowed.
+// tokenPosture admits the two shapes the operator renders: no ServiceAccount token at all
+// (egress), or — for an ingress only — the token of its own identity ServiceAccount
+// ingress-<instance>, which the agent needs to persist its node key in the state Secret.
+// Anything else (an unset automount, a foreign account) stays out.
+func tokenPosture(pod *corev1.Pod) bool {
+	auto := pod.Spec.AutomountServiceAccountToken
+	if auto == nil {
+		return false
+	}
+	if !*auto {
+		return true
+	}
+	mode, _ := agentMode(pod.Labels)
+	return mode == "ingress" && pod.Spec.ServiceAccountName == "ingress-"+pod.Labels["app.kubernetes.io/instance"]
+}
+
 func agentMode(labels map[string]string) (string, bool) {
 	switch labels["app.kubernetes.io/name"] {
 	case "tailnet-ingress":

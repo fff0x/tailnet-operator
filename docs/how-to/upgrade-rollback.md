@@ -27,7 +27,27 @@ A pure operator restart with unchanged desired state does not restart agents; a 
 an agent image change is a real interruption, not a status flap. Outside upgrades, an agent restarts
 only when something it dials or presents changes: `Tailnet.spec.server`, the tag or hostname
 templates, the TLS defaults, or the CR itself. `Tailnet.spec.apiUrl` is the operator's path to the
-Headscale API and leaves agents alone. Breaking changes per version are
+Headscale API and leaves agents alone.
+
+### Operator bump ≠ agent bump
+
+An empty `agentImage` inherits the operator image, so every operator release rolls every agent. Pin
+the agent separately to decouple the two:
+
+```yaml
+image:
+  tag: v0.23.0
+  digest: sha256:<operator digest>
+agentImage:
+  digest: sha256:<agent digest>   # same repository; set once, move only when a release requires it
+```
+
+Then an operator bump changes `image.*` only and agents stay up. Move `agentImage.digest` when
+[Compatibility](../reference/compatibility.md) names the release as requiring new agent images
+(envelope or identity changes); the first pin is roll-free when it equals the current operator
+digest. An ingress agent keeps its node identity across the roll, an egress agent re-registers.
+
+Breaking changes per version are
 
 ### Verify after the upgrade
 

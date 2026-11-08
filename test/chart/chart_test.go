@@ -360,6 +360,10 @@ func TestRBACPrivilegesExact(t *testing.T) {
 					{"tsunaro.io", "tailnets/finalizers tailnetingresses/finalizers", "update"},
 				},
 				"ClusterRole/tailnet-operator-workloads": append(append([]grant{}, workloads...),
+					// Per-ingress ServiceAccount and Role/RoleBinding on its state Secret; the
+					// operator holds the granted Secret verbs itself, so no escalate/bind.
+					grant{"", "serviceaccounts", "get create patch"},
+					grant{"rbac.authorization.k8s.io", "roles rolebindings", "get create patch"},
 					grant{"cert-manager.io", "certificates", "get create patch delete"}),
 				"Role/tailnet-operator": local,
 			}

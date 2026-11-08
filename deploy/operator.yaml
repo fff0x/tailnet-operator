@@ -69,6 +69,16 @@ rules:
   - apiGroups: [""]
     resources: [secrets, configmaps]
     verbs: [get, list, watch, create, update, patch, delete]
+  # Each ingress agent gets its own ServiceAccount and a Role on its one tsnet
+  # state Secret (get/update/patch), so a restarted pod keeps its node identity.
+  # Applied server-side (create + patch), removed by owner GC; the operator already
+  # holds the granted Secret verbs, so no escalate/bind is needed.
+  - apiGroups: [""]
+    resources: [serviceaccounts]
+    verbs: [get, create, patch]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [roles, rolebindings]
+    verbs: [get, create, patch]
   # Optional issuer workflow uses direct namespaced requests, not an informer.
   # No Issuer, ClusterIssuer, CertificateRequest or CRD-object access is required.
   - apiGroups: ["cert-manager.io"]

@@ -12,7 +12,7 @@ derived from the rendered manifests, not from a cluster.
 ## Scope
 
 - `tailnet-operator-crds` (ClusterRole): read Tailnet and TailnetIngress, write their status and finalizers. No CR spec writes, no CRD-object access.
-- `tailnet-operator-workloads` (ClusterRole): the children of tenant ingresses in every namespace — Secrets, ConfigMaps, Deployments, NetworkPolicies, Events; Pods read-only; cert-manager Certificates get/create/patch/delete (no Issuer or CertificateRequest access).
+- `tailnet-operator-workloads` (ClusterRole): the children of tenant ingresses in every namespace — Secrets, ConfigMaps, Deployments, NetworkPolicies, Events, and per ingress a ServiceAccount with a Role/RoleBinding on its tsnet state Secret (get/create/patch only; no escalate/bind, the operator holds those Secret verbs itself); Pods read-only; cert-manager Certificates get/create/patch/delete (no Issuer or CertificateRequest access).
 - `tailnet-operator` (Role, operator namespace): TailnetEgress read/status/finalizers, Services, leader-election Leases, and the same workload verbs for egress children.
 - The ClusterRole/Role split documents which resources each controller touches; it does not narrow effective privilege, because Kubernetes RBAC is additive and cannot restrict `create` by `resourceNames`.
 - No wildcards, no non-resource URLs. Disabling leader election removes the Lease rule.
@@ -39,9 +39,11 @@ bindings: a RoleBinding limits its role to that namespace, a ClusterRoleBinding 
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `configmaps`, `secrets` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `events` | `create`, `patch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `pods` | `get`, `list`, `watch` | all names | — |
+| `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `(core)` | `serviceaccounts` | `create`, `get`, `patch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `apps` | `deployments` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `cert-manager.io` | `certificates` | `create`, `delete`, `get`, `patch` | all names | — |
 | `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `networking.k8s.io` | `networkpolicies` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
+| `ClusterRole/tailnet-operator-workloads` | — | `cluster-wide` | `rbac.authorization.k8s.io` | `rolebindings`, `roles` | `create`, `get`, `patch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `configmaps`, `secrets`, `services` | `create`, `delete`, `get`, `list`, `patch`, `update`, `watch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `events` | `create`, `patch` | all names | — |
 | `Role/tailnet-operator` | `tailnet-system` | `tailnet-system` | `(core)` | `pods` | `get`, `list`, `watch` | all names | — |

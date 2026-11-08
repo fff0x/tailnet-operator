@@ -147,6 +147,10 @@ func TestAgentCAPatchRejectsUnexpectedPod(t *testing.T) {
 		"host network": func(p *corev1.Pod) { p.Spec.HostNetwork = true },
 		"host path":    func(p *corev1.Pod) { p.Spec.Volumes[0].HostPath = &corev1.HostPathVolumeSource{Path: "/"} },
 		"token":        func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = nil },
+		"token of a foreign account": func(p *corev1.Pod) {
+			yes := true
+			p.Spec.AutomountServiceAccountToken, p.Spec.ServiceAccountName = &yes, "default"
+		},
 		"env override": func(p *corev1.Pod) { p.Spec.Containers[0].Env[0].Value = "/foreign" },
 		"env duplicate": func(p *corev1.Pod) {
 			p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, p.Spec.Containers[0].Env[0])
@@ -236,6 +240,28 @@ func TestAgentCAPatchRequestBoundary(t *testing.T) {
 		mutate(req)
 		if _, err := AgentCAPatch(req, cfg); err != ErrAgentCA {
 			t.Fatal("unexpected admission request accepted")
+		}
+	}
+}
+
+// An ingress carries the token of its own identity ServiceAccount (ingress-<instance>) so the
+// agent can persist its node key; the same shape under the egress label stays out.
+func TestAgentCAPatchAdmitsIngressIdentityToken(t *testing.T) {
+	for _, gate := range []string{"", ownedGateImage} {
+		req, cfg, _ := agentFixture(t)
+		cfg.NetworkGateImage = gate
+		pod := hardenedFixturePod(t)
+		yes := true
+		pod.Labels["app.kubernetes.io/instance"] = "app"
+		pod.Spec.AutomountServiceAccountToken, pod.Spec.ServiceAccountName = &yes, "ingress-app"
+		req.Object.Raw, _ = json.Marshal(pod)
+		if _, err := AgentCAPatch(req, cfg); err != nil {
+			t.Fatalf("gate=%q: ingress identity token rejected: %v", gate, err)
+		}
+		asEgress(&pod)
+		req.Object.Raw, _ = json.Marshal(pod)
+		if _, err := AgentCAPatch(req, cfg); err != ErrAgentCA {
+			t.Fatalf("gate=%q: egress with a token admitted", gate)
 		}
 	}
 }

@@ -20,6 +20,16 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
+## Persistent ingress identity and spoke status (v0.23.0)
+
+Operator and agent images must move together to v0.23.0: the controller renders a ServiceAccount
+and a state Secret per `TailnetIngress` and sets `TS_STATE_SECRET`, which an older agent ignores
+(it would keep registering ephemeral nodes while the operator already stops deleting them as
+duplicates). Each existing ingress rolls once and comes back as a new, now persistent node; from
+then on Pod restarts keep node ID and tailnet IP. The chart's `tailnet-operator-workloads`
+ClusterRole gains `get`/`create`/`patch` on `serviceaccounts`, `roles` and `rolebindings`. Spokes (`policy.mode: Export`)
+report `PolicyApplied=True/HubMerged` or `False/HubPending` instead of a standing `False/Export`.
+
 ## HTTP extension compatibility (v0.5.0)
 
 Existing L4 and HTTP CRs retain their behavior when the new fields are absent.

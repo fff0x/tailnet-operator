@@ -18,8 +18,14 @@ func TestAgentDeploymentSecurity(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			pod := dep.Spec.Template.Spec
-			if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
-				t.Fatal("agent must explicitly disable service-account token automount")
+			// Egress has no Kubernetes client at all; ingress needs its own ServiceAccount for the
+			// state Secret that holds its persistent node identity, and nothing else.
+			wantAutomount, wantSA := false, ""
+			if name == "ingress" {
+				wantAutomount, wantSA = true, "ingress-in"
+			}
+			if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken != wantAutomount || pod.ServiceAccountName != wantSA {
+				t.Fatalf("service-account posture changed: automount=%v sa=%q", pod.AutomountServiceAccountToken, pod.ServiceAccountName)
 			}
 			if dep.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType || len(pod.Containers) != 1 {
 				t.Fatal("agent topology changed")
