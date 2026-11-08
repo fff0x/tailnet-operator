@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-08
+
 ### Changed
 
 - **`TailnetIngress` nodes keep their identity across Pod restarts.** The agent stores its `tsnet`
