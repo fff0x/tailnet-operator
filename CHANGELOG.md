@@ -4,6 +4,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-11-08
+
+### Security
+
+- `golang.org/x/net` 0.62.0 (CVE-2026-78661). The v0.23.0 image carries the affected version and
+  failed the release audit; it is not accepted for use. Use v0.23.1.
+
 ## [0.23.0] - 2026-11-08
 
 ### Changed

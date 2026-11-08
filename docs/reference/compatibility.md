@@ -20,9 +20,9 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
-## Persistent ingress identity and spoke status (v0.23.0)
+## Persistent ingress identity and spoke status (v0.23.1)
 
-Operator and agent images must move together to v0.23.0: the controller renders a ServiceAccount
+Operator and agent images must move together to v0.23.1 (v0.23.0 was not accepted by the release audit): the controller renders a ServiceAccount
 and a state Secret per `TailnetIngress` and sets `TS_STATE_SECRET`, which an older agent ignores
 (it would keep registering ephemeral nodes while the operator already stops deleting them as
 duplicates). Each existing ingress rolls once and comes back as a new, now persistent node; from
