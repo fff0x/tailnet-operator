@@ -1,12 +1,5 @@
 # Tsunaro — tailnet-operator
 
-> **Canonical repository** — development happens on Radicle:
-> [`rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX`](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX)
-> (clone with `git clone rad://z46fGxuhyvDV57psA8s6Q6PdHJrsX`).
->
-> This GitHub repository is a **read-only mirror** synced hourly;
-> patches, issues and releases live on Radicle.
-
 [![CI](https://img.shields.io/endpoint?url=https%3A%2F%2Fci.this-is-fine.io%2Fbadge%2Ftailnet-operator.json)](https://ci.this-is-fine.io/)
 
 **Per-namespace egress into a [Headscale](https://headscale.net) tailnet, ingress out of it, and the
