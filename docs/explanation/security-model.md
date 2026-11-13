@@ -81,7 +81,14 @@ audit aid, not reduced privilege. The exact default grants are listed in the
 The operator NetworkPolicy is opt-in because API-server and Headscale CIDRs are site-specific.
 Generated agent NetworkPolicies restrict inbound traffic to `consumerNamespaces` and the operator
 namespace (TCP 9080 for `/status`, `/targets`, `/metrics`); they do not constrain outbound traffic,
-which userspace tsnet needs for control, DERP and UDP. Do not expose port 9080 or the operator's
+which userspace tsnet needs for control, DERP and UDP. An egress with `spec.expose` additionally
+admits the declared LAN prefixes (`ipBlock`) to its proxy ports only; the prefixes are bounded at
+admission (no default route, at most `/16` IPv4 or `/48` IPv6), must lie inside the Tailnet's
+`exposeSourceAllowlist` (the admin's veto; empty denies) and the LoadBalancer is rendered with
+`externalTrafficPolicy: Local` so the filter sees the client address. The filter is only as good
+as address preservation by the LB implementation — the operator cannot verify it
+([Bridge § security](../how-to/legacy-bridge.md#security-what-the-bridge-is-and-is-not)). On the
+tailnet the bridge acts as its own tag; LAN hosts are never individually identifiable there. Do not expose port 9080 or the operator's
 8080 outside the cluster. Leader election serialises reconciliation; it is not a fence against
 in-flight writes from a paused replica.
 

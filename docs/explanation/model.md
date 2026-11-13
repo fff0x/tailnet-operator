@@ -15,7 +15,11 @@ Diagrams of the resulting shape, one per scenario, and the full list of objects 
 - **`TailnetEgress`** (operator namespace) — one egress identity: a tag, a reusable ephemeral
   pre-auth key (the ingress key is reusable and non-ephemeral), a userspace agent pod and one Service per target. Consumers in `consumerNamespaces`
   dial `<target>.<operator-ns>.svc:<port>`; **aliases** let them dial the real hostname when the far
-  end routes by SNI/Host.
+  end routes by SNI/Host. A target may also be a tailnet peer by MagicDNS name (an ingress of
+  another cluster); with **`spec.expose`** the target Services become LoadBalancers on the site
+  LAN, filtered to declared client prefixes within the admin's `exposeSourceAllowlist` — the
+  **bridge** that lets hosts without a tailnet client reach a tailnet service per service, not per
+  network ([Bridge](../how-to/legacy-bridge.md)).
 - **`TailnetIngress`** (tenant namespace) — the mirror: expose in-cluster Services *on* the tailnet
   as one node with a MagicDNS name and, with a template, a DNS name under your zone. L4 exposes
   forward TCP; one or more `mode: http` exposes (virtual hosts, each with its own name and optional

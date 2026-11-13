@@ -85,6 +85,14 @@ Notes: the alias zone must be forwarded to the resolver that mounts the hosts fi
 ([Wire the cluster CoreDNS](dns-coredns.md#wire-the-cluster-coredns)). Certificates come from the site (often an
 internal CA) — the *application* needs that CA in its trust store; the tunnel does not touch TLS.
 
+## Reach a service published by a TailnetIngress
+
+A target may be a **MagicDNS name** instead of an IP — typically the name of a `TailnetIngress` in
+another cluster. No subnet route is involved then: `status.targets[].route` stays empty and
+`present` is true; the only authorization is the ingress's `allowFrom`, which must list this egress's
+tag, and a missing grant shows as `TargetsReachable=False/Unreachable`. To hand such a target on to
+hosts *outside* the cluster, see [Bridge](legacy-bridge.md) (`spec.expose`).
+
 ## Share targets between prod and dev
 
 *`billing` (prod) already reaches `api.corp.example`; `billing-dev` needs it too.*
