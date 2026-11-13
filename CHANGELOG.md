@@ -4,6 +4,45 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-13
+
+### Added
+
+- **Bridge: `TailnetEgress.spec.expose`.** Hosts on the site LAN without a tailnet client reach a
+  service published on the tailnet through the site cluster. With `expose`, every target Service
+  is rendered as `type: LoadBalancer` with `externalTrafficPolicy: Local` (fixed), no NodePorts and
+  the given `loadBalancer.class`/`annotations`/`labels` passed through — address assignment stays
+  with the cluster's LB implementation. The agent NetworkPolicy gains an `ipBlock` rule admitting
+  exactly `expose.allowFrom` to the proxy listen ports. `allowFrom` is required and bounded at
+  admission (canonical CIDR, no default route, at most `/16` IPv4 or `/48` IPv6); user labels may
+  not set `app.kubernetes.io/*`. Status: condition `Exposed` (`AddressAssigned`, `PendingAddress`,
+  `Denied`) and `status.expose.addresses`; a `False` `Exposed` blocks `Ready`.
+- **`Tailnet.spec.exposeSourceAllowlist`** — the admin's veto: every `expose.allowFrom` prefix must
+  lie inside one of these prefixes, otherwise the egress is rendered *without* the expose
+  (ClusterIP, no `ipBlock`) and reports `Exposed=False/Denied`. Empty denies all; shrinking the
+  list closes running bridges on the next reconcile.
+- How-to [Bridge: let a legacy network reach the tailnet](docs/how-to/legacy-bridge.md) with the
+  two-sided consent model, DNS/firewall hand-offs, the security properties and their limits
+  (client-address preservation), the proxy-box fallback for sites without a cluster and why a NAT
+  subnet router is the wrong tool. Example `deploy/examples/tailnetegress-bridge.yaml`.
+
+### Fixed
+
+- A **MagicDNS-named egress target** (e.g. the name of a `TailnetIngress` in another cluster) no
+  longer waits for a `/32` route it can never get: `status.targets[].route` is empty, `present`
+  is true, and the target's `Ready` hinges on reachability only. A missing grant on the far
+  ingress now shows as `TargetsReachable=False/Unreachable` instead of a standing
+  `RoutesGranted=False/RoutesMissing`.
+
+### Changed
+
+- Egress target Services carry an explicit `type: ClusterIP` (API default; no behavioural change).
+
+### Security
+
+- Go 1.26.11 (GO-2026-6859, `net/http` MaxBytesReader header race). The module and the CI test
+  image now require 1.26.11; the scan is clean.
+
 ## [0.23.1] - 2026-11-08
 
 ### Security

@@ -36,7 +36,7 @@ the agent separately to decouple the two:
 
 ```yaml
 image:
-  tag: v0.23.1
+  tag: v0.24.0
   digest: sha256:<operator digest>
 agentImage:
   digest: sha256:<agent digest>   # same repository; set once, move only when a release requires it

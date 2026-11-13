@@ -20,6 +20,15 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
+## Egress bridge and DNS-named targets (v0.24.0)
+
+CRD extension, additive: `TailnetEgress.spec.expose` and `Tailnet.spec.exposeSourceAllowlist`
+need the v0.24.0 CRDs (`task crd-upgrade`); without them the fields are pruned at admission. Controller
+v0.24.0 renders exposed target Services as LoadBalancers and reports the `Exposed` condition; the
+agent image is unchanged, no agent rolls. Behavioural change for **existing DNS-named egress
+targets**: they no longer wait for a `/32` route (`status.targets[].route` empty, `present` true)
+and can become `Ready`; previously they stayed `RoutesGranted=False/RoutesMissing`.
+
 ## Persistent ingress identity and spoke status (v0.23.1)
 
 Operator and agent images must move together to v0.23.1 (v0.23.0 was not accepted by the release audit): the controller renders a ServiceAccount
