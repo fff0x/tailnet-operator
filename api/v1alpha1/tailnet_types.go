@@ -266,6 +266,13 @@ type TailnetSpec struct {
 	// +listType=map
 	// +listMapKey=name
 	ReservedNetworks []ReservedNetwork `json:"reservedNetworks,omitempty"`
+	// Client prefixes a TailnetEgress.spec.expose.allowFrom entry must lie within. Egress CRs are
+	// written by tenants, so this is the admin's veto over which site hosts may use a bridge.
+	// Empty → no egress may be exposed (Exposed=False/Denied).
+	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	// +listType=set
+	ExposeSourceAllowlist []GatewayPrefix `json:"exposeSourceAllowlist,omitempty"`
 }
 
 // PolicyGenerated counts what the operator added to the base policy.

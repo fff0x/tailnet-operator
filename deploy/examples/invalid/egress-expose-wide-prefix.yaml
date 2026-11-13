@@ -1,0 +1,18 @@
+# ExpectedError: prefix must be at least /16 (IPv4) or /48 (IPv6)
+---
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  consumerNamespaces:
+    - billing
+  targets:
+    - name: shop
+      address: shop.prod-1.tailnet.example.internal
+      port: 443
+  expose:
+    allowFrom:
+      - 10.0.0.0/8

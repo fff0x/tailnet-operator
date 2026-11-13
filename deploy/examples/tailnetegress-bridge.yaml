@@ -1,0 +1,38 @@
+---
+# A bridge: hosts on the site LAN that have no tailnet client reach a
+# service published by a TailnetIngress in another cluster. The egress
+# dials the ingress by its MagicDNS name (no subnet route is involved);
+# spec.expose turns the target Service into a LoadBalancer on the LAN and
+# limits its clients to allowFrom. Two sides must consent: the far
+# TailnetIngress lists this egress tag in allowFrom, and the Tailnet admin
+# lists the client prefixes in Tailnet.spec.exposeSourceAllowlist. LB
+# address assignment is the cluster's business (MetalLB, Cilium LB-IPAM,
+# kube-vip, cloud); pass class/annotations/labels through as needed.
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: shop-bridge
+  namespace: tailnet-system
+spec:
+  tailnetRef:
+    name: corp
+  # tag: tag:egress-shop-bridge   # default: tag:egress-{name}; the far ingress grants this
+  consumerNamespaces:
+    - shop-legacy
+  targets:
+    - name: shop
+      address: shop.prod-1.tailnet.example.internal
+      port: 443
+  expose:
+    # Legacy ERP host and the batch hosts, nothing else. Bounded: no /0,
+    # IPv4 at least /16, IPv6 at least /48 — and inside the admin's
+    # exposeSourceAllowlist, or the egress reports Exposed=False/Denied.
+    allowFrom:
+      - 192.0.2.77/32
+      - 192.0.2.80/30
+    loadBalancer:
+      # class: io.cilium/bgp-control-plane
+      annotations:
+        example.com/address-pool: legacy
+      labels:
+        lb-pool: legacy

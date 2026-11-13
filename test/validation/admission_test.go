@@ -105,6 +105,20 @@ func TestAdmission(t *testing.T) {
 	t.Run("example/tailnet-hub-spokes", func(t *testing.T) {
 		accept(t, load(t, filepath.Join(root, "deploy", "examples", "tailnet-hub-spokes.yaml")))
 	})
+	t.Run("example/tailnetegress-bridge", func(t *testing.T) {
+		accept(t, load(t, filepath.Join(root, "deploy", "examples", "tailnetegress-bridge.yaml")))
+	})
+	t.Run("expose-boundaries", func(t *testing.T) {
+		// The narrowest allowed prefixes per family and an exposed egress without LB passthrough.
+		for _, prefixes := range [][]any{{"10.1.0.0/16"}, {"2001:db8::/48"}, {"192.0.2.77/32", "2001:db8:1::1/128"}} {
+			obj := templates["tailnetegress"].DeepCopy()
+			obj.Object["spec"].(map[string]any)["expose"] = map[string]any{"allowFrom": prefixes}
+			accept(t, obj)
+		}
+		tn := templates["tailnet"].DeepCopy()
+		tn.Object["spec"].(map[string]any)["exposeSourceAllowlist"] = []any{"10.0.0.0/8", "2001:db8::/32"}
+		accept(t, tn)
+	})
 
 	t.Run("valid-boundaries", func(t *testing.T) {
 		for _, address := range []string{"10.0.0.1", "2001:db8::1", "printer", "db.magic.example", strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 61)} {

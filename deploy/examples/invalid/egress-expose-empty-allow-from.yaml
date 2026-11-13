@@ -1,0 +1,17 @@
+# ExpectedError: spec.expose.allowFrom
+---
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  consumerNamespaces:
+    - billing
+  targets:
+    - name: shop
+      address: shop.prod-1.tailnet.example.internal
+      port: 443
+  expose:
+    allowFrom: []

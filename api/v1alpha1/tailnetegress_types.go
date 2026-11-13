@@ -33,6 +33,55 @@ type Target struct {
 	Aliases []string `json:"aliases,omitempty"`
 }
 
+// SourcePrefix is a canonical, non-default CIDR of legacy clients allowed to use an exposed egress.
+// Bounded (IPv4 at least /16, IPv6 at least /48) so a typo cannot open the bridge to a whole site.
+// +kubebuilder:validation:MaxLength=49
+// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).prefixLength() > 0 && string(cidr(self).masked()) == self",message="prefix must be a canonical masked non-default CIDR"
+// +kubebuilder:validation:XValidation:rule="isCIDR(self) && (cidr(self).ip().family() == 4 ? cidr(self).prefixLength() >= 16 : cidr(self).prefixLength() >= 48)",message="prefix must be at least /16 (IPv4) or /48 (IPv6)"
+type SourcePrefix string
+
+// EgressExposeLoadBalancer passes implementation-specific LoadBalancer settings through to the Service.
+// The operator interprets none of them; address assignment is the cluster's LB implementation.
+type EgressExposeLoadBalancer struct {
+	// spec.loadBalancerClass of the Service. Empty → the cluster default implementation.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(/[a-z0-9A-Z]([-a-z0-9A-Z_.]*[a-z0-9A-Z])?)?$`
+	Class string `json:"class,omitempty"`
+	// Annotations copied onto the Service (address pools, pool selectors, BGP options …).
+	// +optional
+	// +kubebuilder:validation:MaxProperties=16
+	Annotations map[string]string `json:"annotations,omitempty"`
+	// Labels copied onto the Service, e.g. for LB-IPAM pool selectors. The operator's own
+	// app.kubernetes.io/* labels cannot be overridden.
+	// +optional
+	// +kubebuilder:validation:MaxProperties=16
+	// +kubebuilder:validation:XValidation:rule="!self.exists(k, k.startsWith('app.kubernetes.io/'))",message="labels must not set app.kubernetes.io/* keys"
+	Labels map[string]string `json:"labels,omitempty"`
+}
+
+// EgressExpose publishes every target Service of this egress as a LoadBalancer on the site LAN, so hosts
+// without a tailnet client reach tailnet services through this cluster. externalTrafficPolicy is
+// fixed to Local: the rendered NetworkPolicy filters on the client address, which only survives
+// when the LB keeps it. Every allowFrom entry must be inside the Tailnet's exposeSourceAllowlist.
+type EgressExpose struct {
+	// Client prefixes allowed to dial the exposed Services (NetworkPolicy ipBlock). Required and
+	// bounded: no default route, IPv4 at least /16, IPv6 at least /48.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=set
+	AllowFrom []SourcePrefix `json:"allowFrom"`
+	// +optional
+	LoadBalancer EgressExposeLoadBalancer `json:"loadBalancer,omitempty"`
+}
+
+// EgressExposeStatus is the observed LAN side of an exposed egress.
+type EgressExposeStatus struct {
+	// Addresses the LB implementation assigned (IPs or hostnames), across all target Services.
+	// +optional
+	Addresses []string `json:"addresses,omitempty"`
+}
+
 // TailnetEgressSpec is the desired egress into a tailnet for one identity.
 type TailnetEgressSpec struct {
 	TailnetRef TailnetRef `json:"tailnetRef"`
@@ -58,6 +107,10 @@ type TailnetEgressSpec struct {
 	// Override the Tailnet's default agent resources.
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	// Publish the target Services on the site LAN for clients without a tailnet node. Off when
+	// empty: the Services stay ClusterIP, reachable from consumerNamespaces only.
+	// +optional
+	Expose *EgressExpose `json:"expose,omitempty"`
 }
 
 // TargetStatus is the per-target observed state.
@@ -65,9 +118,11 @@ type TargetStatus struct {
 	Name string `json:"name"`
 	// Local port the agent listens on and the Service forwards to.
 	ListenPort int32 `json:"listenPort"`
-	// The /32 or /128 this target needs in the netmap.
-	Route string `json:"route"`
-	// True once that route is present in the pod's netmap.
+	// The /32 or /128 this target needs in the netmap. Empty for a DNS-named target: a tailnet
+	// peer is reached by its own address, no subnet route is involved.
+	// +optional
+	Route string `json:"route,omitempty"`
+	// True once that route is present in the pod's netmap (always true for a DNS-named target).
 	Present bool `json:"present"`
 	// True once the agent last dialled the target successfully.
 	Reachable bool `json:"reachable"`
@@ -94,7 +149,11 @@ type TailnetEgressStatus struct {
 	AuthKeyExpiresAt *metav1.Time `json:"authKeyExpiresAt,omitempty"`
 	// +optional
 	Targets []TargetStatus `json:"targets,omitempty"`
-	// Conditions: TagKnown, Registered, RoutesGranted, TargetsReachable, Ready.
+	// LAN side of spec.expose; absent when the egress is not exposed.
+	// +optional
+	Expose *EgressExposeStatus `json:"expose,omitempty"`
+	// Conditions: TagKnown, Registered, RoutesGranted, TargetsReachable, Exposed (only with
+	// spec.expose), Ready.
 	// +optional
 	// +listType=map
 	// +listMapKey=type

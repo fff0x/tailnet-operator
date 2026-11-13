@@ -66,6 +66,65 @@ spec:
                   type: string
                 minItems: 1
                 type: array
+              expose:
+                description: |-
+                  Publish the target Services on the site LAN for clients without a tailnet node. Off when
+                  empty: the Services stay ClusterIP, reachable from consumerNamespaces only.
+                properties:
+                  allowFrom:
+                    description: |-
+                      Client prefixes allowed to dial the exposed Services (NetworkPolicy ipBlock). Required and
+                      bounded: no default route, IPv4 at least /16, IPv6 at least /48.
+                    items:
+                      description: |-
+                        SourcePrefix is a canonical, non-default CIDR of legacy clients allowed to use an exposed egress.
+                        Bounded (IPv4 at least /16, IPv6 at least /48) so a typo cannot open the bridge to a whole site.
+                      maxLength: 49
+                      type: string
+                      x-kubernetes-validations:
+                      - message: prefix must be a canonical masked non-default CIDR
+                        rule: isCIDR(self) && cidr(self).prefixLength() > 0 && string(cidr(self).masked())
+                          == self
+                      - message: prefix must be at least /16 (IPv4) or /48 (IPv6)
+                        rule: 'isCIDR(self) && (cidr(self).ip().family() == 4 ? cidr(self).prefixLength()
+                          >= 16 : cidr(self).prefixLength() >= 48)'
+                    maxItems: 32
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  loadBalancer:
+                    description: |-
+                      EgressExposeLoadBalancer passes implementation-specific LoadBalancer settings through to the Service.
+                      The operator interprets none of them; address assignment is the cluster's LB implementation.
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: Annotations copied onto the Service (address
+                          pools, pool selectors, BGP options …).
+                        maxProperties: 16
+                        type: object
+                      class:
+                        description: spec.loadBalancerClass of the Service. Empty
+                          → the cluster default implementation.
+                        maxLength: 253
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(/[a-z0-9A-Z]([-a-z0-9A-Z_.]*[a-z0-9A-Z])?)?$
+                        type: string
+                      labels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          Labels copied onto the Service, e.g. for LB-IPAM pool selectors. The operator's own
+                          app.kubernetes.io/* labels cannot be overridden.
+                        maxProperties: 16
+                        type: object
+                        x-kubernetes-validations:
+                        - message: labels must not set app.kubernetes.io/* keys
+                          rule: '!self.exists(k, k.startsWith(''app.kubernetes.io/''))'
+                    type: object
+                required:
+                - allowFrom
+                type: object
               hostname:
                 description: Explicit tailnet hostname. Empty → rendered from the
                   Tailnet's hostnameTemplate.
@@ -206,8 +265,9 @@ spec:
                 format: date-time
                 type: string
               conditions:
-                description: 'Conditions: TagKnown, Registered, RoutesGranted, TargetsReachable,
-                  Ready.'
+                description: |-
+                  Conditions: TagKnown, Registered, RoutesGranted, TargetsReachable, Exposed (only with
+                  spec.expose), Ready.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -266,6 +326,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              expose:
+                description: LAN side of spec.expose; absent when the egress is not
+                  exposed.
+                properties:
+                  addresses:
+                    description: Addresses the LB implementation assigned (IPs or
+                      hostnames), across all target Services.
+                    items:
+                      type: string
+                    type: array
+                type: object
               hostname:
                 type: string
               nodeId:
@@ -293,7 +364,8 @@ spec:
                     name:
                       type: string
                     present:
-                      description: True once that route is present in the pod's netmap.
+                      description: True once that route is present in the pod's netmap
+                        (always true for a DNS-named target).
                       type: boolean
                     reachable:
                       description: True once the agent last dialled the target successfully.
@@ -303,14 +375,15 @@ spec:
                         or NoGrant. Empty when present.'
                       type: string
                     route:
-                      description: The /32 or /128 this target needs in the netmap.
+                      description: |-
+                        The /32 or /128 this target needs in the netmap. Empty for a DNS-named target: a tailnet
+                        peer is reached by its own address, no subnet route is involved.
                       type: string
                   required:
                   - listenPort
                   - name
                   - present
                   - reachable
-                  - route
                   type: object
                 type: array
             type: object

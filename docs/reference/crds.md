@@ -38,6 +38,7 @@ TailnetSpec describes a control server and how the operator authenticates to it.
 | `dns.hostsConfigMap` | string | no | Name of the ConfigMap (operator namespace, key "hosts") that receives the rendered hosts file. Empty → the feature is off and a previously rendered ConfigMap is removed. |
 | `dns.ingressAliasTemplate` | string | no | Optional template for a shorter DNS alias of an HTTP expose that opts in with `alias: true`. Same placeholders as ingressNameTemplate; {name} is the expose's effective label (dnsLabel or the CR name). The operator requires the alias to end in the SAME literal zone as ingressNameTemplate, because only that zone is guaranteed to resolve over the tailnet. Empty → aliases are disabled. The alias becomes an additional certificate SAN and SNI route; a name claimed by two CRs is resolved oldest-first and the loser reports DNSNameConflict. Max length 253. |
 | `dns.ingressNameTemplate` | string | no | Template for a TailnetIngress's DNS name; {name} is the CR name, {namespace} its namespace. Keep the result one label below your gateway's wildcard certificate, e.g. "{name}-{namespace}.prod-1.tailnet.example.internal". Empty → ingresses get no name. Max length 253. |
+| `exposeSourceAllowlist[]` | []string | no | Client prefixes a TailnetEgress.spec.expose.allowFrom entry must lie within. Egress CRs are written by tenants, so this is the admin's veto over which site hosts may use a bridge. Empty → no egress may be exposed (Exposed=False/Denied). Items ≤ 64. |
 | `headscale` | object | no | External Headscale metadata; compatibility is checked against the API, not the version hint. |
 | `headscale.ref` | string | no | Reserved for an operator-managed Headscale. Must remain empty until managed mode is supported. |
 | `headscale.version` | string | no | Optional version hint for diagnostics, e.g. "0.29.3". Does not bypass capability checks. |
@@ -140,6 +141,12 @@ TailnetEgressSpec is the desired egress into a tailnet for one identity.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `consumerNamespaces[]` | []string | yes | Namespaces whose pods may reach this proxy's Services (NetworkPolicy ingress). Items ≥ 1. |
+| `expose` | object | no | Publish the target Services on the site LAN for clients without a tailnet node. Off when empty: the Services stay ClusterIP, reachable from consumerNamespaces only. |
+| `expose.allowFrom[]` | []string | yes | Client prefixes allowed to dial the exposed Services (NetworkPolicy ipBlock). Required and bounded: no default route, IPv4 at least /16, IPv6 at least /48. Items 1–32. |
+| `expose.loadBalancer` | object | no | EgressExposeLoadBalancer passes implementation-specific LoadBalancer settings through to the Service. The operator interprets none of them; address assignment is the cluster's LB implementation. |
+| `expose.loadBalancer.annotations` | object | no | Annotations copied onto the Service (address pools, pool selectors, BGP options …). |
+| `expose.loadBalancer.class` | string | no | spec.loadBalancerClass of the Service. Empty → the cluster default implementation. Max length 253. |
+| `expose.loadBalancer.labels` | object | no | Labels copied onto the Service, e.g. for LB-IPAM pool selectors. The operator's own app.kubernetes.io/* labels cannot be overridden. |
 | `hostname` | string | no | Explicit tailnet hostname. Empty → rendered from the Tailnet's hostnameTemplate. |
 | `image` | string | no | Override the Tailnet's default agent image. |
 | `resources` | object | no | Override the Tailnet's default agent resources. |
@@ -164,13 +171,15 @@ TailnetEgressStatus is the observed state.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `authKeyExpiresAt` | string | no | Expiry of the reusable pre-auth key currently in the agent's Secret. Format `date-time`. |
-| `conditions[]` | []object | no | Conditions: TagKnown, Registered, RoutesGranted, TargetsReachable, Ready. |
+| `conditions[]` | []object | no | Conditions: TagKnown, Registered, RoutesGranted, TargetsReachable, Exposed (only with spec.expose), Ready. |
 | `conditions[].lastTransitionTime` | string | yes | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed. If that is not known, then using the time when the API field changed is acceptable. Format `date-time`. |
 | `conditions[].message` | string | yes | message is a human readable message indicating details about the transition. This may be an empty string. Max length 32768. |
 | `conditions[].observedGeneration` | integer | no | observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance. Range ≥ 0. Format `int64`. |
 | `conditions[].reason` | string | yes | reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty. Max length 1024. |
 | `conditions[].status` | string | yes | status of the condition, one of True, False, Unknown. One of `True`, `False`, `Unknown`. |
 | `conditions[].type` | string | yes | type of condition in CamelCase or in foo.example.com/CamelCase. Max length 316. |
+| `expose` | object | no | LAN side of spec.expose; absent when the egress is not exposed. |
+| `expose.addresses[]` | []string | no | Addresses the LB implementation assigned (IPs or hostnames), across all target Services. |
 | `hostname` | string | no |  |
 | `nodeId` | string | no |  |
 | `observedGeneration` | integer | no | Format `int64`. |
@@ -179,10 +188,10 @@ TailnetEgressStatus is the observed state.
 | `targets[]` | []object | no |  |
 | `targets[].listenPort` | integer | yes | Local port the agent listens on and the Service forwards to. Format `int32`. |
 | `targets[].name` | string | yes |  |
-| `targets[].present` | boolean | yes | True once that route is present in the pod's netmap. |
+| `targets[].present` | boolean | yes | True once that route is present in the pod's netmap (always true for a DNS-named target). |
 | `targets[].reachable` | boolean | yes | True once the agent last dialled the target successfully. |
 | `targets[].reason` | string | no | When the route is missing: NotAdvertised, NotApproved or NoGrant. Empty when present. |
-| `targets[].route` | string | yes | The /32 or /128 this target needs in the netmap. |
+| `targets[].route` | string | no | The /32 or /128 this target needs in the netmap. Empty for a DNS-named target: a tailnet peer is reached by its own address, no subnet route is involved. |
 
 ## TailnetGateway
 
