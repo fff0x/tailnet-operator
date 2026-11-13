@@ -120,4 +120,5 @@ func TestEgressReach(t *testing.T) {
 		"consumerRestarts": consumer.Status.ContainerStatuses[0].RestartCount, "consumerOutput": out,
 	})
 	t.Log("gate: the generated egress agent passed the real startup gate, the peer's /32 is routed and probed reachable, and an ordinary in-cluster consumer completed the bounded exchange through the target's ClusterIP Service without knowing the far end is on a tailnet")
+	exposeBridgePhase(t, x, base, egress)
 }

@@ -21,7 +21,7 @@ func TestAgentNetworkPoliciesAdmitConfiguredScrapePeers(t *testing.T) {
 			return ingressNetworkPolicy(in, "tenant", "operator", p)
 		},
 		"egress": func(p []networkingv1.NetworkPolicyPeer) *networkingv1.NetworkPolicy {
-			return egressNetworkPolicy(eg, "tenant", "operator", p)
+			return egressNetworkPolicy(eg, "tenant", "operator", p, nil, nil)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

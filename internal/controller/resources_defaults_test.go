@@ -111,7 +111,7 @@ func TestReconcilersApplyAgentResources(t *testing.T) {
 					eg := &tnv1.TailnetEgress{ObjectMeta: metav1.ObjectMeta{Name: "out", Namespace: "agents", UID: "egress-uid"}}
 					eg.Spec.Resources = cr
 					r := &TailnetEgressReconciler{Client: c, Scheme: c.Scheme(), OperatorNamespace: "agents", AgentResources: defaults}
-					err = r.applyChildren(context.Background(), eg, tn, eg.Namespace, "image", nil)
+					err = r.applyChildren(context.Background(), eg, tn, eg.Namespace, "image", nil, nil)
 				} else {
 					in := tlsResourceIngress()
 					in.Spec.Resources = cr

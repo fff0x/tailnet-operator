@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -157,6 +159,21 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	listen := ports.Assign(existing, names)
 
+	// Expose is the tenant's wish; the Tailnet's exposeSourceAllowlist is the admin's veto. A denied
+	// expose is rendered as if absent (ClusterIP, no ipBlock) so shrinking the allowlist closes the
+	// LAN door on the next reconcile instead of leaving a stale LoadBalancer behind.
+	expose := eg.Spec.Expose
+	if expose != nil {
+		if outside := exposeDenied(expose, tn.Spec.ExposeSourceAllowlist); outside != "" {
+			setCond(&eg.Status.Conditions, eg.Generation, "Exposed", metav1.ConditionFalse, "Denied",
+				fmt.Sprintf("allowFrom %s is outside Tailnet %q exposeSourceAllowlist; not exposing", outside, tn.Name))
+			expose = nil
+		}
+	} else {
+		meta.RemoveStatusCondition(&eg.Status.Conditions, "Exposed")
+		eg.Status.Expose = nil
+	}
+
 	// Apply children (Secret is written by ensureAuthKey).
 	image := eg.Spec.Image
 	if image == "" {
@@ -165,8 +182,11 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if image == "" {
 		image = r.OperatorImage
 	}
-	if err := r.applyChildren(ctx, &eg, &tn, ns, image, listen); err != nil {
+	if err := r.applyChildren(ctx, &eg, &tn, ns, image, listen, expose); err != nil {
 		return r.fail(ctx, &eg, "Apply", err)
+	}
+	if expose != nil {
+		r.observeExpose(ctx, &eg, ns)
 	}
 
 	// Node association + duplicate cleanup.
@@ -299,13 +319,71 @@ func (r *TailnetEgressReconciler) currentListenPorts(ctx context.Context, ns, na
 	return out
 }
 
-func (r *TailnetEgressReconciler) applyChildren(ctx context.Context, eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string, listen map[string]int32) error {
+// exposeDenied returns the first allowFrom prefix not contained in the admin allowlist, "" if all
+// are. An empty allowlist denies everything: exposing is opt-in per Tailnet.
+func exposeDenied(expose *tnv1.EgressExpose, allowlist []tnv1.GatewayPrefix) string {
+	allowed := make([]netip.Prefix, 0, len(allowlist))
+	for _, a := range allowlist {
+		if p, err := netip.ParsePrefix(string(a)); err == nil {
+			allowed = append(allowed, p)
+		}
+	}
+	for _, src := range expose.AllowFrom {
+		p, err := netip.ParsePrefix(string(src))
+		if err != nil {
+			return string(src)
+		}
+		if !slices.ContainsFunc(allowed, func(a netip.Prefix) bool {
+			return a.Addr().Is4() == p.Addr().Is4() && a.Bits() <= p.Bits() && a.Contains(p.Addr())
+		}) {
+			return string(src)
+		}
+	}
+	return ""
+}
+
+// observeExpose reads the LB addresses the cluster assigned to the target Services. The operator
+// cannot verify that the LB preserves client addresses (that is the implementation's contract, see
+// the bridge how-to), so Exposed only reports assignment, never reachability.
+func (r *TailnetEgressReconciler) observeExpose(ctx context.Context, eg *tnv1.TailnetEgress, ns string) {
+	addrs := map[string]bool{}
+	pending := 0
+	for _, t := range eg.Spec.Targets {
+		var svc corev1.Service
+		if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: t.Name}, &svc); err != nil || !ownedBy(&svc, eg.UID) {
+			pending++
+			continue
+		}
+		n := 0
+		for _, ing := range svc.Status.LoadBalancer.Ingress {
+			for _, a := range []string{ing.IP, ing.Hostname} {
+				if a != "" {
+					addrs[a] = true
+					n++
+				}
+			}
+		}
+		if n == 0 {
+			pending++
+		}
+	}
+	eg.Status.Expose = &tnv1.EgressExposeStatus{Addresses: slices.Sorted(maps.Keys(addrs))}
+	if pending > 0 {
+		setCond(&eg.Status.Conditions, eg.Generation, "Exposed", metav1.ConditionFalse, "PendingAddress",
+			fmt.Sprintf("%d target Service(s) without a LoadBalancer address yet", pending))
+		return
+	}
+	setCond(&eg.Status.Conditions, eg.Generation, "Exposed", metav1.ConditionTrue, "AddressAssigned",
+		"LoadBalancer addresses assigned to every target Service")
+}
+
+func (r *TailnetEgressReconciler) applyChildren(ctx context.Context, eg *tnv1.TailnetEgress, tn *tnv1.Tailnet, ns, image string, listen map[string]int32, expose *tnv1.EgressExpose) error {
 	cm, err := targetsConfigMap(eg, ns, listen)
 	if err != nil {
 		return err
 	}
 	dep := agentDeployment(eg, tn, ns, image, r.AgentImagePullSecrets, r.AgentResources)
-	np := egressNetworkPolicy(eg, ns, r.OperatorNamespace, r.AgentScrapePeers)
+	np := egressNetworkPolicy(eg, ns, r.OperatorNamespace, r.AgentScrapePeers, expose, listen)
 	for _, obj := range []client.Object{cm, dep, np} {
 		if err := controllerutil.SetControllerReference(eg, obj, r.Scheme); err != nil {
 			return err
@@ -316,7 +394,7 @@ func (r *TailnetEgressReconciler) applyChildren(ctx context.Context, eg *tnv1.Ta
 	}
 	// Services: one per target, skipping any name already owned by something else.
 	for _, t := range eg.Spec.Targets {
-		svc := targetService(eg, ns, t, listen[t.Name])
+		svc := targetService(eg, ns, t, listen[t.Name], expose)
 		var existing corev1.Service
 		if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: t.Name}, &existing); err == nil {
 			if !ownedBy(&existing, eg.UID) {
@@ -449,11 +527,16 @@ func (r *TailnetEgressReconciler) computeTargetStatus(eg *tnv1.TailnetEgress, li
 	allReachable := true
 	allPresent := true
 	for _, t := range eg.Spec.Targets {
-		route := t.Address + "/32"
-		if strings.Contains(t.Address, ":") {
-			route = t.Address + "/128"
+		// A DNS-named target is a tailnet peer: no subnet route is involved, the far end's grant is
+		// the only authorization and it shows as reachable/unreachable, not as a missing route.
+		route, reason := "", routes.Present
+		if ip, err := netip.ParseAddr(t.Address); err == nil {
+			route = ip.String() + "/32"
+			if ip.Is6() {
+				route = ip.String() + "/128"
+			}
+			reason = routes.Classify(route, netmap, advertised, approved)
 		}
-		reason := routes.Classify(route, netmap, advertised, approved)
 		if probeErr != nil {
 			reason = probeFailed
 		}
@@ -486,7 +569,7 @@ func (r *TailnetEgressReconciler) computeTargetStatus(eg *tnv1.TailnetEgress, li
 	trStatus := metav1.ConditionTrue
 	trReason, trMsg := "AllReachable", "all targets reachable"
 	if !allReachable {
-		trStatus, trReason, trMsg = metav1.ConditionFalse, "Unreachable", "a target is not reachable"
+		trStatus, trReason, trMsg = metav1.ConditionFalse, "Unreachable", "a target is not reachable (for a DNS-named target: name unresolved or no grant on the far ingress)"
 	}
 	if probeErr != nil {
 		rgReason, rgMsg = string(probeFailed), "agent not scraped: "+truncate(probeErr.Error(), 256)
@@ -497,7 +580,10 @@ func (r *TailnetEgressReconciler) computeTargetStatus(eg *tnv1.TailnetEgress, li
 
 	ready := allPresent && allReachable && eg.Status.NodeID != ""
 	readyStatus := metav1.ConditionFalse
-	readyReason, readyMsg := blockingReason(eg.Status.Conditions, "Registered", "RoutesGranted", "TargetsReachable")
+	readyReason, readyMsg := blockingReason(eg.Status.Conditions, "Registered", "RoutesGranted", "TargetsReachable", "Exposed")
+	if c := meta.FindStatusCondition(eg.Status.Conditions, "Exposed"); c != nil && c.Status == metav1.ConditionFalse {
+		ready = false
+	}
 	if ready {
 		readyStatus, readyReason, readyMsg = metav1.ConditionTrue, "Ready", "all targets served"
 	}

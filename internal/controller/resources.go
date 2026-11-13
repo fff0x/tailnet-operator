@@ -12,6 +12,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 	"tsunaro.io/tailnet-operator/internal/keys"
@@ -136,11 +137,17 @@ func authKeySecret(eg *tnv1.TailnetEgress, ns, key, expiresAt string, binding ma
 }
 
 // targetService publishes one target under its own name, so consumers dial <target>.<ns>:<port>.
-func targetService(eg *tnv1.TailnetEgress, ns string, t tnv1.Target, listenPort int32) *corev1.Service {
-	return &corev1.Service{
+// targetService is ClusterIP for in-cluster consumers; with expose it becomes the LAN-facing
+// LoadBalancer. externalTrafficPolicy Local is not configurable: the NetworkPolicy's ipBlock filter
+// only sees the real client address when the LB does not SNAT, and Local is the standard knob for
+// that. Address assignment stays with the cluster's LB implementation (class/annotations/labels
+// pass through untouched); the operator's identity labels win over user labels.
+func targetService(eg *tnv1.TailnetEgress, ns string, t tnv1.Target, listenPort int32, expose *tnv1.EgressExpose) *corev1.Service {
+	svc := &corev1.Service{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
 		ObjectMeta: metav1.ObjectMeta{Name: t.Name, Namespace: ns, Labels: objLabels(eg.Name)},
 		Spec: corev1.ServiceSpec{
+			Type:     corev1.ServiceTypeClusterIP,
 			Selector: selectorLabels(eg.Name),
 			Ports: []corev1.ServicePort{{
 				Name:       "proxy",
@@ -150,6 +157,40 @@ func targetService(eg *tnv1.TailnetEgress, ns string, t tnv1.Target, listenPort 
 			}},
 		},
 	}
+	if expose == nil {
+		return svc
+	}
+	lb := expose.LoadBalancer
+	labels := make(map[string]string, len(lb.Labels)+len(svc.Labels))
+	maps.Copy(labels, lb.Labels)
+	maps.Copy(labels, svc.Labels)
+	svc.Labels = labels
+	if len(lb.Annotations) > 0 {
+		svc.Annotations = maps.Clone(lb.Annotations)
+	}
+	svc.Spec.Type = corev1.ServiceTypeLoadBalancer
+	svc.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyLocal
+	svc.Spec.AllocateLoadBalancerNodePorts = ptr.To(false)
+	if lb.Class != "" {
+		svc.Spec.LoadBalancerClass = ptr.To(lb.Class)
+	}
+	return svc
+}
+
+// exposeIngressRule admits the declared LAN clients to the proxy listen ports only — not the
+// health port, not everything. It is the whole source filter of a bridge, so it is rendered from
+// spec.expose.allowFrom verbatim and nothing else.
+func exposeIngressRule(expose *tnv1.EgressExpose, listen map[string]int32) networkingv1.NetworkPolicyIngressRule {
+	peers := make([]networkingv1.NetworkPolicyPeer, 0, len(expose.AllowFrom))
+	for _, p := range expose.AllowFrom {
+		peers = append(peers, networkingv1.NetworkPolicyPeer{IPBlock: &networkingv1.IPBlock{CIDR: string(p)}})
+	}
+	ports := make([]networkingv1.NetworkPolicyPort, 0, len(listen))
+	for _, name := range slices.Sorted(maps.Keys(listen)) {
+		port := intstr.FromInt32(listen[name])
+		ports = append(ports, networkingv1.NetworkPolicyPort{Port: &port})
+	}
+	return networkingv1.NetworkPolicyIngressRule{From: peers, Ports: ports}
 }
 
 // egressNetworkPolicy is the only thing keeping the proxy pointed at its allowed namespaces now that
@@ -158,7 +199,7 @@ func targetService(eg *tnv1.TailnetEgress, ns string, t tnv1.Target, listenPort 
 // CR status — without that second rule the operator's own probe is blocked and every target shows a
 // false NoGrant/unreachable even when the data plane works. Egress stays open, because the pod must
 // reach DERP and its peers to work at all.
-func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns, operatorNS string, scrape []networkingv1.NetworkPolicyPeer) *networkingv1.NetworkPolicy {
+func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns, operatorNS string, scrape []networkingv1.NetworkPolicyPeer, expose *tnv1.EgressExpose, listen map[string]int32) *networkingv1.NetworkPolicy {
 	peers := make([]networkingv1.NetworkPolicyPeer, 0, len(eg.Spec.ConsumerNamespaces))
 	for _, cns := range eg.Spec.ConsumerNamespaces {
 		peers = append(peers, networkingv1.NetworkPolicyPeer{
@@ -193,6 +234,9 @@ func egressNetworkPolicy(eg *tnv1.TailnetEgress, ns, operatorNS string, scrape [
 		np.Spec.Ingress = append(np.Spec.Ingress, networkingv1.NetworkPolicyIngressRule{
 			From: slices.Clone(scrape), Ports: []networkingv1.NetworkPolicyPort{{Port: &health}},
 		})
+	}
+	if expose != nil {
+		np.Spec.Ingress = append(np.Spec.Ingress, exposeIngressRule(expose, listen))
 	}
 	return np
 }
