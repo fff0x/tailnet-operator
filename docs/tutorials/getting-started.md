@@ -68,7 +68,7 @@ headscale policy check -f /acl/policy
 ## 3. Install the operator (5 min)
 
 ```sh
-helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
+helm install tailnet-operator oci://oci.tsunaro.io/charts/tailnet-operator \
   --version 0.24.0 --namespace tailnet-system --create-namespace
 
 kubectl -n tailnet-system create secret generic headscale-bootstrap --from-literal=apiKey='<key from step 1>'

@@ -7,7 +7,7 @@ Tsunaro — TailnetEgress, TailnetIngress and experimental kernel TailnetGateway
 ## Installation
 
 ```sh
-helm install tailnet-operator oci://oci.this-is-fine.io/charts/tailnet-operator \
+helm install tailnet-operator oci://oci.tsunaro.io/charts/tailnet-operator \
   --version 0.24.0 --namespace tailnet-system --create-namespace
 # or from a source checkout:
 helm install tailnet-operator ./charts/tailnet-operator --namespace tailnet-system --create-namespace

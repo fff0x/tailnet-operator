@@ -107,7 +107,7 @@ the SBOM and provenance attestations are recorded in the public Rekor transparen
 cosign verify --key deploy/cosign.pub docker.io/ff0x/tailnet-operator@sha256:<digest>
 cosign verify-attestation --key deploy/cosign.pub --type spdxjson \
   docker.io/ff0x/tailnet-operator@sha256:<digest>
-cosign verify --key deploy/cosign.pub oci.this-is-fine.io/charts/tailnet-operator:<version>
+cosign verify --key deploy/cosign.pub oci.tsunaro.io/charts/tailnet-operator:<version>
 ```
 
 Attestations of releases before v0.21.1 were not uploaded; verify those with `--insecure-ignore-tlog`.
