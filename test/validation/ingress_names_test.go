@@ -97,6 +97,30 @@ func testHTTPVirtualHostAdmission(t *testing.T, newIngress func() *unstructured.
 	for _, label := range []string{"Upper", "a.b", "a_b", "a/b", "-a", "a-", " ", strings.Repeat("a", 64)} {
 		t.Run("invalid-label/"+label, func(t *testing.T) { check(t, []any{http("a", label)}, "dnsLabel") })
 	}
+	withBridges := func(e any, names ...any) any {
+		e.(map[string]any)["bridgeNames"] = names
+		return e
+	}
+	for _, tt := range []struct {
+		name    string
+		exposes []any
+		reason  string
+	}{
+		{"bridge-names", []any{withBridges(http("a", "alpha"), "shop.site.example", "api.other.example")}, ""},
+		{"bridge-names-max", []any{withBridges(http("a", "alpha"), "a.site.example", "b.site.example", "c.site.example", "d.site.example")}, ""},
+		{"bridge-names-too-many", []any{withBridges(http("a", "alpha"), "a.site.example", "b.site.example", "c.site.example", "d.site.example", "e.site.example")}, "must have at most 4 items"},
+		{"bridge-names-duplicate", []any{withBridges(http("a", "alpha"), "shop.site.example", "shop.site.example")}, "Duplicate value"},
+		{"bridge-names-l4", []any{withBridges(expose("a", "l4", 22, nil), "shop.site.example")}, "bridgeNames require HTTP mode"},
+		{"bridge-names-implicit-l4", []any{withBridges(expose("a", "", 22, nil), "shop.site.example")}, "bridgeNames require HTTP mode"},
+		{"bridge-names-ip", []any{withBridges(http("a", "alpha"), "192.0.2.10")}, "bridgeNames must be DNS names, not IP addresses"},
+		{"bridge-names-single-label", []any{withBridges(http("a", "alpha"), "shop")}, "should match"},
+		{"bridge-names-uppercase", []any{withBridges(http("a", "alpha"), "SHOP.site.example")}, "should match"},
+		{"bridge-names-trailing-dot", []any{withBridges(http("a", "alpha"), "shop.site.example.")}, "should match"},
+		{"bridge-names-empty", []any{withBridges(http("a", "alpha"), "")}, "should match"},
+		{"bridge-names-overlong", []any{withBridges(http("a", "alpha"), strings.Repeat("a", 63)+"."+strings.Repeat("b", 63)+"."+strings.Repeat("c", 63)+"."+strings.Repeat("d", 62))}, "Too long"},
+	} {
+		t.Run(tt.name, func(t *testing.T) { check(t, tt.exposes, tt.reason) })
+	}
 	for _, count := range []int{50, 51} {
 		t.Run(fmt.Sprintf("count/%d", count), func(t *testing.T) {
 			es := make([]any, count)

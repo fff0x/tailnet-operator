@@ -105,9 +105,11 @@ func TestAdmission(t *testing.T) {
 	t.Run("example/tailnet-hub-spokes", func(t *testing.T) {
 		accept(t, load(t, filepath.Join(root, "deploy", "examples", "tailnet-hub-spokes.yaml")))
 	})
-	t.Run("example/tailnetegress-bridge", func(t *testing.T) {
-		accept(t, load(t, filepath.Join(root, "deploy", "examples", "tailnetegress-bridge.yaml")))
-	})
+	for _, example := range []string{"tailnetegress-bridge", "tailnetingress-bridge"} {
+		t.Run("example/"+example, func(t *testing.T) {
+			accept(t, load(t, filepath.Join(root, "deploy", "examples", example+".yaml")))
+		})
+	}
 	t.Run("expose-boundaries", func(t *testing.T) {
 		// The narrowest allowed prefixes per family and an exposed egress without LB passthrough.
 		for _, prefixes := range [][]any{{"10.1.0.0/16"}, {"2001:db8::/48"}, {"192.0.2.77/32", "2001:db8:1::1/128"}} {
@@ -117,7 +119,15 @@ func TestAdmission(t *testing.T) {
 		}
 		tn := templates["tailnet"].DeepCopy()
 		tn.Object["spec"].(map[string]any)["exposeSourceAllowlist"] = []any{"10.0.0.0/8", "2001:db8::/32"}
+		tn.Object["spec"].(map[string]any)["bridgeNameAllowlist"] = []any{"site.example", "corp.example.internal"}
 		accept(t, tn)
+		for _, zones := range [][]any{{"site"}, {"Site.example"}, {"site.example."}, {"site.example", "site.example"}, {""}} {
+			bad := tn.DeepCopy()
+			bad.Object["spec"].(map[string]any)["bridgeNameAllowlist"] = zones
+			if err := c.Create(ctx, bad, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Fatalf("bridgeNameAllowlist=%v accepted: %v", zones, err)
+			}
+		}
 	})
 
 	t.Run("valid-boundaries", func(t *testing.T) {

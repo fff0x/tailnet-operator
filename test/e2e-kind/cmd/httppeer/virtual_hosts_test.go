@@ -11,8 +11,8 @@ import (
 )
 
 func TestVirtualHostProbeNamesAreFixedAndPaired(t *testing.T) {
-	for _, sni := range []string{publicDNS, virtualDNS, virtualAlias} {
-		for _, host := range []string{publicDNS, virtualDNS, virtualAlias} {
+	for _, sni := range []string{publicDNS, virtualDNS, virtualAlias, virtualBridge} {
+		for _, host := range []string{publicDNS, virtualDNS, virtualAlias, virtualBridge} {
 			for _, h2 := range []bool{false, true} {
 				raw, _ := json.Marshal(map[string]any{"target": "100.64.0.8", "http2": h2, "sni": sni, "host": host})
 				input, err := decodeProbe(strings.NewReader(string(raw)))

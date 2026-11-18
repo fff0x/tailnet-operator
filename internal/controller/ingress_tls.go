@@ -97,6 +97,10 @@ func inspectIngressCertificate(secret *corev1.Secret, dnsName string, now time.T
 	return leaf, reason
 }
 
+// maxIngressCertificateNames bounds the SAN list: the base name plus, per HTTP expose (≤ 50), its
+// name, one alias and up to maxBridgeNamesPerExpose bridge names.
+const maxIngressCertificateNames = 1 + 50*(2+maxBridgeNamesPerExpose)
+
 // Return only the first uncovered configured name, never names or parser errors from the Secret.
 // Keep the server-leaf policy aligned with certificates.ParseServingPair; time is checked at use.
 func inspectIngressCertificateNames(secret *corev1.Secret, names []string, now time.Time) (servingCertificate, string, string) {
@@ -107,7 +111,7 @@ func inspectIngressCertificateNames(secret *corev1.Secret, names []string, now t
 	if secret.Type != corev1.SecretTypeTLS {
 		return result, "TLSSecretInvalid", ""
 	}
-	if len(names) == 0 || len(names) > 51 {
+	if len(names) == 0 || len(names) > maxIngressCertificateNames {
 		return result, "TLSInvalidDNSName", ""
 	}
 	for _, name := range names {

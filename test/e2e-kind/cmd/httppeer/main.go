@@ -36,6 +36,9 @@ const (
 	publicDNS    = "http-agent.fixture.test"
 	virtualDNS   = "admin.fixture.test"
 	virtualAlias = "admin-tailnet-system.fixture.test"
+	// Bridge name of the admin expose: a name outside the tailnet zone that the agent serves only
+	// because Tailnet.spec.bridgeNameAllowlist admits site.test.
+	virtualBridge = "admin.site.test"
 	// MagicDNS of a node renamed to "renamed-agent": the fixture control plane serves
 	// <givenName>.fixture.test. Dialable like publicDNS, but never a valid SNI or Host — the rename
 	// gate probes L4, so widening allowedHTTPName would buy nothing.
@@ -261,7 +264,7 @@ type probeInput struct {
 // Only fixed fixture identities may vary; the destination port/path and dial
 // allowlist remain unchanged. Empty fields preserve the original strict probe.
 func allowedHTTPName(name string) bool {
-	return name == publicDNS || name == virtualDNS || name == virtualAlias
+	return name == publicDNS || name == virtualDNS || name == virtualAlias || name == virtualBridge
 }
 
 func (input probeInput) names() (sni, host string, ok bool) {

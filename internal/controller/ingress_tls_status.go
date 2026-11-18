@@ -217,6 +217,10 @@ func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress,
 				in.Status.Exposes[i].DNSAliases = []string{alias}
 				hosts = append(hosts, alias)
 			}
+			if bridges := state.plan.names.bridgeNames[expose.Name]; len(bridges) > 0 {
+				in.Status.Exposes[i].BridgeNames = append([]string(nil), bridges...)
+				hosts = append(hosts, bridges...)
+			}
 		}
 		if reason := backendReasons[expose.Name]; reason != "" {
 			in.Status.Exposes[i].Reason = reason

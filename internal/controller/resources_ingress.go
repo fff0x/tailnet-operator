@@ -84,6 +84,8 @@ func ingressExposesConfigMap(in *tnv1.TailnetIngress, ns string, plan ingressTLS
 			if alias := plan.names.aliasNames[e.Name]; alias != "" {
 				target.DNSAliases = []string{alias}
 			}
+			// Bridge names are routes like aliases; the agent requires every one in certificateDNSNames.
+			target.DNSAliases = append(target.DNSAliases, plan.names.bridgeNames[e.Name]...)
 			target.CertFile, target.KeyFile = ingressTLSMount+"/tls.crt", ingressTLSMount+"/tls.key"
 			if e.Backend.TLS != nil {
 				target.BackendServerName = e.Backend.TLS.ServerName

@@ -37,7 +37,9 @@ func testIngressVirtualHosts(t *testing.T, x *httpPeerFixture, ingress *tnv1.Tai
 	const primary = "http-agent.fixture.test"
 	const second = "admin.fixture.test"
 	const alias = "admin-tailnet-system.fixture.test"
-	wantNames := []string{primary, second, alias}
+	// Outside every tailnet zone: the site's DNS, not the operator, points it at the node.
+	const bridge = "admin.site.test"
+	wantNames := []string{primary, second, alias, bridge}
 	slices.Sort(wantNames)
 	oldPod := agent.DeepCopy()
 	var dep appsv1.Deployment
@@ -60,6 +62,7 @@ func testIngressVirtualHosts(t *testing.T, x *httpPeerFixture, ingress *tnv1.Tai
 	base := ingress.DeepCopy()
 	verifiedBackend := *ingress.Spec.Exposes[0].DeepCopy()
 	verifiedBackend.Name, verifiedBackend.DNSLabel, verifiedBackend.Alias = "admin", "admin", true
+	verifiedBackend.BridgeNames = []string{bridge}
 	ingress.Spec.Exposes = []tnv1.Expose{
 		{Name: "http", Mode: "http", Port: 443, Backend: tnv1.Backend{Service: "fixture-backend", Port: 8080}},
 		verifiedBackend,
@@ -147,6 +150,14 @@ watchTransition:
 		}
 		return true
 	})
+	for _, e := range ingress.Status.Exposes {
+		if (e.Name == "admin") != slices.Equal(e.BridgeNames, []string{bridge}) {
+			t.Fatal("bridge name status differs from the admitted spec")
+		}
+	}
+	if !slices.Contains(ingress.Status.Hosts, bridge) {
+		t.Fatal("bridge name missing from status.hosts")
+	}
 	certs := &unstructured.UnstructuredList{}
 	certs.SetAPIVersion("cert-manager.io/v1")
 	certs.SetKind("CertificateList")
@@ -232,11 +243,13 @@ watchTransition:
 		check(primary, primary, h2, 200, true, true)
 		check(second, second, h2, 404, false, true)
 		check(alias, alias, h2, 404, false, true)
+		check(bridge, bridge, h2, 404, false, true)
 		// Positive controls converged first. A successful mismatched request is
 		// never retried into a pass, nor is a dial/TLS failure counted as rejection.
 		check(primary, second, h2, 421, false, false)
 		check(second, primary, h2, 421, false, false)
 		check(alias, primary, h2, 421, false, false)
+		check(bridge, primary, h2, 421, false, false)
 	}
 	checkIngressL4Coexistence(t, x, ingress, "virtual-hosts-after")
 	checkIngressWebSocket(t, x, ingress, leaf, "virtual-hosts")
@@ -332,6 +345,6 @@ watchTransition:
 	}
 	x.save("virtual-host-ingress.json", ingress)
 	x.save("virtual-host-agent-final.json", agent)
-	x.save("virtual-host-result.json", map[string]any{"realV2ScaleZeroObserved": drained, "oldPodAbsentBeforeV3GateRelease": true, "singleOwnedCertificate": true, "issuedSANs": sans, "http1AndHTTP2": true, "distinctBackends": true, "aliasRouted": true, "hostSNIMismatchRejected": true, "l4CoexistenceTested": true, "webSocketsTested": true, "unroutedBaseNameServed404": true})
-	t.Log("gate: observed real v2 scale-zero retirement, gated v3 replacement, two SNI backends + alias, HTTP1/HTTP2 Host!=SNI rejection, one owned Certificate and issued SAN union, unrouted base name answered 404 under the reissued leaf")
+	x.save("virtual-host-result.json", map[string]any{"realV2ScaleZeroObserved": drained, "oldPodAbsentBeforeV3GateRelease": true, "singleOwnedCertificate": true, "issuedSANs": sans, "http1AndHTTP2": true, "distinctBackends": true, "aliasRouted": true, "bridgeNameRouted": true, "hostSNIMismatchRejected": true, "l4CoexistenceTested": true, "webSocketsTested": true, "unroutedBaseNameServed404": true})
+	t.Log("gate: observed real v2 scale-zero retirement, gated v3 replacement, two SNI backends + alias + bridge name, HTTP1/HTTP2 Host!=SNI rejection, one owned Certificate and issued SAN union, unrouted base name answered 404 under the reissued leaf")
 }

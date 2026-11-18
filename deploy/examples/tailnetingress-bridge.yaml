@@ -1,0 +1,31 @@
+---
+# The far side of a bridge that terminates TLS on the agent. Site hosts
+# reach this ingress through the exposed egress (tailnetegress-bridge.yaml)
+# and dial the name the SITE DNS gives the bridge, not the tailnet name.
+# bridgeNames makes the agent serve that name as well: an extra certificate
+# SAN and SNI route, nothing more — no hosts-file record, no claim, no
+# MagicDNS. Two sides consent here too: the Tailnet admin lists the zone in
+# Tailnet.spec.bridgeNameAllowlist (a bridge name must be a proper
+# subdomain of it and outside the tailnet name/alias zone, else
+# TLSReady=False/BridgeNameDenied), and this ingress grants the bridge's
+# egress tag in allowFrom. The site must trust the issuer's CA.
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetIngress
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  tailnetRef:
+    name: corp
+  allowFrom:
+    - group:shop
+    - tag:egress-shop-bridge        # the bridge egress in the site cluster
+  exposes:
+    - name: shop
+      mode: http
+      port: 443
+      bridgeNames:
+        - shop.site.example.internal  # A record at the site → LB address of the bridge
+      backend:
+        service: shop
+        port: 8080

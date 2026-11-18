@@ -143,6 +143,8 @@ func TestIngressHTTP(t *testing.T) {
 		Proxy:  tnv1.ProxySpec{ProbeInterval: metav1.Duration{Duration: 2 * time.Second}},
 		DNS:    tnv1.DNSSpec{IngressNameTemplate: "{name}.fixture.test", IngressAliasTemplate: "{name}-{namespace}.fixture.test"},
 		Policy: tnv1.PolicySpec{BaseConfigMap: "headscale-policy", Mode: "Apply", TagOwners: []string{httpFixtureUser + "@"}, RouteApprovers: []string{httpFixtureUser + "@"}, IngressSourceAllowlist: []string{"group:http-allowed"}},
+		// A foreign zone the site resolves itself; the virtual-host test serves a bridge name in it.
+		BridgeNameAllowlist: []string{"site.test"},
 	}}
 	x.create(tn)
 	eventually(t, "real Tailnet compatibility and policy applied", func() bool {
