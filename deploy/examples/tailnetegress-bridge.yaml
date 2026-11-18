@@ -8,6 +8,9 @@
 # lists the client prefixes in Tailnet.spec.exposeSourceAllowlist. LB
 # address assignment is the cluster's business (MetalLB, Cilium LB-IPAM,
 # kube-vip, cloud); pass class/annotations/labels through as needed.
+# The site DNS points shop.site.example.internal at the LB address. If the
+# far ingress terminates TLS (mode: http), it must serve that name too:
+# see tailnetingress-bridge.yaml (bridgeNames).
 apiVersion: tsunaro.io/v1alpha1
 kind: TailnetEgress
 metadata:

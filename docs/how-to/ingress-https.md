@@ -112,6 +112,32 @@ spec:
       backend: { service: shop-admin, port: 8080 }
 ```
 
+### Bridge names
+
+Clients that reach the node through a [bridge](legacy-bridge.md) resolve a name the *site* owns,
+not the tailnet zone. `bridgeNames` (up to 4 per HTTP expose) adds such names as certificate SANs
+and SNI routes of that expose — and nothing more: no hosts-file record, no claim across CRs, no
+MagicDNS. The admin allows the zones first in `Tailnet.spec.bridgeNameAllowlist`; each bridge
+name must be a proper subdomain of an allowed zone (`shop.site.example.internal` for
+`site.example.internal`, never the zone itself) and must not lie in the tailnet name or alias zone.
+A name that fails this reports `TLSReady=False/BridgeNameDenied`; the accepted names are listed
+in `status.exposes[].bridgeNames` and `status.hosts`.
+
+```yaml
+# Tailnet (admin): which foreign zones ingresses may serve.
+spec:
+  bridgeNameAllowlist: [site.example.internal]
+---
+# TailnetIngress: the site's name for this service, pointed at the bridge by the site DNS.
+spec:
+  exposes:
+    - name: shop
+      mode: http
+      port: 443
+      bridgeNames: [shop.site.example.internal]
+      backend: { service: shop, port: 8080 }
+```
+
 The certificate source is, in order of precedence: `spec.tls.secretName` (a `kubernetes.io/tls`
 Secret in the ingress namespace whose leaf covers `status.dnsName`, wildcard SAN allowed),
 `spec.tls.issuerRef` (`Issuer` or `ClusterIssuer`, group `cert-manager.io`; the operator creates
@@ -131,6 +157,7 @@ curl -sI https://shop-shop-dev.prod-1.tailnet.example.internal | head -1      # 
 | `TLSReady=False/TLSCertificatePending` | cert-manager has not issued yet | `kubectl -n shop-dev describe certificate shop-tls` |
 | `TLSReady=False/TLSCertificateMismatch`, `TLSInvalidDNSName` | leaf does not cover every expose name (the first uncovered name is in the message) | fix the SANs or the ingress name/alias template |
 | `Ready=False/DNSNameConflict` | an older CR of this Tailnet already claims one of these DNS names/aliases | rename, drop the alias, or remove the other CR |
+| `TLSReady=False/BridgeNameDenied` | a `bridgeNames` entry is outside every zone in `Tailnet.spec.bridgeNameAllowlist`, is the zone itself, or lies in the tailnet name/alias zone | ask the admin to allow the zone, or use a proper subdomain of an allowed one ([Bridge names](#bridge-names)) |
 | `Ready=False/WorkloadMigrating` | the pre-0.12 Deployment named after the CR is being drained before `ingress-<name>` is created (one restart, normally under a minute) | wait |
 | `Ready=False/WorkloadMigrationBlocked` | the legacy Deployment could not be scaled down or deleted | read the message; check RBAC and the Deployment's finalizers |
 | `TLSReady=False/TLSCertificateExpired`, `TLSCertificateNotYetValid` | validity interval | renew |

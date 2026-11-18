@@ -88,7 +88,11 @@ admission (no default route, at most `/16` IPv4 or `/48` IPv6), must lie inside 
 `externalTrafficPolicy: Local` so the filter sees the client address. The filter is only as good
 as address preservation by the LB implementation — the operator cannot verify it
 ([Bridge § security](../how-to/legacy-bridge.md#security-what-the-bridge-is-and-is-not)). On the
-tailnet the bridge acts as its own tag; LAN hosts are never individually identifiable there. Do not expose port 9080 or the operator's
+tailnet the bridge acts as its own tag; LAN hosts are never individually identifiable there. The
+mirror on the ingress side, `bridgeNames`, lets a tenant obtain a certificate for and route a name
+outside the tailnet zone; `Tailnet.spec.bridgeNameAllowlist` (empty denies) bounds this to zones the
+admin has chosen, a bridge name must be a proper subdomain of one of them, and the tailnet name and
+alias zones are excluded so that no tenant can impersonate another CR's name through it. Do not expose port 9080 or the operator's
 8080 outside the cluster. Leader election serialises reconciliation; it is not a fence against
 in-flight writes from a paused replica.
 
@@ -124,7 +128,7 @@ bound together independently of the registry:
 
 ```sh
 rad clone rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX && cd tailnet-operator
-rad-artifact show v0.24.0 --pretty          # creator must be a delegate; shows image/chart digests
+rad-artifact show v0.25.0 --pretty          # creator must be a delegate; shows image/chart digests
 test "$(rad-artifact cid deploy/cosign.pub)" = "<cid from show>"
 ```
 

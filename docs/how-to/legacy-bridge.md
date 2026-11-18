@@ -73,6 +73,33 @@ The tag defaults to `tag:egress-<name>` of the egress CR (`Tailnet.spec.tagTempl
 operator-owned policy the grant is rendered; without it, write `{src: [tag:egress-shop-bridge],
 dst: [tag:ingress-shop], ip: [tcp:443]}` yourself.
 
+**HTTP ingress and the site's name.** The ingress above is L4: the agent passes TLS through and
+the ERP must dial the service's real name. If the ingress instead terminates TLS (`mode: http`),
+the agent only answers SNI it holds a certificate for, and the ERP dials whatever the site DNS
+calls the bridge (`shop.site.example.internal`). Give the expose that name as a **bridge name**;
+the admin first allows the zone on the Tailnet:
+
+```yaml
+# Tailnet (admin)
+spec:
+  bridgeNameAllowlist: [site.example.internal]
+---
+# TailnetIngress (service owner)
+spec:
+  exposes:
+    - name: shop
+      mode: http
+      port: 443
+      bridgeNames: [shop.site.example.internal]
+      backend: { service: shop, port: 8443 }
+```
+
+A bridge name becomes an extra certificate SAN and SNI route of that expose — nothing else: the
+operator neither renders it into the hosts file nor claims it across CRs, the site DNS owns it.
+It must be a proper subdomain of an allowed zone and must not lie in the tailnet name or alias
+zone; otherwise `TLSReady=False/BridgeNameDenied`. The certificate is still issued by the
+ingress's issuer, so the ERP must trust that CA ([Ingress: HTTPS](ingress-https.md#bridge-names)).
+
 ## 3. Bridge owner: the exposed egress
 
 In the site cluster's operator namespace:
@@ -94,7 +121,7 @@ spec:
       annotations: { example.com/address-pool: legacy }   # whatever your LB implementation reads
 ```
 
-Full example with comments: [`deploy/examples/tailnetegress-bridge.yaml`](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/deploy/examples/tailnetegress-bridge.yaml) — the same file the site's guided tour shows.
+Full examples with comments: [`deploy/examples/tailnetegress-bridge.yaml`](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/deploy/examples/tailnetegress-bridge.yaml) — the same file the site's guided tour shows — and, for the HTTP ingress with a bridge name, [`deploy/examples/tailnetingress-bridge.yaml`](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad:z46fGxuhyvDV57psA8s6Q6PdHJrsX/tree/deploy/examples/tailnetingress-bridge.yaml).
 
 What the operator renders:
 
@@ -123,7 +150,9 @@ The operator stops at the LoadBalancer address. Two things stay with the site:
   in the site DNS (take the address from `status.expose.addresses`). If the far service checks the
   TLS server name, the ERP must dial the *real* name — add `shop.prod-1.tailnet.example.internal`
   itself as that record, or use a target alias so the agent's hosts file carries it. The L4 tunnel
-  passes SNI through untouched.
+  passes SNI through untouched. If the far ingress terminates TLS itself (`mode: http`), give it the
+  site name as a bridge name instead ([§ 2](#2-service-owner-grant-the-bridge-tag)) — then the
+  site record is the only record needed and the tailnet zone stays out of the site DNS.
 - **Firewall.** If the ERP sits in another VLAN than the cluster nodes, open `192.0.2.77 →
   192.0.2.200:443` there as well. The NetworkPolicy is the second filter, not the only one.
 
@@ -135,6 +164,7 @@ The operator stops at the LoadBalancer address. Two things stay with the site:
 | `Exposed=False` | `PendingAddress` | a target Service has no LoadBalancer address yet. Usually no LB implementation, an exhausted pool, or a `class`/pool selector nothing claims. `kubectl -n tailnet-system describe svc shop` shows the implementation's events. |
 | `Exposed=True` | `AddressAssigned` | every target Service has an address; listed in `status.expose.addresses`. |
 | `TargetsReachable=False` | `Unreachable` | for a DNS-named target: the name did not resolve on the tailnet or the far ingress does not grant the bridge tag. Check the ingress `allowFrom` and `ingressSourceAllowlist` on its Tailnet. |
+| `TLSReady=False` (far ingress) | `BridgeNameDenied` | a `bridgeNames` entry is not a proper subdomain of a zone in `Tailnet.spec.bridgeNameAllowlist` (or the list is empty), or lies in the tailnet name/alias zone. Nothing is rendered for the ingress until fixed. |
 
 `kubectl get tneg` shows `Ready`; `Exposed` and `status.expose.addresses` are in the full status.
 

@@ -31,9 +31,10 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
   end routes by SNI/Host.
 - **`TailnetIngress`** (tenant namespace) — the mirror: expose in-cluster Services *on* the tailnet
   as one node with a MagicDNS name and, with a template, a DNS name under your zone. L4 exposes
-  forward TCP; one or more `mode: http` exposes (virtual hosts, each with its own name and optional
-  short alias) terminate TLS on the agent with a Secret or cert-manager certificate and forward HTTP
-  or explicitly verified HTTPS to the app, routed by SNI — no shared gateway needed.
+  forward TCP; one or more `mode: http` exposes (virtual hosts, each with its own name, optional
+  short alias and admin-allowed **bridge names** from a site's own zone) terminate TLS on the agent
+  with a Secret or cert-manager certificate and forward HTTP or explicitly verified HTTPS to the
+  app, routed by SNI — no shared gateway needed.
 - **`TailnetSite`** (cluster-scoped) — a remote network behind a subnet router: a branch `/24`, a
   management range, a single host as `/32`. Declared once in the policy-owning cluster; the router
   is identified **by tag**, so any tagged router, in this or another cluster, qualifies. The operator renders
