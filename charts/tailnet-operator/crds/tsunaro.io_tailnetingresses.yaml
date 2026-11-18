@@ -145,6 +145,21 @@ spec:
                       - port
                       - service
                       type: object
+                    bridgeNames:
+                      description: |-
+                        Additional names outside the tailnet zone this HTTP expose answers to: extra certificate
+                        SANs and SNI routes for clients that reach the node through a bridge and resolve the name in
+                        their own zone (the site's DNS points it at the bridge address). Each must be a proper
+                        subdomain of a zone in Tailnet.spec.bridgeNameAllowlist and must not lie in the tailnet
+                        name or alias zone; otherwise the CR reports BridgeNameDenied. Never rendered into the hosts
+                        file or claimed across CRs.
+                      items:
+                        maxLength: 253
+                        pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)+$
+                        type: string
+                      maxItems: 4
+                      type: array
+                      x-kubernetes-list-type: set
                     dnsLabel:
                       description: |-
                         HTTP DNS label substituted for {name} in the Tailnet's ingressNameTemplate.
@@ -210,6 +225,11 @@ spec:
                   - message: alias requires HTTP mode
                     rule: '!has(self.alias) || !self.alias || (has(self.mode) && self.mode
                       == ''http'')'
+                  - message: bridgeNames require HTTP mode
+                    rule: '!has(self.bridgeNames) || size(self.bridgeNames) == 0 ||
+                      (has(self.mode) && self.mode == ''http'')'
+                  - message: bridgeNames must be DNS names, not IP addresses
+                    rule: '!has(self.bridgeNames) || self.bridgeNames.all(n, !isIP(n))'
                 maxItems: 50
                 minItems: 1
                 type: array
@@ -438,6 +458,13 @@ spec:
                     backend:
                       description: The in-cluster backend the agent dials, as service:port.
                       type: string
+                    bridgeNames:
+                      description: |-
+                        Bridge names served by this HTTP expose (certificate SANs and SNI routes outside the tailnet
+                        zone); empty unless requested and allowed.
+                      items:
+                        type: string
+                      type: array
                     dnsAliases:
                       description: Additional resolved DNS aliases for an HTTP expose;
                         empty unless alias is requested and won.

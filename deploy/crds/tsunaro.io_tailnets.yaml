@@ -98,6 +98,21 @@ spec:
                 description: Lifetime of the reusable ephemeral pre-auth keys handed
                   to agents. Rotated at half-life.
                 type: string
+              bridgeNameAllowlist:
+                description: |-
+                  DNS zones a TailnetIngress.spec.exposes[].bridgeNames entry must lie within (proper
+                  subdomain), e.g. ["site.example.internal"]. Bridge names are extra certificate SANs and SNI
+                  routes for clients that reach the ingress through a bridge and resolve the name in their own
+                  zone; the operator neither renders nor claims them. Ingress CRs are written by tenants, so
+                  this is the admin's veto over which foreign zones may be served. Empty → no bridge names
+                  (TLSReady=False/BridgeNameDenied).
+                items:
+                  maxLength: 253
+                  pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)+$
+                  type: string
+                maxItems: 16
+                type: array
+                x-kubernetes-list-type: set
               defaults:
                 description: Defaults inherited by ingress resources that do not select
                   their own TLS source.

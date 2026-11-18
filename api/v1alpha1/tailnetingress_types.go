@@ -70,6 +70,8 @@ type HTTPTimeouts struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.timeouts) || (has(self.mode) && self.mode == 'http')",message="timeouts require HTTP mode"
 // +kubebuilder:validation:XValidation:rule="!has(self.dnsLabel) || (has(self.mode) && self.mode == 'http')",message="dnsLabel requires HTTP mode"
 // +kubebuilder:validation:XValidation:rule="!has(self.alias) || !self.alias || (has(self.mode) && self.mode == 'http')",message="alias requires HTTP mode"
+// +kubebuilder:validation:XValidation:rule="!has(self.bridgeNames) || size(self.bridgeNames) == 0 || (has(self.mode) && self.mode == 'http')",message="bridgeNames require HTTP mode"
+// +kubebuilder:validation:XValidation:rule="!has(self.bridgeNames) || self.bridgeNames.all(n, !isIP(n))",message="bridgeNames must be DNS names, not IP addresses"
 type Expose struct {
 	// Listener mode. Omitted means L4 forwarding; HTTP requests TLS termination.
 	// +optional
@@ -92,6 +94,18 @@ type Expose struct {
 	// ingressAliasTemplate to be set; otherwise the CR reports InvalidDNSName.
 	// +optional
 	Alias bool `json:"alias,omitempty"`
+	// Additional names outside the tailnet zone this HTTP expose answers to: extra certificate
+	// SANs and SNI routes for clients that reach the node through a bridge and resolve the name in
+	// their own zone (the site's DNS points it at the bridge address). Each must be a proper
+	// subdomain of a zone in Tailnet.spec.bridgeNameAllowlist and must not lie in the tailnet
+	// name or alias zone; otherwise the CR reports BridgeNameDenied. Never rendered into the hosts
+	// file or claimed across CRs.
+	// +optional
+	// +kubebuilder:validation:MaxItems=4
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)+$`
+	// +listType=set
+	BridgeNames []string `json:"bridgeNames,omitempty"`
 	// Port the tailnet node listens on — what a tailnet peer dials on this node's MagicDNS name/IP.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
@@ -147,6 +161,10 @@ type ExposeStatus struct {
 	// Additional resolved DNS aliases for an HTTP expose; empty unless alias is requested and won.
 	// +optional
 	DNSAliases []string `json:"dnsAliases,omitempty"`
+	// Bridge names served by this HTTP expose (certificate SANs and SNI routes outside the tailnet
+	// zone); empty unless requested and allowed.
+	// +optional
+	BridgeNames []string `json:"bridgeNames,omitempty"`
 	// Port the tailnet node listens on for this expose.
 	ListenPort int32 `json:"listenPort"`
 	// The in-cluster backend the agent dials, as service:port.

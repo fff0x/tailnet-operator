@@ -28,6 +28,7 @@ TailnetSpec describes a control server and how the operator authenticates to it.
 | `apiSecretRef.name` | string | yes |  |
 | `apiUrl` | string | no | In-cluster URL for the REST API if it differs from Server. Empty → Server. |
 | `authKeyLifetime` | string | no | Lifetime of the reusable ephemeral pre-auth keys handed to agents. Rotated at half-life. Default `168h`. |
+| `bridgeNameAllowlist[]` | []string | no | DNS zones a TailnetIngress.spec.exposes[].bridgeNames entry must lie within (proper subdomain), e.g. ["site.example.internal"]. Bridge names are extra certificate SANs and SNI routes for clients that reach the ingress through a bridge and resolve the name in their own zone; the operator neither renders nor claims them. Ingress CRs are written by tenants, so this is the admin's veto over which foreign zones may be served. Empty → no bridge names (TLSReady=False/BridgeNameDenied). Items ≤ 16. |
 | `defaults` | object | no | Defaults inherited by ingress resources that do not select their own TLS source. |
 | `defaults.tls` | object | no | TLSDefaults supplies an issuer for HTTP ingresses without an explicit TLS source. Secrets are namespace-local and cannot be selected as a Tailnet-wide default. |
 | `defaults.tls.issuerRef` | object | no | TLSIssuerReference identifies a cert-manager issuer without requiring its API dependency. Issuer references resolve in the ingress namespace; ClusterIssuer references are cluster-scoped. |
@@ -295,6 +296,7 @@ TailnetIngressSpec exposes in-cluster services through one tsnet node. L4 forwar
 | `exposes[].backend.tls.caConfigMapRef.key` | string | yes | Max length 253. |
 | `exposes[].backend.tls.caConfigMapRef.name` | string | yes | Max length 253. |
 | `exposes[].backend.tls.serverName` | string | yes | DNS name verified against the backend certificate; does not change the dial address or HTTP Host. Max length 253. |
+| `exposes[].bridgeNames[]` | []string | no | Additional names outside the tailnet zone this HTTP expose answers to: extra certificate SANs and SNI routes for clients that reach the node through a bridge and resolve the name in their own zone (the site's DNS points it at the bridge address). Each must be a proper subdomain of a zone in Tailnet.spec.bridgeNameAllowlist and must not lie in the tailnet name or alias zone; otherwise the CR reports BridgeNameDenied. Never rendered into the hosts file or claimed across CRs. Items ≤ 4. |
 | `exposes[].dnsLabel` | string | no | HTTP DNS label substituted for {name} in the Tailnet's ingressNameTemplate. Omitted or empty uses the ingress-level name; does not change the expose identifier. Max length 63. |
 | `exposes[].mode` | string | no | Listener mode. Omitted means L4 forwarding; HTTP requests TLS termination. Default `l4`. One of `l4`, `http`. Max length 4. |
 | `exposes[].name` | string | yes | DNS label; identifies the expose in status and in the agent config. Max length 63. |
@@ -337,6 +339,7 @@ TailnetIngressStatus is the observed state.
 | `dnsName` | string | no | DNS name rendered from the Tailnet's dns.ingressNameTemplate; resolves to TailnetIPs via the hosts ConfigMap. Empty when no template is set. |
 | `exposes[]` | []object | no |  |
 | `exposes[].backend` | string | yes | The in-cluster backend the agent dials, as service:port. |
+| `exposes[].bridgeNames[]` | []string | no | Bridge names served by this HTTP expose (certificate SANs and SNI routes outside the tailnet zone); empty unless requested and allowed. |
 | `exposes[].dnsAliases[]` | []string | no | Additional resolved DNS aliases for an HTTP expose; empty unless alias is requested and won. |
 | `exposes[].dnsName` | string | no | Resolved DNS name for an HTTP expose; empty for L4. |
 | `exposes[].listenPort` | integer | yes | Port the tailnet node listens on for this expose. Format `int32`. |

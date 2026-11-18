@@ -273,6 +273,18 @@ type TailnetSpec struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +listType=set
 	ExposeSourceAllowlist []GatewayPrefix `json:"exposeSourceAllowlist,omitempty"`
+	// DNS zones a TailnetIngress.spec.exposes[].bridgeNames entry must lie within (proper
+	// subdomain), e.g. ["site.example.internal"]. Bridge names are extra certificate SANs and SNI
+	// routes for clients that reach the ingress through a bridge and resolve the name in their own
+	// zone; the operator neither renders nor claims them. Ingress CRs are written by tenants, so
+	// this is the admin's veto over which foreign zones may be served. Empty → no bridge names
+	// (TLSReady=False/BridgeNameDenied).
+	// +optional
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)+$`
+	// +listType=set
+	BridgeNameAllowlist []string `json:"bridgeNameAllowlist,omitempty"`
 }
 
 // PolicyGenerated counts what the operator added to the base policy.
