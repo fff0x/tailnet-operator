@@ -25,6 +25,7 @@ description: "Symptom table with the condition reasons, and the diagnosis cheat 
 | `… NoGrant` | policy `grants` | no grant tag → /32:port (file mode) |
 | `TargetsReachable=False` | agent log `dial …: context deadline exceeded` | site firewall, target down |
 | Alias does not resolve in a pod | `kubectl -n tailnet-system get cm tailnet-dns-hosts`, resolver log | zone not forwarded, ConfigMap not mounted, Service not created yet |
+| Aliases and tailnet names stop resolving in pods for minutes after a Kubernetes upgrade (agents stay Ready; a hub reports spokes `dial failed`) | `kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}'` — forwarded zones missing | the platform rewrote the cluster CoreDNS ConfigMap (Talos `upgrade-k8s`, managed add-ons); see [Who owns `kube-system/coredns`](dns-coredns.md#who-owns-kube-systemcoredns) |
 | Ingress `PolicyGranted=False/PolicyDenied` | condition message | `allowFrom` entry not covered by `ingressSourceAllowlist` |
 | `PolicyRendered=False/PolicyEmpty` | base ConfigMap | base has no `tagOwners` or no `acls`/`grants` — refused to avoid a lock-out |
 | `PolicyApplied=False/ApplyFailed` | condition message (`read: …; write: …`) | Headscale still in file mode, empty policy table, API unreachable |

@@ -84,3 +84,23 @@ as upstream — forward that zone to a peer resolver *inside* the site over the 
 
 Freshness is ConfigMap propagation (≤ ~1 min) plus the `hosts` reload (5 s). If the operator dies,
 the last file stays valid — the data path never depends on it.
+
+### Who owns `kube-system/coredns`
+
+On many platforms the cluster CoreDNS ConfigMap is not yours: Talos rewrites it to its default on
+every `talosctl upgrade-k8s`, and managed distributions (EKS, AKS, GKE) do the same through their
+add-on managers. A GitOps copy that replaces the whole ConfigMap is reverted at each upgrade and comes
+back only at the next sync plus CoreDNS's own reload (30–70 s) — measured windows of 4–8 min with a
+15 min sync interval. In that window pods lose the forwarded zones (aliases, tailnet names, and in a
+hub/spoke setup the hub's path to a spoke API by tailnet name); egress agents are not affected (they
+dial through the tailnet's own DNS), nor are ingress backends (`cluster.local`).
+
+Prefer not to fight the platform: leave its CoreDNS untouched and run your own resolver for the
+forwarded zones (on Talos, `cluster.coreDNS.disabled: true` and bring your own `kube-dns`; platform
+hooks such as AKS `coredns-custom` or a Corefile `import` work too). If you must replace the ConfigMap,
+reconcile it at a short interval (`1m`) so the window is bounded, and check the zones after every
+Kubernetes upgrade:
+
+```sh
+kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}' | grep -c 'corp.example'   # 1
+```
