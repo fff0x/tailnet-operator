@@ -69,7 +69,7 @@ headscale policy check -f /acl/policy
 
 ```sh
 helm install tailnet-operator oci://oci.tsunaro.io/charts/tailnet-operator \
-  --version 0.24.0 --namespace tailnet-system --create-namespace
+  --version 0.25.0 --namespace tailnet-system --create-namespace
 
 kubectl -n tailnet-system create secret generic headscale-bootstrap --from-literal=apiKey='<key from step 1>'
 

@@ -20,6 +20,15 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
+## Bridge names on HTTP ingresses (v0.25.0)
+
+CRD extension, additive: `TailnetIngress.spec.exposes[].bridgeNames`, `status.exposes[].bridgeNames`
+and `Tailnet.spec.bridgeNameAllowlist` need the v0.25.0 CRDs (`task crd-upgrade`); without them the
+fields are pruned at admission and the ingress behaves as before. Controller v0.25.0 adds the names
+to the certificate and to the agent's per-target `dnsAliases`, which every v0.6.0+ agent already
+serves; the agent image is unchanged in behaviour. Existing ingresses without `bridgeNames` render
+byte-identical targets and do not roll.
+
 ## Egress bridge and DNS-named targets (v0.24.0)
 
 CRD extension, additive: `TailnetEgress.spec.expose` and `Tailnet.spec.exposeSourceAllowlist`

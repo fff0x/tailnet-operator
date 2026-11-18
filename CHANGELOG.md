@@ -4,6 +4,29 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-18
+
+### Added
+
+- **Bridge names: `TailnetIngress.spec.exposes[].bridgeNames`.** An HTTP expose may serve up to
+  four names outside the tailnet zone — the names a site's own DNS gives a
+  [bridge](docs/how-to/legacy-bridge.md), so that LAN clients without a tailnet client dial the
+  ingress by the site name and the agent still finds a matching SNI route and certificate SAN.
+  Bridge names are SANs and routes only: never rendered into the hosts file, never claimed across
+  CRs, never MagicDNS. Accepted names appear in `status.exposes[].bridgeNames` and `status.hosts`.
+- **`Tailnet.spec.bridgeNameAllowlist`** — the admin's veto: a bridge name must be a proper
+  subdomain of a listed zone and must not lie in the `ingressNameTemplate`/`ingressAliasTemplate`
+  zone; otherwise `TLSReady=False/BridgeNameDenied` (new bounded reason). Empty list denies.
+- Admission: `bridgeNames` require `mode: http`, are lowercase multi-label DNS names (no IP
+  literals, no trailing dot), unique per expose; `bridgeNameAllowlist` entries are zones of the
+  same shape (max 16).
+
+### Changed
+
+- The agent config and certificate name bound grows from 51 to 301 names (base + per HTTP expose
+  its name, one alias and four bridge names). Ingresses without `bridgeNames` render identical
+  targets and do not roll.
+
 ## [0.24.0] - 2026-11-13
 
 ### Added
