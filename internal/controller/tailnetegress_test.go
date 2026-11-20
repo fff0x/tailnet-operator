@@ -16,7 +16,7 @@ func TestComputeTargetStatusProbeFailed(t *testing.T) {
 	eg.Spec.Targets = []tnv1.Target{{Name: "db", Address: "10.0.0.5", Port: 5432}}
 	eg.Status.NodeID = "1"
 	approved := map[string]bool{"10.0.0.5/32": true}
-	r.computeTargetStatus(eg, map[string]int32{"db": 10000}, map[string]bool{}, approved, approved, nil, errors.New("dial tcp: connection refused"))
+	r.computeTargetStatus(eg, map[string]int32{"db": 10000}, map[string]bool{}, approved, approved, nil, nil, errors.New("dial tcp: connection refused"))
 	if got := eg.Status.Targets[0].Reason; got != "ProbeFailed" {
 		t.Fatalf("target reason = %s, want ProbeFailed", got)
 	}
@@ -26,7 +26,7 @@ func TestComputeTargetStatusProbeFailed(t *testing.T) {
 		}
 	}
 	// Same inputs with a successful scrape -> the classifier's verdict stands.
-	r.computeTargetStatus(eg, map[string]int32{"db": 10000}, map[string]bool{}, approved, approved, map[string]bool{}, nil)
+	r.computeTargetStatus(eg, map[string]int32{"db": 10000}, map[string]bool{}, approved, approved, map[string]bool{}, nil, nil)
 	if got := eg.Status.Targets[0].Reason; got != "NoGrant" {
 		t.Fatalf("target reason = %s, want NoGrant", got)
 	}

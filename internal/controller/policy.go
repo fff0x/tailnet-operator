@@ -226,6 +226,9 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if len(sum.Denied) > 0 {
 		msg += "; denied ingress tags: " + strings.Join(sum.Denied, ", ")
 	}
+	if len(sum.UnknownSources) > 0 {
+		msg += "; skipped undeclared source tags: " + strings.Join(sum.UnknownSources, ", ")
+	}
 	if len(skipped) > 0 {
 		msg += "; skipped (name-addressed target without grant, gateway routes that do not plan, or blocked site): " + strings.Join(skipped, ", ")
 	}
@@ -405,6 +408,9 @@ func (r *TailnetPolicyReconciler) export(ctx context.Context, tn *tnv1.Tailnet) 
 	if len(sum.Denied) > 0 {
 		msg += "; denied ingress tags: " + strings.Join(sum.Denied, ", ")
 	}
+	if len(sum.UnknownSources) > 0 {
+		msg += "; skipped undeclared source tags: " + strings.Join(sum.UnknownSources, ", ")
+	}
 	if len(skipped) > 0 {
 		msg += "; skipped: " + strings.Join(skipped, ", ")
 	}
@@ -551,6 +557,13 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 	if err := r.List(ctx, &egs, client.InNamespace(r.OperatorNamespace)); err != nil {
 		return in, nil, nil, err
 	}
+	// render must not depend on List order; a stable tag sort below keeps this order for ties
+	sort.Slice(egs.Items, func(a, b int) bool {
+		if egs.Items[a].Namespace != egs.Items[b].Namespace {
+			return egs.Items[a].Namespace < egs.Items[b].Namespace
+		}
+		return egs.Items[a].Name < egs.Items[b].Name
+	})
 	for _, eg := range egs.Items {
 		if eg.Spec.TailnetRef.Name != tn.Name {
 			continue
@@ -570,6 +583,12 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 	if err := r.List(ctx, &ins); err != nil {
 		return in, nil, nil, err
 	}
+	sort.Slice(ins.Items, func(a, b int) bool {
+		if ins.Items[a].Namespace != ins.Items[b].Namespace {
+			return ins.Items[a].Namespace < ins.Items[b].Namespace
+		}
+		return ins.Items[a].Name < ins.Items[b].Name
+	})
 	for _, ig := range ins.Items {
 		if ig.Spec.TailnetRef.Name != tn.Name {
 			continue
@@ -620,8 +639,10 @@ func (r *TailnetPolicyReconciler) collect(ctx context.Context, tn *tnv1.Tailnet)
 			skipped = append(skipped, "site/"+name)
 		}
 	}
-	sort.Slice(in.Egresses, func(a, b int) bool { return in.Egresses[a].Tag < in.Egresses[b].Tag })
-	sort.Slice(in.Ingresses, func(a, b int) bool { return in.Ingresses[a].Tag < in.Ingresses[b].Tag })
+	// Stable: CRs that resolve to the same tag (two exposes of one service) keep their
+	// namespace/name order above, so the rendered grant src list is deterministic.
+	sort.SliceStable(in.Egresses, func(a, b int) bool { return in.Egresses[a].Tag < in.Egresses[b].Tag })
+	sort.SliceStable(in.Ingresses, func(a, b int) bool { return in.Ingresses[a].Tag < in.Ingresses[b].Tag })
 	sort.Strings(skipped)
 	return in, skipped, bound, nil
 }

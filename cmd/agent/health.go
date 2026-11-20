@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -28,10 +29,14 @@ const (
 // HTTP Reachable combines backend proof (verified TLS when configured, otherwise TCP)
 // with local frontend TLS readiness. Peer end-to-end acceptance remains a separate check.
 type probeResult struct {
-	Name               string     `json:"name"`
-	Reachable          bool       `json:"reachable"`
-	LastProbe          time.Time  `json:"lastProbe"`
-	Error              string     `json:"error,omitempty"`
+	Name      string    `json:"name"`
+	Reachable bool      `json:"reachable"`
+	LastProbe time.Time `json:"lastProbe"`
+	Error     string    `json:"error,omitempty"`
+	// Reason classifies an L4 dial failure for the operator: "NameUnresolved" when the target name
+	// did not resolve (a tailnet-zone alias with no :53 grant for the egress tag, or a typo) versus
+	// a plain dial failure (grant/backend). Empty on success and for HTTP targets.
+	Reason             string     `json:"reason,omitempty"`
 	ConfigID           string     `json:"configID,omitempty"`
 	BackendReachable   *bool      `json:"backendReachable,omitempty"`
 	TLSReady           *bool      `json:"tlsReady,omitempty"`
@@ -295,6 +300,10 @@ func probeOne(ctx context.Context, probe probeTarget) probeResult {
 			r.Reachable = true
 		} else {
 			r.Error = err.Error() // retain L4 error behavior
+			var dnsErr *net.DNSError
+			if errors.As(err, &dnsErr) {
+				r.Reason = "NameUnresolved" // name did not resolve, as opposed to a dial/grant failure
+			}
 		}
 	}
 	if t.Mode == "http" {

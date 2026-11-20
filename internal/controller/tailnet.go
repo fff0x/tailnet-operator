@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -269,6 +270,32 @@ func healthConditions(ctx context.Context, hs *headscale.Client, tn *tnv1.Tailne
 	setCond(&tn.Status.Conditions, tn.Generation, "ApiKeyValid", metav1.ConditionTrue, "Valid",
 		fmt.Sprintf("working key valid until %s", exp.UTC().Format(time.RFC3339)))
 	return true
+}
+
+// readyReason is the current reason of the Ready condition, or "" when it is not set yet.
+func readyReason(conds []metav1.Condition) string {
+	if c := meta.FindStatusCondition(conds, "Ready"); c != nil {
+		return c.Reason
+	}
+	return ""
+}
+
+// emitReadyChange records an event whenever a resource's Ready reason flips, so an operator sees
+// transitions (e.g. Granted -> SourceTagUnknown, or back to Ready) in `kubectl describe` without
+// scraping controller logs. No event on an unchanged reason; the first observed reason emits once.
+func emitReadyChange(rec record.EventRecorder, obj runtime.Object, oldReason, newReason string) {
+	if rec == nil || oldReason == newReason {
+		return
+	}
+	etype := corev1.EventTypeWarning
+	if newReason == "Ready" {
+		etype = corev1.EventTypeNormal
+	}
+	from := oldReason
+	if from == "" {
+		from = "<none>"
+	}
+	rec.Eventf(obj, etype, "ReadyChanged", "Ready: %s -> %s", from, newReason)
 }
 
 // setCond is meta.SetStatusCondition with the observed generation stamped in.

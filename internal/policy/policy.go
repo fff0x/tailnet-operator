@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"path"
 	"sort"
+	"strings"
 
 	"github.com/tailscale/hujson"
 )
@@ -79,6 +80,9 @@ type Summary struct {
 	Tags, Grants, Routes int
 	Fragments            int
 	Denied               []string
+	// Undeclared tag: sources that were dropped from generated/fragment grants (not owned by any
+	// tagOwner after the merge). Base grants are never touched. See dropUnknownSources.
+	UnknownSources []string
 }
 
 // Allowed reports whether src matches one of the glob patterns (path.Match syntax, e.g. "group:*").
@@ -105,12 +109,17 @@ func Render(base []byte, in Inputs, fragments ...[]byte) ([]byte, Summary, error
 	if _, ok := doc["tagOwners"].(map[string]any); !ok || (len(arr(doc["acls"])) == 0 && len(arr(doc["grants"])) == 0) {
 		return nil, sum, ErrEmpty
 	}
+	baseGrants := map[string]bool{}
+	for _, g := range arr(doc["grants"]) {
+		baseGrants[canon(g)] = true
+	}
 	generate(doc, in, &sum)
 	for _, f := range fragments {
 		if err := mergeFragment(doc, f, &sum); err != nil {
 			return nil, sum, err
 		}
 	}
+	dropUnknownSources(doc, baseGrants, &sum)
 	return marshal(doc, sum)
 }
 
@@ -255,6 +264,50 @@ func generate(doc map[string]any, in Inputs, sum *Summary) {
 		add(map[string]any{"src": toAny(dedupe(i.AllowFrom)), "dst": []any{i.Tag}, "ip": ip})
 	}
 	doc["grants"] = grants
+}
+
+// dropUnknownSources removes a tag: source that no tagOwner declares (after generate and every
+// fragment merged) from each generated/fragment grant, so one undeclared source tag — a typo, or an
+// egress tag not created yet — can no longer make Headscale reject the whole policy (observed
+// 2026-11-18: HTTP 500, live policy frozen). Base grants (keyed before generate) are never touched:
+// the base is the admin's word. A grant left with no source disappears. Unknown tags are reported
+// so the owning ingress can show SourceTagUnknown.
+func dropUnknownSources(doc map[string]any, baseGrants map[string]bool, sum *Summary) {
+	owners := ensureMap(doc, "tagOwners")
+	grants := arr(doc["grants"])
+	out := grants[:0]
+	unknown := map[string]bool{}
+	for _, g := range grants {
+		gm, ok := g.(map[string]any)
+		if baseGrants[canon(g)] || !ok {
+			out = append(out, g)
+			continue
+		}
+		src := strs(gm["src"])
+		kept := make([]string, 0, len(src))
+		for _, s := range src {
+			if strings.HasPrefix(s, "tag:") {
+				if _, declared := owners[s]; !declared {
+					unknown[s] = true
+					continue
+				}
+			}
+			kept = append(kept, s)
+		}
+		if len(kept) == 0 {
+			sum.Grants-- // the grant had only undeclared tag sources; it vanishes
+			continue
+		}
+		if len(kept) != len(src) {
+			gm["src"] = toAny(kept)
+		}
+		out = append(out, gm)
+	}
+	doc["grants"] = out
+	for s := range unknown {
+		sum.UnknownSources = append(sum.UnknownSources, s)
+	}
+	sort.Strings(sum.UnknownSources)
 }
 
 // mergeFragment merges a spoke fragment into doc using the same additive rules as generate: unknown

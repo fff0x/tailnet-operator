@@ -21,7 +21,7 @@ func TestReadyReasonNamesBlockingCondition(t *testing.T) {
 
 	// No node yet: Registered wins over the route and probe verdicts.
 	setCond(&eg.Status.Conditions, 1, "Registered", metav1.ConditionFalse, "NotRegistered", "no node")
-	r.computeTargetStatus(eg, listen, approved, approved, approved, map[string]bool{"db": true}, nil)
+	r.computeTargetStatus(eg, listen, approved, approved, approved, map[string]bool{"db": true}, nil, nil)
 	if got := condReason(eg.Status.Conditions, "Ready"); got != "NotRegistered" {
 		t.Fatalf("Ready reason = %s, want NotRegistered", got)
 	}
@@ -29,19 +29,19 @@ func TestReadyReasonNamesBlockingCondition(t *testing.T) {
 	// Node registered, scrape failed: ProbeFailed (via RoutesGranted) instead of NotReady.
 	eg.Status.NodeID = "1"
 	setCond(&eg.Status.Conditions, 1, "Registered", metav1.ConditionTrue, "Registered", "ok")
-	r.computeTargetStatus(eg, listen, map[string]bool{}, approved, approved, nil, errors.New("dial tcp: connection refused"))
+	r.computeTargetStatus(eg, listen, map[string]bool{}, approved, approved, nil, nil, errors.New("dial tcp: connection refused"))
 	if got := condReason(eg.Status.Conditions, "Ready"); got != "ProbeFailed" {
 		t.Fatalf("Ready reason = %s, want ProbeFailed", got)
 	}
 
 	// Routes present, one target dead: Unreachable.
-	r.computeTargetStatus(eg, listen, approved, approved, approved, map[string]bool{"db": false}, nil)
+	r.computeTargetStatus(eg, listen, approved, approved, approved, map[string]bool{"db": false}, nil, nil)
 	if got := condReason(eg.Status.Conditions, "Ready"); got != "Unreachable" {
 		t.Fatalf("Ready reason = %s, want Unreachable", got)
 	}
 
 	// Everything served: Ready.
-	r.computeTargetStatus(eg, listen, approved, approved, approved, map[string]bool{"db": true}, nil)
+	r.computeTargetStatus(eg, listen, approved, approved, approved, map[string]bool{"db": true}, nil, nil)
 	if got := condReason(eg.Status.Conditions, "Ready"); got != "Ready" {
 		t.Fatalf("Ready reason = %s, want Ready", got)
 	}
@@ -57,6 +57,12 @@ func TestReadyReasonNamesBlockingCondition(t *testing.T) {
 	if got := condReason(in.Status.Conditions, "Ready"); got != "PolicyDenied" {
 		t.Fatalf("ingress Ready reason = %s, want PolicyDenied", got)
 	}
+	// An undeclared source tag blocks Ready with SourceTagUnknown, not a generic NotReady.
+	setCond(&in.Status.Conditions, 1, "PolicyGranted", metav1.ConditionFalse, "SourceTagUnknown", "tag not in policy")
+	ri.computeExposeStatus(in, map[string]bool{"web": true}, nil)
+	if got := condReason(in.Status.Conditions, "Ready"); got != "SourceTagUnknown" {
+		t.Fatalf("ingress Ready reason = %s, want SourceTagUnknown", got)
+	}
 	setCond(&in.Status.Conditions, 1, "PolicyGranted", metav1.ConditionTrue, "Granted", "ok")
 	ri.computeExposeStatus(in, map[string]bool{"web": false}, nil)
 	if got := condReason(in.Status.Conditions, "Ready"); got != "Unreachable" {
@@ -67,5 +73,16 @@ func TestReadyReasonNamesBlockingCondition(t *testing.T) {
 func TestBlockingReasonFallsBackToNotReady(t *testing.T) {
 	if reason, _ := blockingReason(nil, "Registered"); reason != "NotReady" {
 		t.Fatalf("reason = %s, want NotReady", reason)
+	}
+}
+
+func TestUndeclaredTagSources(t *testing.T) {
+	const live = `{"tagOwners":{"tag:known":[]},"grants":[{"src":["tag:known"],"dst":["tag:x"]}]}`
+	got := undeclaredTagSources([]string{"group:ops", "tag:known", "tag:ghost", "tag:absent"}, live)
+	if len(got) != 2 || got[0] != "tag:absent" || got[1] != "tag:ghost" {
+		t.Fatalf("undeclaredTagSources = %v, want [tag:absent tag:ghost]", got)
+	}
+	if len(undeclaredTagSources([]string{"group:ops", "tag:known"}, live)) != 0 {
+		t.Fatal("declared tag reported as unknown")
 	}
 }

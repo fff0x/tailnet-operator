@@ -91,12 +91,14 @@ func New(cfg *rest.Config, opts Options) (ctrl.Manager, error) {
 			AgentResources: *opts.AgentResources.DeepCopy(), AgentScrapePeers: slices.Clone(opts.AgentScrapePeers),
 			Metrics: metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
 			OperatorImage: opts.Image, AgentImagePullSecrets: append([]string(nil), opts.AgentImagePullSecrets...),
+			Recorder: mgr.GetEventRecorderFor("tailnet-operator"),
 		}).SetupWithManager},
 		{"TailnetIngress", (&controller.TailnetIngressReconciler{
 			AgentResources: *opts.AgentResources.DeepCopy(), AgentScrapePeers: slices.Clone(opts.AgentScrapePeers),
 			Metrics: metrics, Client: mgr.GetClient(), Scheme: scheme, OperatorNamespace: opts.Namespace,
 			Certificates: certificateClient, SecretReader: mgr.GetAPIReader(),
 			OperatorImage: opts.Image, AgentImagePullSecrets: append([]string(nil), opts.AgentImagePullSecrets...),
+			Recorder: mgr.GetEventRecorderFor("tailnet-operator"),
 		}).SetupWithManager},
 		{"TailnetGateway", (&controller.TailnetGatewayReconciler{
 			Client: mgr.GetClient(), RuntimeClient: gatewayClient, OperatorNamespace: opts.Namespace,

@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,6 +46,7 @@ type TailnetEgressReconciler struct {
 	AgentResources        corev1.ResourceRequirements
 	// AgentScrapePeers may reach the agent health/metrics port besides the operator.
 	AgentScrapePeers []networkingv1.NetworkPolicyPeer
+	Recorder         record.EventRecorder
 }
 
 func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -56,6 +58,9 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	// Emit one event per Ready-reason flip, from whatever this reconcile leaves persisted.
+	oldReady := readyReason(eg.Status.Conditions)
+	defer func() { emitReadyChange(r.Recorder, &eg, oldReady, readyReason(eg.Status.Conditions)) }()
 	if !eg.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, releaseAuthKey(ctx, r.Client, r.OperatorNamespace, &eg, eg.Spec.TailnetRef.Name, r.Metrics.Headscale(eg.Spec.TailnetRef.Name))
 	}
@@ -206,11 +211,11 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// Diagnosis: classify each target route against the netmap + advertised/approved sets.
 	advertised, approved := routeSets(nodes)
 	netmap, probeErr := r.scrapeNetmap(ctx, ns, eg.Name)
-	probes, err := r.scrapeTargets(ctx, ns, eg.Name)
+	probes, probeReasons, err := r.scrapeTargets(ctx, ns, eg.Name)
 	if probeErr == nil {
 		probeErr = err
 	}
-	r.computeTargetStatus(&eg, listen, netmap, advertised, approved, probes, probeErr)
+	r.computeTargetStatus(&eg, listen, netmap, advertised, approved, probes, probeReasons, probeErr)
 
 	eg.Status.ObservedGeneration = eg.Generation
 	if err := updateObservedStatus(ctx, r.Client, r.Metrics, &eg); err != nil {
@@ -521,11 +526,12 @@ func routeSets(nodes []headscale.Node) (advertised, approved map[string]bool) {
 // could not be scraped at all (no running pod, NetworkPolicy, agent down): then nothing is known
 // about the netmap or the dials, and every target reports ProbeFailed instead of a misleading
 // NoGrant/Unreachable.
-func (r *TailnetEgressReconciler) computeTargetStatus(eg *tnv1.TailnetEgress, listen map[string]int32, netmap, advertised, approved map[string]bool, probes map[string]bool, probeErr error) {
+func (r *TailnetEgressReconciler) computeTargetStatus(eg *tnv1.TailnetEgress, listen map[string]int32, netmap, advertised, approved map[string]bool, probes map[string]bool, reasons map[string]string, probeErr error) {
 	var ts []tnv1.TargetStatus
 	missing := 0
 	allReachable := true
 	allPresent := true
+	nameUnresolved := false
 	for _, t := range eg.Spec.Targets {
 		// A DNS-named target is a tailnet peer: no subnet route is involved, the far end's grant is
 		// the only authorization and it shows as reachable/unreachable, not as a missing route.
@@ -546,7 +552,19 @@ func (r *TailnetEgressReconciler) computeTargetStatus(eg *tnv1.TailnetEgress, li
 			missing++
 			allPresent = false
 		}
-		if !reachable {
+		targetReason := string(reason)
+		if present && !reachable {
+			allReachable = false
+			// A present (route-less or in-netmap) target that will not dial: surface the agent's
+			// classification, so an unresolved tailnet-zone name is told apart from a grant/backend
+			// failure instead of a blanket "Unreachable".
+			if ar := reasons[t.Name]; ar != "" {
+				targetReason = ar
+				if ar == "NameUnresolved" {
+					nameUnresolved = true
+				}
+			}
+		} else if !reachable {
 			allReachable = false
 		}
 		ts = append(ts, tnv1.TargetStatus{
@@ -555,7 +573,7 @@ func (r *TailnetEgressReconciler) computeTargetStatus(eg *tnv1.TailnetEgress, li
 			Route:      route,
 			Present:    present,
 			Reachable:  reachable,
-			Reason:     string(reason),
+			Reason:     targetReason,
 		})
 	}
 	eg.Status.Targets = ts
@@ -569,7 +587,10 @@ func (r *TailnetEgressReconciler) computeTargetStatus(eg *tnv1.TailnetEgress, li
 	trStatus := metav1.ConditionTrue
 	trReason, trMsg := "AllReachable", "all targets reachable"
 	if !allReachable {
-		trStatus, trReason, trMsg = metav1.ConditionFalse, "Unreachable", "a target is not reachable (for a DNS-named target: name unresolved or no grant on the far ingress)"
+		trStatus, trReason, trMsg = metav1.ConditionFalse, "Unreachable", "a target is not reachable; a DNS-named target may lack a grant on the far ingress — see status.targets[].reason"
+		if nameUnresolved {
+			trReason, trMsg = "NameUnresolved", "a target name did not resolve: use the ingress node's MagicDNS name (<hostname>.<base_domain>), or grant the egress tag :53 to the target cluster's resolver — see status.targets[].reason"
+		}
 	}
 	if probeErr != nil {
 		rgReason, rgMsg = string(probeFailed), "agent not scraped: "+truncate(probeErr.Error(), 256)
@@ -617,29 +638,36 @@ func (r *TailnetEgressReconciler) scrapeNetmap(ctx context.Context, ns, name str
 	return out, nil
 }
 
-// scrapeTargets reads the agent's /targets and returns reachability by target name.
-func (r *TailnetEgressReconciler) scrapeTargets(ctx context.Context, ns, name string) (map[string]bool, error) {
+// scrapeTargets reads the agent's /targets and returns reachability and per-target failure reason
+// (e.g. NameUnresolved) by target name.
+func (r *TailnetEgressReconciler) scrapeTargets(ctx context.Context, ns, name string) (map[string]bool, map[string]string, error) {
 	ip := r.agentPodIP(ctx, ns, name)
 	if ip == "" {
-		return nil, errNoAgentPod
+		return nil, nil, errNoAgentPod
 	}
 	return scrapeProbes(ctx, ip)
 }
 
-// scrapeProbes reads an agent's /targets (egress targets or ingress exposes) → reachable by name.
-func scrapeProbes(ctx context.Context, ip string) (map[string]bool, error) {
+// scrapeProbes reads an agent's /targets (egress targets or ingress exposes) → reachable and the
+// agent's failure reason by name.
+func scrapeProbes(ctx context.Context, ip string) (map[string]bool, map[string]string, error) {
 	var results []struct {
 		Name      string `json:"name"`
 		Reachable bool   `json:"reachable"`
+		Reason    string `json:"reason"`
 	}
 	if err := scrapeJSON(ctx, ip, "targets", &results); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make(map[string]bool, len(results))
+	reasons := make(map[string]string, len(results))
 	for _, res := range results {
 		out[res.Name] = res.Reachable
+		if res.Reason != "" {
+			reasons[res.Name] = res.Reason
+		}
 	}
-	return out, nil
+	return out, reasons, nil
 }
 
 var errNoAgentPod = errors.New("no running agent pod")

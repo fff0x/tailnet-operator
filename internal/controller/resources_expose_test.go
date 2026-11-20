@@ -150,7 +150,7 @@ func TestComputeTargetStatusDNSTargetAndExposed(t *testing.T) {
 	r := &TailnetEgressReconciler{}
 	eg, _, listen := exposeFixture()
 	eg.Status.NodeID = "1"
-	r.computeTargetStatus(eg, listen, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{"shop": true}, nil)
+	r.computeTargetStatus(eg, listen, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{"shop": true}, nil, nil)
 	ts := eg.Status.Targets[0]
 	if ts.Route != "" || !ts.Present || ts.Reason != "" || !ts.Reachable {
 		t.Fatalf("DNS target status = %+v, want route-less present reachable", ts)
@@ -159,15 +159,25 @@ func TestComputeTargetStatusDNSTargetAndExposed(t *testing.T) {
 		t.Fatalf("Ready = %+v", meta.FindStatusCondition(eg.Status.Conditions, "Ready"))
 	}
 	setCond(&eg.Status.Conditions, eg.Generation, "Exposed", metav1.ConditionFalse, "Denied", "outside allowlist")
-	r.computeTargetStatus(eg, listen, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{"shop": true}, nil)
+	r.computeTargetStatus(eg, listen, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{"shop": true}, nil, nil)
 	if meta.IsStatusConditionTrue(eg.Status.Conditions, "Ready") || condReason(eg.Status.Conditions, "Ready") != "Denied" {
 		t.Fatalf("Ready = %+v, want False/Denied", meta.FindStatusCondition(eg.Status.Conditions, "Ready"))
 	}
-	// Unreachable DNS target: not a route problem.
+	// Unreachable DNS target without an agent reason: a plain Unreachable, not a route problem.
 	eg.Status.Conditions = nil
-	r.computeTargetStatus(eg, listen, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, nil)
+	r.computeTargetStatus(eg, listen, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, nil, nil)
 	if condReason(eg.Status.Conditions, "RoutesGranted") != "AllGranted" || condReason(eg.Status.Conditions, "TargetsReachable") != "Unreachable" {
 		t.Fatalf("conditions = %+v", eg.Status.Conditions)
+	}
+
+	// Unreachable DNS target that the agent could not resolve: NameUnresolved, surfaced per target.
+	eg.Status.Conditions = nil
+	r.computeTargetStatus(eg, listen, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]string{"shop": "NameUnresolved"}, nil)
+	if condReason(eg.Status.Conditions, "TargetsReachable") != "NameUnresolved" {
+		t.Fatalf("TargetsReachable = %+v, want NameUnresolved", meta.FindStatusCondition(eg.Status.Conditions, "TargetsReachable"))
+	}
+	if eg.Status.Targets[0].Reason != "NameUnresolved" {
+		t.Fatalf("target reason = %q, want NameUnresolved", eg.Status.Targets[0].Reason)
 	}
 }
 
