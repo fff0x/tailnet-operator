@@ -156,6 +156,7 @@ curl -sI https://shop-shop-dev.prod-1.tailnet.example.internal | head -1      # 
 | `TLSReady=False/TLSSecretMissing`, `TLSSecretInvalid` | Secret absent, not `kubernetes.io/tls`, or key pair invalid | create or fix the Secret |
 | `TLSReady=False/TLSCertificatePending` | cert-manager has not issued yet | `kubectl -n shop-dev describe certificate shop-tls` |
 | `TLSReady=False/TLSCertificateMismatch`, `TLSInvalidDNSName` | leaf does not cover every expose name (the first uncovered name is in the message) | fix the SANs or the ingress name/alias template |
+| `TLSReady=False/TLSChainInvalid` | the Secret carries a `ca.crt`, but the leaf does not verify against it — a foreign issuer or a name outside the issuing CA's name constraints. The agent keeps serving the leaf; only the status reports it. | reissue the leaf from the CA in `ca.crt`, or correct `ca.crt`; absent `ca.crt`, no chain check runs |
 | `Ready=False/DNSNameConflict` | an older CR of this Tailnet already claims one of these DNS names/aliases | rename, drop the alias, or remove the other CR |
 | `TLSReady=False/BridgeNameDenied` | a `bridgeNames` entry is outside every zone in `Tailnet.spec.bridgeNameAllowlist`, is the zone itself, or lies in the tailnet name/alias zone | ask the admin to allow the zone, or use a proper subdomain of an allowed one ([Bridge names](#bridge-names)) |
 | `Ready=False/WorkloadMigrating` | the pre-0.12 Deployment named after the CR is being drained before `ingress-<name>` is created (one restart, normally under a minute) | wait |

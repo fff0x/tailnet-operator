@@ -23,10 +23,13 @@ description: "Symptom table with the condition reasons, and the diagnosis cheat 
 | `status.targets[].reason=NotAdvertised` | router `--advertise-routes` | route not advertised |
 | `… NotApproved` | `headscale nodes list-routes`, `kubectl describe tailnet` events | route not approved; with operator-owned policy it is re-approved on the next policy reconcile — persists → `autoApprovers` entry missing or router tag differs |
 | `… NoGrant` | policy `grants` | no grant tag → /32:port (file mode) |
-| `TargetsReachable=False` | agent log `dial …: context deadline exceeded` | site firewall, target down |
+| `TargetsReachable=False/Unreachable` | agent log `dial …: context deadline exceeded` | site firewall, target down (the name resolved) |
+| `TargetsReachable=False/NameUnresolved` | `status.targets[].reason`, the target name | the name did not resolve — use its MagicDNS name `<hostname>.<base_domain>`, or grant the egress tag `:53` to the split-DNS zone's resolver ([Reach a service published by a TailnetIngress](egress.md#reach-a-service-published-by-a-tailnetingress)) |
 | Alias does not resolve in a pod | `kubectl -n tailnet-system get cm tailnet-dns-hosts`, resolver log | zone not forwarded, ConfigMap not mounted, Service not created yet |
 | Aliases and tailnet names stop resolving in pods for minutes after a Kubernetes upgrade (agents stay Ready; a hub reports spokes `dial failed`) | `kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}'` — forwarded zones missing | the platform rewrote the cluster CoreDNS ConfigMap (Talos `upgrade-k8s`, managed add-ons); see [Who owns `kube-system/coredns`](dns-coredns.md#who-owns-kube-systemcoredns) |
 | Ingress `PolicyGranted=False/PolicyDenied` | condition message | `allowFrom` entry not covered by `ingressSourceAllowlist` |
+| Ingress `PolicyGranted=False/SourceTagUnknown` | the `allowFrom` tags vs the live policy `tagOwners` | an `allowFrom` `tag:` source is not declared in the tailnet policy — the other sources stay granted; the ingress becomes reachable from that tag once it exists |
+| Ingress `TLSReady=False/TLSChainInvalid` (`mode: http`) | the TLS Secret's `ca.crt` vs the served leaf | leaf does not verify against `ca.crt` (foreign issuer or a name outside the CA's name constraints); the agent keeps serving the leaf — reissue the leaf or fix `ca.crt` ([Terminate TLS on the agent](ingress-https.md#terminate-tls-on-the-agent)) |
 | `PolicyRendered=False/PolicyEmpty` | base ConfigMap | base has no `tagOwners` or no `acls`/`grants` — refused to avoid a lock-out |
 | `PolicyApplied=False/ApplyFailed` | condition message (`read: …; write: …`) | Headscale still in file mode, empty policy table, API unreachable |
 | Event `PolicyDriftOverwritten` | `kubectl get events -A --field-selector reason=PolicyDriftOverwritten` | someone ran `headscale policy set` |

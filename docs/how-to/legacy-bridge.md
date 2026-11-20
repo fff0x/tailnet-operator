@@ -163,7 +163,8 @@ The operator stops at the LoadBalancer address. Two things stay with the site:
 | `Exposed=False` | `Denied` | an `allowFrom` entry is outside `Tailnet.spec.exposeSourceAllowlist` (or the list is empty). The egress is rendered **without** the expose: Services stay ClusterIP, no `ipBlock`. `Ready` is `False/Denied`. |
 | `Exposed=False` | `PendingAddress` | a target Service has no LoadBalancer address yet. Usually no LB implementation, an exhausted pool, or a `class`/pool selector nothing claims. `kubectl -n tailnet-system describe svc shop` shows the implementation's events. |
 | `Exposed=True` | `AddressAssigned` | every target Service has an address; listed in `status.expose.addresses`. |
-| `TargetsReachable=False` | `Unreachable` | for a DNS-named target: the name did not resolve on the tailnet or the far ingress does not grant the bridge tag. Check the ingress `allowFrom` and `ingressSourceAllowlist` on its Tailnet. |
+| `TargetsReachable=False` | `Unreachable` | for a DNS-named target: the name resolved but the dial failed — usually the far ingress does not grant the bridge tag. Check the ingress `allowFrom` and `ingressSourceAllowlist` on its Tailnet. |
+| `TargetsReachable=False` | `NameUnresolved` | the target name did not resolve: use its MagicDNS name `<hostname>.<base_domain>`, or grant the egress tag `:53` to the split-DNS zone's resolver. |
 | `TLSReady=False` (far ingress) | `BridgeNameDenied` | a `bridgeNames` entry is not a proper subdomain of a zone in `Tailnet.spec.bridgeNameAllowlist` (or the list is empty), or lies in the tailnet name/alias zone. Nothing is rendered for the ingress until fixed. |
 
 `kubectl get tneg` shows `Ready`; `Exposed` and `status.expose.addresses` are in the full status.

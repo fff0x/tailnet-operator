@@ -20,6 +20,25 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
+## Status clarity: reasons, columns, events (v0.26.0)
+
+Additive and status-only; no CRD field changes and no image behaviour change, so no resource rolls.
+
+- **`kubectl get` columns changed.** The `READY` column now prints the Ready **reason** instead of
+  `True`/`False` (so a not-ready resource reads e.g. `SourceTagUnknown` at a glance); `TailnetEgress`
+  gains an `ADDRESS` column and `TailnetGateway` an `AGE` column (both wide-output, `-o wide`).
+  Applying the v0.26.0 CRDs (`task crd-upgrade`) refreshes the columns; scripts that parsed the old
+  `READY=True`/`False` text must read `.status.conditions[?(@.type=="Ready")].status` instead.
+- **New status reasons.** `TailnetIngress` may report `PolicyGranted=False/SourceTagUnknown` (an
+  `allowFrom` `tag:` source is not yet declared in the policy — the other sources stay granted) and,
+  for `mode: http`, `TLSReady=False/TLSChainInvalid`. The chain check only runs when the TLS Secret
+  carries a `ca.crt`; an ingress whose leaf does not verify against that `ca.crt` **newly reports
+  `TLSReady=False` after the upgrade** — this is a report, not a regression: the agent keeps serving
+  the same leaf. `TailnetEgress` may report `TargetsReachable=False/NameUnresolved` for a target
+  name that does not resolve.
+- **Ready-change events.** `TailnetIngress` and `TailnetEgress` now emit a `ReadyChanged` event on
+  every Ready-reason transition (`kubectl describe`), so a flap is visible without log scraping.
+
 ## Bridge names on HTTP ingresses (v0.25.0)
 
 CRD extension, additive: `TailnetIngress.spec.exposes[].bridgeNames`, `status.exposes[].bridgeNames`

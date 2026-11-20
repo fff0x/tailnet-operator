@@ -93,6 +93,13 @@ another cluster. No subnet route is involved then: `status.targets[].route` stay
 tag, and a missing grant shows as `TargetsReachable=False/Unreachable`. To hand such a target on to
 hosts *outside* the cluster, see [Bridge](legacy-bridge.md) (`spec.expose`).
 
+Use the MagicDNS name (`<hostname>.<base_domain>`), which the agent resolves from its own netmap.
+A name in a **tailnet split-DNS zone** only resolves if the egress tag holds a `:53` grant to the
+zone's resolver; without it the agent cannot look the name up and the target reports
+`TargetsReachable=False/NameUnresolved` (distinct from a plain `Unreachable`, which means the name
+resolved but the dial failed — usually a missing `allowFrom` grant). The per-target cause is in
+`status.targets[].reason`.
+
 ## Share targets between prod and dev
 
 *`billing` (prod) already reaches `api.corp.example`; `billing-dev` needs it too.*

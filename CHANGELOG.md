@@ -4,6 +4,40 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-20
+
+### Added
+
+- **Status reason `TailnetIngress` `PolicyGranted=False/SourceTagUnknown`.** When an `allowFrom`
+  `tag:` source is not declared in the live tailnet policy, that one source is left out of the
+  grant while the other sources stay granted; the ingress reports `SourceTagUnknown` and
+  `Ready=False` until the tag exists, instead of the policy freezing. Skipped sources are named in
+  the `Tailnet` `PolicyApplied` message (`skipped undeclared source tags: …`).
+- **Status reason `TailnetIngress` `TLSReady=False/TLSChainInvalid`** (`mode: http`). When the TLS
+  Secret carries a `ca.crt`, the controller verifies the served leaf against it (issuer and the
+  CA's name constraints). A leaf that does not verify reports `TLSChainInvalid`; the agent keeps
+  serving the leaf — the check is report-only. Without `ca.crt`, no chain check runs.
+- **Status reason `TailnetEgress` `TargetsReachable=False/NameUnresolved`** and per-target
+  `status.targets[].reason=NameUnresolved`, distinguishing a target name that did not resolve (use
+  the MagicDNS name, or grant the egress tag `:53` to the split-DNS zone) from a plain `Unreachable`
+  dial failure.
+- **`ReadyChanged` events.** `TailnetIngress` and `TailnetEgress` emit a `ReadyChanged` event on
+  every Ready-reason transition, visible in `kubectl describe`.
+
+### Changed
+
+- **`kubectl get` columns.** The `READY` column now shows the Ready **reason** instead of
+  `True`/`False`; `TailnetEgress` gains an `ADDRESS` column and `TailnetGateway` an `AGE` column
+  (both in `-o wide`). Scripts that parsed `READY=True`/`False` must read
+  `.status.conditions[?(@.type=="Ready")].status` instead. Apply the v0.26.0 CRDs
+  (`task crd-upgrade`) to refresh the columns.
+- **Metrics reason labels.** The exported `reason` label now covers every condition reason the
+  controllers emit; previously a dozen reasons (including the TLS-backend, gateway-workload and
+  spoke `HubMerged` reasons) collapsed silently to `Other`. A regression test guards the allowlist
+  against drift.
+- Grant rendering is now independent of the order the API server lists objects in, so two ingresses
+  sharing a source tag no longer flap the policy between reconciles.
+
 ## [0.25.0] - 2026-11-18
 
 ### Added

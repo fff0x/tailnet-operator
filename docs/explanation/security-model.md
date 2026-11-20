@@ -114,6 +114,11 @@ cosign verify-attestation --key deploy/cosign.pub --type spdxjson \
 cosign verify --key deploy/cosign.pub oci.tsunaro.io/charts/tailnet-operator:<version>
 ```
 
+The image (with its SBOM and provenance) and the Helm chart live on **two different hosts** — the
+image on the container registry, the chart under `oci.tsunaro.io/charts` — so a verify command
+names the right host for each. The Radicle release record binds both digests together regardless of
+where each is served (see below).
+
 Attestations of releases before v0.21.1 were not uploaded; verify those with `--insecure-ignore-tlog`.
 
 The production image is built from `scratch` and contains only the two static binaries.
