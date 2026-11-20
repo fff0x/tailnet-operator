@@ -253,6 +253,8 @@ func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress,
 		localReason := state.reason
 		if localReason == "" {
 			switch {
+			case state.leaf.chainInvalid:
+				localReason = "TLSChainInvalid"
 			case probeErr != nil:
 				localReason = "TLSProbeFailed"
 			case !exists || probe.TLSReady == nil || !*probe.TLSReady:
@@ -279,6 +281,9 @@ func (r *TailnetIngressReconciler) computeIngressStatus(in *tnv1.TailnetIngress,
 		message := "local TLS source or agent observation is not ready; this condition does not test a remote tailnet path"
 		if reason == "TLSNameMismatch" && state.uncoveredName != "" {
 			message = fmt.Sprintf("certificate does not cover configured DNS name %q", state.uncoveredName)
+		}
+		if reason == "TLSChainInvalid" {
+			message = "certificate does not verify against the Secret's ca.crt: a foreign issuer or a name outside the issuing CA's constraints; the agent keeps serving the leaf"
 		}
 		setCond(&in.Status.Conditions, in.Generation, "TLSReady", metav1.ConditionFalse, reason, message)
 		setCond(&in.Status.Conditions, in.Generation, "Ready", metav1.ConditionFalse, reason,

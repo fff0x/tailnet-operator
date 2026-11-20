@@ -88,6 +88,39 @@ func resolveIngressTLS(in *tnv1.TailnetIngress, tn *tnv1.Tailnet) (ingressTLSPla
 type servingCertificate struct {
 	notAfter metav1.Time
 	sha256   string
+	// chainInvalid is true when the Secret carries a ca.crt (cert-manager writes the issuing chain
+	// there) but the leaf does not verify against it as a server certificate — a foreign issuer, or
+	// a name outside the issuing CA's name constraints. Reported as TLSChainInvalid; it never stops
+	// the listener (the leaf itself is a valid server cert). Empty ca.crt means no chain to check.
+	chainInvalid bool
+}
+
+// chainVerifies reports whether leaf verifies for server auth against the roots in caPEM, using the
+// remaining presented certificates as intermediates. An empty caPEM means there is nothing to check
+// (externally managed Secret without a ca.crt) and counts as verified: this probe only fails a chain
+// the Secret itself claims. Name constraints on the issuing CA are enforced by x509.Verify, so a
+// bridge name outside the sub-CA's permitted subtree surfaces here.
+func chainVerifies(leaf *x509.Certificate, intermediatesDER [][]byte, caPEM []byte, now time.Time) bool {
+	if len(caPEM) == 0 {
+		return true
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return false // a ca.crt that parses to no certificate is not a usable chain
+	}
+	inter := x509.NewCertPool()
+	for _, der := range intermediatesDER {
+		if c, err := x509.ParseCertificate(der); err == nil {
+			inter.AddCert(c)
+		}
+	}
+	_, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: inter,
+		CurrentTime:   now,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	})
+	return err == nil
 }
 
 // inspectIngressCertificate validates namespace-local material without leaking parser or SAN
@@ -140,7 +173,8 @@ func inspectIngressCertificateNames(secret *corev1.Secret, names []string, now t
 		}
 	}
 	digest := sha256.Sum256(pair.Certificate[0])
-	result = servingCertificate{notAfter: metav1.NewTime(leaf.NotAfter), sha256: hex.EncodeToString(digest[:])}
+	result = servingCertificate{notAfter: metav1.NewTime(leaf.NotAfter), sha256: hex.EncodeToString(digest[:]),
+		chainInvalid: !chainVerifies(leaf, pair.Certificate[1:], secret.Data["ca.crt"], now)}
 	if now.Before(leaf.NotBefore) {
 		return result, "TLSCertificateNotYetValid", ""
 	}
