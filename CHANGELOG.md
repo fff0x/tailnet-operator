@@ -21,6 +21,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   unchanged; the CRD description text changes.
 - **`task ci-local`** runs the CI gate in the CI test container (the `Dockerfile` `TEST` stage)
   with Podman, so a local run uses the toolchain the CI broker uses.
+- **`shell.nix` pins kind v0.32.0**, the release the kind runners require, so `task e2e-full` runs
+  from the dev shell again after nixpkgs moved to a newer kind.
 
 ### Fixed
 

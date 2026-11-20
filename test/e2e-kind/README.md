@@ -12,10 +12,10 @@ created. Neither touches an existing kube-context, Docker socket or host configu
 
 ```sh
 # kind must be v0.32.0 (its embedded node image is pinned in kind.yaml / kind-http.yaml)
-nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind.sh'
-nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind-projection.sh'
+nix-shell --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind.sh'
+nix-shell --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind-projection.sh'
 # Focused L4 acceptance; use --http-only instead for the HTTP/cert-manager path.
-nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind-projection.sh --l4-only'
+nix-shell --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind-projection.sh --l4-only'
 ```
 
 ## Requirements

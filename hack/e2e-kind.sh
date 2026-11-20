@@ -16,7 +16,7 @@ export KIND_EXPERIMENTAL_PROVIDER=podman
 export GOFLAGS=-mod=readonly GOWORK=off GOTOOLCHAIN="${GOTOOLCHAIN:-local}" CGO_ENABLED=0 TS_NO_LOGS_NO_SUPPORT=1
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 for tool in podman kind kubectl helm go timeout; do
-  command -v "$tool" >/dev/null || fail "missing $tool (kind can be supplied with nix-shell -p kind)"
+  command -v "$tool" >/dev/null || fail "missing $tool (nix-shell supplies the pinned kind)"
 done
 podman_bin=$(type -P podman)
 [[ $("$podman_bin" --remote=false info --format '{{.Host.Security.Rootless}}') == true ]] || fail 'local Podman is not rootless'

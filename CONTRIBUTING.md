@@ -42,9 +42,9 @@ about 75 minutes; a failing stage stops the run. Each kind stage needs the deleg
 start the whole task inside one:
 
 ```sh
-# Inside nix-shell; kind v0.32.0 comes from nixpkgs. GOTOOLCHAIN=auto only until the
+# shell.nix pins kind v0.32.0, the release the runners require. GOTOOLCHAIN=auto only until the
 # nixpkgs Go matches go.mod — the CI image keeps GOTOOLCHAIN=local.
-nix-shell -p kind --run 'systemd-run --user --scope -p Delegate=yes -- env GOTOOLCHAIN=auto task e2e-full'
+nix-shell --run 'systemd-run --user --scope -p Delegate=yes -- env GOTOOLCHAIN=auto task e2e-full'
 ```
 
 CI runs the first stage on every push to `main`; the kind suites run only here, so run
