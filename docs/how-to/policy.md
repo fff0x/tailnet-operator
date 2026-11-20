@@ -226,7 +226,10 @@ The hub takes the fragment one of two ways, both validated identically:
   scoped to that one ConfigMap, every reconcile. `approval: Auto` merges each valid fetch; `Manual`
   holds a changed fetch as `<spoke>-policy-fragment-pending` with a `pendingDelta` until the Tailnet
   carries `tsunaro.io/approve-spoke.<spoke>: <pendingHash>`. Per-spoke `tagPatterns` (default
-  `tag:*-<spoke>-*`) and `routeAllowlist` narrow what that spoke may claim. Walk-through in
+  `tag:*-<spoke>-*`) and `routeAllowlist` narrow what that spoke may claim: a network route must lie
+  inside a hub `TailnetSite` or a `routeAllowlist` prefix (the spoke gateway's tailnet-LB range
+  belongs in the list). The hub reaches the spoke API through a network it declares itself — the
+  approval in the fragment comes too late for the first fetch. Walk-through in
   [Connect a second cluster](second-cluster.md#2-export-on-the-spoke-pull-on-the-hub).
 - **Commit** (`policy.fragmentConfigMaps`): copy the fragment into the hub's GitOps repo as a
   ConfigMap (key `policy`); the Git review is the gate.

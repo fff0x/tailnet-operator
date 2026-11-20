@@ -101,9 +101,29 @@ spec:
   consumerNamespaces: [tailnet-system]      # the operator itself is the consumer
   targets:
     - name: prod-2-api
-      address: 203.0.113.10                  # the spoke's API server address
+      address: 10.20.0.10                    # the spoke's API server address inside the spoke's network
       port: 6443
 ```
+
+**First contact.** The spoke gateway advertises its network (`10.20.0.0/16`), not the `/32`, and the
+approval for that network sits in the fragment the hub cannot read yet. Declare the network on the
+hub, like the hub's own LAN ([Declare the LAN as a site](gateway.md#declare-the-lan-as-a-site)):
+
+```yaml
+# hub
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetSite
+metadata:
+  name: prod-2-lan
+spec:
+  tailnetRef: {name: corp}
+  prefixes: [10.20.0.0/16]                  # the route the spoke gateway advertises
+  owner: platform
+```
+
+The hub renders the approval and replays it on the spoke gateway; then the egress turns `Ready`.
+The target must be the private address: no site router advertises a public one, and an exit node's
+default route never counts.
 
 ```sh
 kubectl -n tailnet-system get tailnetegress spoke-prod-2 \
@@ -113,7 +133,8 @@ kubectl -n tailnet-system get tailnetegress spoke-prod-2 \
 ```
 
 Wait for `Ready` before listing the spoke below: until the route to the spoke API is advertised and
-approved, the hub reports `SpokeUnreachable`. From now on the spoke API server is
+approved, the hub reports `SpokeUnreachable`. A GitOps tool that waits for health reports the
+whole set as failed while one egress is not ready, so ship the site first. From now on the spoke API server is
 `prod-2-api.tailnet-system.svc:6443` inside the hub cluster. The TLS session still terminates at the
 spoke API server; because the kubeconfig now dials a Service name, `tls-server-name` must carry a
 name the spoke API certificate actually holds (one of its SANs), and the CA stays the spoke's:
@@ -149,9 +170,13 @@ spec:
         # the spoke Tailnet above is called corp, so name its ConfigMap:
         configMap: corp-policy-fragment
         tagPatterns: ["tag:*-prod-2-*"]                   # default: tag:*-<name>-*
-        routeAllowlist: ["10.20.0.0/16"]                  # site networks of prod-2 the hub has no TailnetSite for
+        routeAllowlist: ["198.51.100.32/28"]              # prod-2 routes inside no hub TailnetSite
         approval: Manual                                  # default Auto
 ```
+
+`routeAllowlist` holds every network route of the fragment that lies inside no hub `TailnetSite` —
+at least the `tailnetLBCIDR` of the spoke's gateway (here `198.51.100.32/28`; `10.20.0.0/16` is
+covered by the `prod-2-lan` site). A missing entry is `SpokeFragmentInvalid` on the first fetch.
 
 A hub with `networkPolicy.enabled` must allow this dial, which none of the default rules cover.
 The dial goes to the agent pod of the `spoke-prod-2` egress from [2a](#2a-reach-the-spoke-api-through-the-tailnet)
@@ -163,7 +188,7 @@ networkPolicy:
   spokePeers:
     - podSelector: {matchLabels: {app.kubernetes.io/name: tailnet-egress, app.kubernetes.io/instance: spoke-prod-2}}
   spokePorts: [10000]            # the egress target's listen port (first target: 10000)
-  # spokeCIDRs: [203.0.113.10/32]  # or: the spoke API server address, with spokePorts: [6443]
+  # spokeCIDRs: [10.20.0.10/32]  # or: the spoke API server address, with spokePorts: [6443]
 ```
 
 Every reconcile the hub fetches the fragment (10 s timeout), validates it like a committed fragment
@@ -181,6 +206,9 @@ kubectl get tailnet corp -o jsonpath='{.status.spokes[0]}' | jq .
 kubectl -n tailnet-system get cm prod-2-policy-fragment-pending -o jsonpath='{.data.policy}' | jq .
 kubectl annotate tailnet corp tsunaro.io/approve-spoke.prod-2=9f2c…      # pendingHash verbatim
 ```
+
+The annotation is read once, to adopt the pending fragment. The approval lives in the
+`-approved` copy, so a GitOps tool that removes the annotation at its next apply changes nothing.
 
 While a fetch is pending the hub merges the approved fragment **minus** anything the spoke removed:
 a spoke can withdraw its own grants without approval, additions wait. An unreachable spoke, a
@@ -269,3 +297,6 @@ dig +short shop-shop-dev.prod-2.tailnet.example.internal
 | hub `SpokesReady=False/SpokeFragmentInvalid` or `PolicyRendered=False/FragmentInvalid` | fragment carries `groups`/`acls`/`ssh`/…, or a grant/owner/route outside the hub's limits (the message names the path); for a pulled fragment also a tag outside `tagPatterns` or a route outside `routeAllowlist` | export again; never hand-edit the fragment beyond review; widen the hub's `tagOwners`/`routeApprovers`/`ingressSourceAllowlist` only deliberately |
 | spoke `PolicyRendered` message lists `denied …` | `allowFrom` outside the spoke's `ingressSourceAllowlist` | align the allowlist with the hub |
 | spoke egress `RoutesGranted=False`, target reason `NotAdvertised` | no router advertises a route covering the host | add the `/32` or its subnet to a gateway's routes or a `TailnetSite` |
+| hub egress to the spoke API `RoutesGranted=False`, target reason `NotApproved` | the spoke gateway advertises its network, but nothing on the hub approves it before the first merge | declare the spoke network as a `TailnetSite` on the hub ([2a](#2a-reach-the-spoke-api-through-the-tailnet)) |
+| hub egress to the spoke API `RoutesGranted=False`, target reason `NotAdvertised` | the target is a public address, or the spoke gateway is not up yet | target the API server's private address inside the network the spoke gateway advertises |
+| spoke `TailnetSite` `Ready=False/NotApproved` | the hub has not merged the fragment yet, or rejects the route | approve the fragment on the hub; a network the hub already declares needs no site on the spoke ([Site network](site-network.md)) |

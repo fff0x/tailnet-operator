@@ -4,6 +4,14 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Changed
+
+- **Docs: first contact with a spoke API** ([Connect a second cluster](docs/how-to/second-cluster.md)).
+  The hub declares the spoke's network as a `TailnetSite` before the first fetch, the egress targets
+  the API server's private address, and `routeAllowlist` carries the spoke gateway's tailnet-LB
+  range. New troubleshooting rows for the hub egress, and a note that the approval annotation is
+  read once.
+
 ### Fixed
 
 - **`TailnetEgress` route diagnosis ignores default routes.** An exit node's `0.0.0.0/0` or `::/0`
