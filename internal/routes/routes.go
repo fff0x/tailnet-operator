@@ -35,6 +35,9 @@ const (
 // A set "has" the route when any of its prefixes covers it: a target 10.0.10.20/32 is served by an
 // advertised 10.0.10.20/32 as well as by an aggregate 10.0.0.0/24 — Headscale distributes the
 // aggregate to every node whose grants overlap it, so exact-match would misreport NotAdvertised.
+//
+// A default route (0.0.0.0/0, ::/0) never covers a target: an exit node is not a site router, and
+// counting it would report NoGrant for a target that no site route reaches.
 func Classify(route string, netmap, advertised, approved map[string]bool) Reason {
 	if covers(netmap, route) {
 		return Present
@@ -58,7 +61,7 @@ func covers(set map[string]bool, route string) bool {
 	}
 	for s := range set {
 		p, err := netip.ParsePrefix(s)
-		if err == nil && p.Bits() <= want.Bits() && p.Contains(want.Addr()) {
+		if err == nil && p.Bits() > 0 && p.Bits() <= want.Bits() && p.Contains(want.Addr()) {
 			return true
 		}
 	}

@@ -4,6 +4,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed
+
+- **`TailnetEgress` route diagnosis ignores default routes.** An exit node's `0.0.0.0/0` or `::/0`
+  no longer counts as covering a target. A target that only a default route reaches reports
+  `NotAdvertised` instead of `NoGrant`, and a default route in the agent's netmap no longer makes
+  such a target look routed.
+
 ## [0.26.0] - 2026-11-20
 
 ### Added

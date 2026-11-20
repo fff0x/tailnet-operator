@@ -67,6 +67,35 @@ func TestClassify(t *testing.T) {
 			approved:   set(r),
 			want:       NoGrant,
 		},
+		{
+			name:       "only a default route is advertised and approved",
+			netmap:     set(),
+			advertised: set("0.0.0.0/0", "::/0"),
+			approved:   set("0.0.0.0/0", "::/0"),
+			want:       NotAdvertised,
+		},
+		{
+			name:       "a default route in the netmap does not make the target present",
+			netmap:     set("0.0.0.0/0"),
+			advertised: set("0.0.0.0/0"),
+			approved:   set("0.0.0.0/0"),
+			want:       NotAdvertised,
+		},
+		{
+			name:       "an approved default route does not approve the site route",
+			netmap:     set("0.0.0.0/0"),
+			advertised: set("0.0.0.0/0", "10.0.0.0/8"),
+			approved:   set("0.0.0.0/0"),
+			want:       NotApproved,
+		},
+		{
+			name:       "IPv6 target behind a default route only",
+			route:      "2001:db8::20/128",
+			netmap:     set("::/0"),
+			advertised: set("::/0"),
+			approved:   set("::/0"),
+			want:       NotAdvertised,
+		},
 	}
 	for _, c := range cases {
 		route := c.route
