@@ -63,7 +63,15 @@ kubectl describe tailnetsite branch-south | grep -A1 -E 'Advertised|Approved|Rou
 | `Advertised` | `NotAdvertised` | No node with an advertiser tag offers the listed prefixes (exact match — a `/24` does not count for a `/32`). Fix the router's route list. |
 | `Approved` | `NotApproved` | Advertised but not approved yet; the replay runs with the next policy reconcile (≤ 5 min). Persisting → the node lacks the tag. |
 | `UnmanagedOverlap` | `Unmanaged` | A node *without* an advertiser tag advertises an overlapping route (named in the message). Report only. |
-| `Ready` | `NotObserved` | The control server was not queried in this reconcile (DryRun without a working key, API failure). |
+| `Ready` | `NotObserved` | The control server was not queried in this reconcile (DryRun or Export without a working key, API failure). |
+
+**On a spoke** (`policy.mode: Export`) a site adds its prefixes to the exported fragment and reports
+the same conditions from the node list. The spoke never approves a route: `Approved` stays
+`NotApproved` until the hub has merged the fragment and replayed the approval. The hub accepts the
+route only inside one of its own `TailnetSite` or `routeAllowlist` prefixes, so a network the hub
+already declares needs no site on the spoke. Declare the network in front of the spoke's API on the
+hub — the hub must reach it before it can read the fragment
+([Connect a second cluster](second-cluster.md#2a-reach-the-spoke-api-through-the-tailnet)).
 
 Migrating existing `autoApprovers` lines: create the sites, keep the old entries until
 `renderedHash` equals today's live policy (the render is a set union, so the document does not

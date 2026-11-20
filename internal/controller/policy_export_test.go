@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -157,6 +158,68 @@ func TestPolicyExportSpokeSeesHub(t *testing.T) {
 	cond = meta.FindStatusCondition(got.Status.Conditions, "PolicyApplied")
 	if cond.Reason != "HubMerged" || cond.Status != metav1.ConditionTrue || got.Status.Policy.AppliedHash != got.Status.Policy.RenderedHash || got.Status.Policy.AppliedAt == nil {
 		t.Fatalf("merged fragment must report HubMerged with appliedHash: %+v %+v", cond, got.Status.Policy)
+	}
+}
+
+// TestPolicyExportSpokeSiteObserved: a TailnetSite on an Export tailnet reports Advertised,
+// Approved and Ready from the control server's node list, as in Apply mode; an unreadable node
+// list is Unknown/NotObserved; the spoke only ever reads.
+func TestPolicyExportSpokeSiteObserved(t *testing.T) {
+	s := exportScheme(t)
+	const prefix = "10.20.0.0/16"
+	serverUp := false
+	var nodes []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("spoke must only read the control server, got %s %s", r.Method, r.URL.Path)
+		}
+		switch {
+		case !serverUp:
+			http.Error(w, "down", http.StatusBadGateway)
+		case r.URL.Path == "/api/v1/node":
+			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": nodes})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]string{"policy": hubBase})
+		}
+	}))
+	defer srv.Close()
+	tn := &tnv1.Tailnet{ObjectMeta: metav1.ObjectMeta{Name: "corp", UID: "spoke-uid", Generation: 2},
+		Spec: tnv1.TailnetSpec{Server: srv.URL,
+			Policy: tnv1.PolicySpec{Mode: "Export", TagOwners: []string{"group:admins"}, RouteApprovers: []string{"tag:fabric"}}}}
+	site := siteFixture("spoke-lan", "corp", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil, prefix)
+	key := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: workingSecretName("corp"), Namespace: "operator"},
+		Data: map[string][]byte{apiKeyData: []byte("hskey-api-test")}}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(tn, site, key).WithStatusSubresource(tn, site).Build()
+	r := TailnetPolicyReconciler{Client: c, Scheme: s, OperatorNamespace: "operator"}
+	router := func(available, approved []string) []map[string]any {
+		return []map[string]any{{"id": "1", "name": "spoke-gw", "tags": []string{"tag:fabric"},
+			"availableRoutes": available, "approvedRoutes": approved}}
+	}
+	for _, tc := range []struct {
+		name                        string
+		up                          bool
+		nodes                       []map[string]any
+		advertised, approved, ready string
+	}{
+		{"node list unreadable", false, nil, "Unknown/NotObserved", "Unknown/NotObserved", "Unknown/NotObserved"},
+		{"no router advertises the prefix", true, nil, "False/NotAdvertised", "False/NotApproved", "False/NotAdvertised"},
+		{"advertised, hub has not approved yet", true, router([]string{prefix}, nil), "True/Advertised", "False/NotApproved", "False/NotApproved"},
+		{"approved through the hub's policy", true, router([]string{prefix}, []string{prefix}), "True/Advertised", "True/Approved", "True/Ready"},
+	} {
+		serverUp, nodes = tc.up, tc.nodes
+		if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "corp"}}); err != nil {
+			t.Fatal(err)
+		}
+		var got tnv1.TailnetSite
+		if err := c.Get(context.Background(), types.NamespacedName{Name: "spoke-lan"}, &got); err != nil {
+			t.Fatal(err)
+		}
+		for typ, want := range map[string]string{"Advertised": tc.advertised, "Approved": tc.approved, "Ready": tc.ready} {
+			cond := meta.FindStatusCondition(got.Status.Conditions, typ)
+			if cond == nil || string(cond.Status)+"/"+cond.Reason != want {
+				t.Errorf("%s: %s = %+v, want %s", tc.name, typ, cond, want)
+			}
+		}
 	}
 }
 

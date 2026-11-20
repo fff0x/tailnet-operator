@@ -245,13 +245,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if spec.Mode != "Apply" {
 		// DryRun still observes the control server for the site CRs when the working key exists.
 		if len(sites) > 0 {
-			if apiKey, err := readWorkingKey(ctx, r.Client, r.OperatorNamespace, tn.Name); err == nil {
-				apiURL := tn.Spec.APIURL
-				if apiURL == "" {
-					apiURL = tn.Spec.Server
-				}
-				nodes, _ = headscale.New(apiURL, apiKey, r.Metrics.Headscale(tn.Name)).ListNodes(ctx)
-			}
+			nodes = r.observeNodes(ctx, &tn)
 		}
 		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
 			renderedCond(t)
@@ -378,9 +372,13 @@ func (r *TailnetPolicyReconciler) export(ctx context.Context, tn *tnv1.Tailnet) 
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	// A spoke cannot approve its own routes (the hub owns the policy), so sites report from an
-	// empty node list until the hub merges the fragment.
-	defer r.siteStatus(ctx, tn, sites, nil)
+	// A spoke cannot approve its own routes (the hub owns the policy), but it can read the node
+	// list: sites report what the control server shows, and Approved follows the hub's merge.
+	var nodes []headscale.Node
+	if len(sites) > 0 {
+		nodes = r.observeNodes(ctx, tn)
+	}
+	defer r.siteStatus(ctx, tn, sites, nodes)
 	rendered, sum, err := policy.RenderFragment(in)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -450,17 +448,41 @@ func (r *TailnetPolicyReconciler) export(ctx context.Context, tn *tnv1.Tailnet) 
 	})
 }
 
-// liveSpokePolicy reads the control server's policy with the Tailnet's working API key.
-func (r *TailnetPolicyReconciler) liveSpokePolicy(ctx context.Context, tn *tnv1.Tailnet) (string, error) {
+// readClient returns a control-server client on the Tailnet's working API key, for the paths that
+// only read (DryRun, Export).
+func (r *TailnetPolicyReconciler) readClient(ctx context.Context, tn *tnv1.Tailnet) (*headscale.Client, error) {
 	apiKey, err := readWorkingKey(ctx, r.Client, r.OperatorNamespace, tn.Name)
 	if err != nil {
-		return "", fmt.Errorf("working api key: %w", err)
+		return nil, fmt.Errorf("working api key: %w", err)
 	}
 	apiURL := tn.Spec.APIURL
 	if apiURL == "" {
 		apiURL = tn.Spec.Server
 	}
-	return headscale.New(apiURL, apiKey, r.Metrics.Headscale(tn.Name)).GetPolicy(ctx)
+	return headscale.New(apiURL, apiKey, r.Metrics.Headscale(tn.Name)), nil
+}
+
+// liveSpokePolicy reads the control server's policy with the Tailnet's working API key.
+func (r *TailnetPolicyReconciler) liveSpokePolicy(ctx context.Context, tn *tnv1.Tailnet) (string, error) {
+	hs, err := r.readClient(ctx, tn)
+	if err != nil {
+		return "", err
+	}
+	return hs.GetPolicy(ctx)
+}
+
+// observeNodes lists the control server's nodes for the site status without writing anything.
+// nil means not observed (no working key, API failure); an empty tailnet is a non-nil empty list.
+func (r *TailnetPolicyReconciler) observeNodes(ctx context.Context, tn *tnv1.Tailnet) []headscale.Node {
+	hs, err := r.readClient(ctx, tn)
+	if err != nil {
+		return nil
+	}
+	nodes, err := hs.ListNodes(ctx)
+	if err != nil {
+		return nil
+	}
+	return append([]headscale.Node{}, nodes...)
 }
 
 func truncateList(ss []string, n int) []string {

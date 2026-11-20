@@ -10,6 +10,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   no longer counts as covering a target. A target that only a default route reaches reports
   `NotAdvertised` instead of `NoGrant`, and a default route in the agent's netmap no longer makes
   such a target look routed.
+- **`TailnetSite` on an Export tailnet reports its observed state.** A site on a spoke stayed
+  `Advertised`/`Approved`/`Ready` = `Unknown/NotObserved` forever. It now reads the control
+  server's node list like a site in Apply mode: `NotApproved` until the hub has merged the
+  fragment, then `Ready`. The spoke still never approves a route, and an unreadable node list
+  stays `NotObserved`.
 
 ## [0.26.0] - 2026-11-20
 
