@@ -202,7 +202,11 @@ func reason(s string) string {
 		"OverlapsReserved", "OverlapsSite", "Unmanaged", "None", "NotObserved", "Advertised", "Approved", "RouteConflict",
 		"FreshBlocked", "IdentityChanged", "Provisioning", "FreshRuntimeReady", "RuntimeUnavailable", "ExternallyManaged",
 		"DNSInSync", "DNSUpdateConflict", "DNSUpdateBlocked", "LBPending", "LoadBalancerAssigned",
-		"FragmentMissing", "FragmentInvalid", "Export", "AllMerged", "SpokeUnreachable", "SpokeFragmentInvalid", "ApprovalPending", "NothingApproved":
+		"FragmentMissing", "FragmentInvalid", "Export", "AllMerged", "SpokeUnreachable", "SpokeFragmentInvalid", "ApprovalPending", "NothingApproved",
+		"SourceTagUnknown", "TLSChainInvalid", "NameUnresolved", "TLSNameMismatch",
+		"Denied", "WorkloadBlocked", "WorkloadMigrating", "HTTPTransitionPending", "AddressAssigned", "PendingAddress", "BackendProbePending",
+		"BackendCAUnavailable", "BackendCAMissing", "BackendCAInvalid", "BackendCAForbidden", "BackendTLSConfigurationInvalid",
+		"WorkloadUpdateConflict", "WorkloadUpdateBlocked", "ServiceUpdateConflict", "ServiceUpdateBlocked", "PodCurrent", "PodTemplateStale", "HubMerged":
 		return s
 	default:
 		return "Other"
