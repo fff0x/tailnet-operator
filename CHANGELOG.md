@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-11-20
+
 ### Changed
 
 - **Docs: first contact with a spoke API** ([Connect a second cluster](docs/how-to/second-cluster.md)).

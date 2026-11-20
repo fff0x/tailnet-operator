@@ -20,6 +20,20 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
+## Route diagnosis and sites on a spoke (v0.26.1)
+
+Controller-only; no CRD change and no agent image change, so with a pinned `agentImage` no agent
+rolls. Two status changes can appear after the upgrade:
+
+- **`TailnetEgress`: a default route no longer covers a target.** A target that only an exit node's
+  `0.0.0.0/0` or `::/0` reaches reports `NotAdvertised` — also when that default route is in the
+  agent's netmap, where the target used to count as routed. Such an egress **newly reports
+  `RoutesGranted=False` and `Ready=False`**; the agent keeps forwarding as before. Before the
+  upgrade, check that every egress target lies inside an approved site route.
+- **`TailnetSite` on an Export tailnet reports its observed state** instead of a standing
+  `Unknown/NotObserved`: `Ready=False/NotApproved` until the hub has merged the fragment and
+  approved the route, then `Ready`.
+
 ## Status clarity: reasons, columns, events (v0.26.0)
 
 Additive and status-only; no CRD field changes and no image behaviour change, so no resource rolls.
