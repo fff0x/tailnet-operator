@@ -23,9 +23,12 @@ spec:
     - jsonPath: .spec.suspend
       name: Suspended
       type: boolean
-    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+    - jsonPath: .status.conditions[?(@.type=="Ready")].reason
       name: Ready
       type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:

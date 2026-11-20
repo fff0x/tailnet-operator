@@ -165,7 +165,8 @@ type TailnetEgressStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Tag",type=string,JSONPath=`.status.tag`
 // +kubebuilder:printcolumn:name="Hostname",type=string,JSONPath=`.status.hostname`
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
+// +kubebuilder:printcolumn:name="Address",type=string,priority=1,JSONPath=`.status.expose.addresses[0]`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // TailnetEgress is a per-identity egress into a Tailnet. It lives in the operator's namespace; a

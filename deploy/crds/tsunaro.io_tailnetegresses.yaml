@@ -23,8 +23,12 @@ spec:
     - jsonPath: .status.hostname
       name: Hostname
       type: string
-    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+    - jsonPath: .status.conditions[?(@.type=="Ready")].reason
       name: Ready
+      type: string
+    - jsonPath: .status.expose.addresses[0]
+      name: Address
+      priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age

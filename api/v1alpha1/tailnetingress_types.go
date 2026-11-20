@@ -226,8 +226,8 @@ type TailnetIngressStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Tag",type=string,JSONPath=`.status.tag`
 // +kubebuilder:printcolumn:name="Hostname",type=string,JSONPath=`.status.hostname`
-// +kubebuilder:printcolumn:name="Hosts",type=string,JSONPath=`.status.hosts`
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Hosts",type=string,priority=1,JSONPath=`.status.hosts`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // TailnetIngress exposes in-cluster L4 services on the tailnet as one tsnet node with a MagicDNS

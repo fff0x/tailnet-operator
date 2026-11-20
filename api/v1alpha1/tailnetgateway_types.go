@@ -272,7 +272,8 @@ type TailnetGatewayStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Hostname",type=string,JSONPath=`.spec.hostname`
 // +kubebuilder:printcolumn:name="Suspended",type=boolean,JSONPath=`.spec.suspend`
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 40 && self.metadata.name.matches('^[a-z]([-a-z0-9]*[a-z0-9])?$')",message="name must be a DNS-1035 label of at most 40 characters"
 // +kubebuilder:validation:XValidation:rule="self.spec.dns.serviceName != self.metadata.name && self.spec.dns.serviceName != self.metadata.name + '-headless'",message="DNS serviceName must not collide with the gateway or headless Service"
 // TailnetGateway describes a persistent kernel router in the operator namespace.
