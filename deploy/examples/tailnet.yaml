@@ -47,14 +47,14 @@ spec:
     tagOwners: [group:operator]
     routeApprovers: [tag:fabric]
     ingressSourceAllowlist: ["group:*"]
-  # Address space no TailnetSite may claim (optional): the node prefix
-  # of this control server and, per cluster, LAN/pod/service/tailnet-LB
-  # ranges.
+  # Address space that never becomes a tailnet route (optional): the node
+  # prefix of this control server and, per cluster, the pod and service
+  # ranges. Never a network a router advertises (LAN, tailnet-LB range).
   reservedNetworks:
     - name: nodes
       prefixes: [100.64.0.0/16]
     - name: prod-1
-      prefixes: [192.0.2.0/24, 10.244.0.0/16, 10.96.0.0/12, 198.51.100.0/24]
+      prefixes: [10.244.0.0/16, 10.96.0.0/12]
   # Site hosts a TailnetEgress.spec.expose may admit (optional): the
   # admin's veto over tenant bridges. Empty → no egress is exposed.
   exposeSourceAllowlist: [192.0.2.0/24]

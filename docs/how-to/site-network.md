@@ -35,16 +35,20 @@ What the operator does — and does not do:
 | Reports `Advertised` / `Approved` / `Ready` per site from the control server's node list | De-approve or withdraw routes, ever |
 | Blocks a site whose prefix overlaps `Tailnet.spec.reservedNetworks` or an **older** site | Touch the older site: a conflict never flips an already-serving network |
 
-Fill `Tailnet.spec.reservedNetworks` first — the node prefix and every cluster's LAN/pod/service/
-tailnet-LB ranges on this control server — otherwise a typo like `100.64.8.0/22` in CGNAT space
-would be approved onto the routers:
+Fill `Tailnet.spec.reservedNetworks` first — address space that must never become a tailnet route:
+the node prefix and every cluster's pod and service ranges on this control server. Otherwise a typo
+like `100.64.8.0/22` in CGNAT space would be approved onto the routers:
 
 ```yaml
 spec:
   reservedNetworks:
     - {name: nodes,  prefixes: [100.64.0.0/16]}
-    - {name: prod-1, prefixes: [192.0.2.0/24, 10.244.0.0/16, 10.96.0.0/12, 198.51.100.0/24]}
+    - {name: prod-1, prefixes: [10.244.0.0/16, 10.96.0.0/12]}
 ```
+
+Never list a network a router advertises — a LAN, a gateway's tailnet-LB range. That network is
+declared as a site or through the gateway, and a reserved entry blocks both the site
+(`OverlapsReserved`) and every spoke fragment that carries a route inside it.
 
 Check:
 

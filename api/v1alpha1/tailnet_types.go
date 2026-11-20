@@ -196,9 +196,10 @@ type HeadscaleSpec struct {
 	Ref string `json:"ref,omitempty"`
 }
 
-// ReservedNetwork is address space no TailnetSite may overlap: the node prefix of the control
-// server, and per cluster its LAN, pod, service and tailnet-LB ranges. A site overlapping one of
-// these is blocked with RouteConflict/OverlapsReserved naming this entry.
+// ReservedNetwork is address space that must never become a tailnet route: the node prefix of the
+// control server, and per cluster its pod and service ranges. A network a router advertises (a
+// LAN, a tailnet-LB range) is never listed; it is declared as a TailnetSite or through the
+// gateway. A site overlapping an entry is blocked with RouteConflict/OverlapsReserved naming it.
 type ReservedNetwork struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
@@ -259,8 +260,9 @@ type TailnetSpec struct {
 	// Policy generation from CRs. Off when baseConfigMap is empty.
 	// +optional
 	Policy PolicySpec `json:"policy,omitempty"`
-	// Address space TailnetSite prefixes must not overlap (node prefix, every cluster's LAN/pod/
-	// service/LB ranges on this control server). Only consulted for TailnetSite CRs.
+	// Address space that must never become a tailnet route (node prefix, every cluster's pod and
+	// service ranges on this control server); never a network a router advertises. Blocks
+	// overlapping TailnetSite prefixes and routes in spoke fragments.
 	// +optional
 	// +kubebuilder:validation:MaxItems=64
 	// +listType=map

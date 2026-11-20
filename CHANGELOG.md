@@ -13,6 +13,12 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   the API server's private address, and `routeAllowlist` carries the spoke gateway's tailnet-LB
   range. New troubleshooting rows for the hub egress, and a note that the approval annotation is
   read once.
+- **Docs and examples: what `reservedNetworks` holds.** Only address space that must never become
+  a tailnet route: the node prefix and each cluster's pod and service ranges. The site guide, the
+  field description and two examples also listed the LAN and the tailnet-LB range, which blocks
+  the gateway's own site and every spoke fragment with a route in them. A network a router
+  advertises is declared as a `TailnetSite` or through the gateway, never reserved. Behaviour is
+  unchanged; the CRD description text changes.
 
 ### Fixed
 

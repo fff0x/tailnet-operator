@@ -75,7 +75,7 @@ TailnetSpec describes a control server and how the operator authenticates to it.
 | `proxy.resources.claims[].request` | string | no | Request is the name chosen for a request in the referenced claim. If empty, everything from the claim is made available, otherwise only the result of this request. |
 | `proxy.resources.limits` | object | no | Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
 | `proxy.resources.requests` | object | no | Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
-| `reservedNetworks[]` | []object | no | Address space TailnetSite prefixes must not overlap (node prefix, every cluster's LAN/pod/ service/LB ranges on this control server). Only consulted for TailnetSite CRs. Items ≤ 64. |
+| `reservedNetworks[]` | []object | no | Address space that must never become a tailnet route (node prefix, every cluster's pod and service ranges on this control server); never a network a router advertises. Blocks overlapping TailnetSite prefixes and routes in spoke fragments. Items ≤ 64. |
 | `reservedNetworks[].name` | string | yes | Max length 63. |
 | `reservedNetworks[].prefixes[]` | []string | yes | Items 1–32. |
 | `server` | string | yes | Login/control URL, becomes the agent's ControlURL (e.g. https://ts.example.com). |

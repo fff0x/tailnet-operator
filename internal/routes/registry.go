@@ -17,7 +17,8 @@ type Site struct {
 	Tags     []string
 }
 
-// Reserved is address space no site may overlap (node prefix, cluster LAN/pod/service/LB ranges).
+// Reserved is address space no site may overlap (node prefix, cluster pod/service ranges; never a
+// network a router advertises).
 type Reserved struct {
 	Name     string
 	Prefixes []string

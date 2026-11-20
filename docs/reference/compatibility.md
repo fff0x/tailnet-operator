@@ -22,8 +22,9 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 
 ## Route diagnosis and sites on a spoke (v0.26.1)
 
-Controller-only; no CRD change and no agent image change, so with a pinned `agentImage` no agent
-rolls. Two status changes can appear after the upgrade:
+Controller-only; the CRDs change in one description text (`reservedNetworks`), no field or
+validation changes, and the agent image is unchanged — with a pinned `agentImage` no agent rolls.
+Two status changes can appear after the upgrade:
 
 - **`TailnetEgress`: a default route no longer covers a target.** A target that only an exit node's
   `0.0.0.0/0` or `::/0` reaches reports `NotAdvertised` — also when that default route is in the
