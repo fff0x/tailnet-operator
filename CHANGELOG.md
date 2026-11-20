@@ -19,6 +19,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   the gateway's own site and every spoke fragment with a route in them. A network a router
   advertises is declared as a `TailnetSite` or through the gateway, never reserved. Behaviour is
   unchanged; the CRD description text changes.
+- **`task ci-local`** runs the CI gate in the CI test container (the `Dockerfile` `TEST` stage)
+  with Podman, so a local run uses the toolchain the CI broker uses.
 
 ### Fixed
 

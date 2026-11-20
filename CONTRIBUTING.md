@@ -21,6 +21,11 @@ KUBEBUILDER_ASSETS=/path/to/envtest task test-validation
 COREDNS_BINARY=/absolute/path/to/coredns task test-gateway-dns
 ```
 
+`task ci-local` runs the CI gate the way the CI broker does: it builds the `TEST` stage of the
+`Dockerfile` with rootless Podman and runs `hack/ci-test.sh` in a fresh container. The Go, Helm and
+`govulncheck` versions are the container's, so a host toolchain that differs from CI cannot change
+the result. Run it before a push; the tasks above are the quick loop while you work.
+
 `task security` uses a pinned `govulncheck` version and the current public database.
 Review package/module findings even when no reachable symbol makes the command fail.
 Do not add broad suppressions to make a failing release pass.
