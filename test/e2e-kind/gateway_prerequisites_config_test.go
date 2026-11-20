@@ -25,7 +25,7 @@ func TestGatewayPrerequisiteRunner(t *testing.T) {
 	for _, required := range []string{
 		"test_pattern='^Test(FixtureCAProjection|PodNetworkGate|HeadscaleHTTPS|AgentHTTPSPeer|IngressHTTP|IngressL4)$'\ntest_timeout=26m",
 		"test_pattern='^TestIngressHTTP$'\n", "    test_timeout=22m\nelif",
-		"test_pattern='^Test(EgressReach|RestartNoFlap|MagicDNSRename)$'\n    test_timeout=20m",
+		"test_pattern='^Test(EgressReach|RestartNoFlap|MagicDNSRename|IngressIdentityPersists)$'\n    test_timeout=26m",
 		"test_pattern='^TestIngressL4$'\n    test_timeout=10m",
 		"elif [[ $# == 1 && $1 == --gateway-preflight-only ]]; then\n    test_pattern='^TestGatewayKernelPrerequisites$'\n    test_timeout=10m\n    kernel_only=true",
 		"[[ $kernel_only != true ]] || modes+=(kernel)",

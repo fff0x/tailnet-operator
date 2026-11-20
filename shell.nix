@@ -19,6 +19,36 @@ let
       })
     ];
   });
+
+  # hack/e2e-kind-projection.sh requires Helm 3, and the CI test image (Dockerfile, stage TEST) pins
+  # this release; nixpkgs ships Helm 4. Take the same official archive. Move the version and both
+  # checksums together with the Dockerfile.
+  helm =
+    let
+      release =
+        {
+          x86_64-linux = {
+            arch = "amd64";
+            sha256 = "a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496";
+          };
+          aarch64-linux = {
+            arch = "arm64";
+            sha256 = "440cf7add0aee27ebc93fada965523c1dc2e0ab340d4348da2215737fc0d76ad";
+          };
+        }
+        .${pkgs.stdenv.hostPlatform.system};
+    in
+    pkgs.runCommand "helm-3.19.0"
+      {
+        src = pkgs.fetchurl {
+          url = "https://get.helm.sh/helm-v3.19.0-linux-${release.arch}.tar.gz";
+          inherit (release) sha256;
+        };
+      }
+      ''
+        mkdir -p $out/bin
+        tar -xzf $src -C $out/bin --strip-components=1 linux-${release.arch}/helm
+      '';
 in
 pkgs.mkShell {
   name = "tailnet-operator";
@@ -34,7 +64,7 @@ pkgs.mkShell {
     kustomize
     kind # pinned above; task e2e-kind / e2e-full
     go-task
-    kubernetes-helm
+    helm # pinned above; the chart tasks and the kind runners
     helm-docs
     kubeconform
     jq # Portable dashboard JSON validation (also available in the CI broker)
