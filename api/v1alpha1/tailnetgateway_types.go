@@ -122,6 +122,9 @@ type GatewayServiceName string
 // externally managed. Dynamic hosts remain owned by the existing DNS reconciler.
 // +kubebuilder:validation:XValidation:rule="!has(self.extraZones) || self.extraZones.all(z, z.zone != self.zone && !z.zone.endsWith('.' + self.zone) && !self.zone.endsWith('.' + z.zone))",message="extraZones must not overlap the primary zone"
 // +kubebuilder:validation:XValidation:rule="!has(self.extraZones) || self.extraZones.all(a, self.extraZones.all(b, a.zone == b.zone || (!a.zone.endsWith('.' + b.zone) && !b.zone.endsWith('.' + a.zone))))",message="extraZones must not overlap each other"
+// +kubebuilder:validation:XValidation:rule="!has(self.aliasZones) || self.aliasZones.all(z, z != self.zone && !z.endsWith('.' + self.zone) && !self.zone.endsWith('.' + z))",message="aliasZones must not overlap the primary zone"
+// +kubebuilder:validation:XValidation:rule="!has(self.aliasZones) || !has(self.extraZones) || self.aliasZones.all(a, self.extraZones.all(e, a != e.zone && !a.endsWith('.' + e.zone) && !e.zone.endsWith('.' + a)))",message="aliasZones must not overlap extraZones"
+// +kubebuilder:validation:XValidation:rule="!has(self.aliasZones) || self.aliasZones.all(a, self.aliasZones.all(b, a == b || (!a.endsWith('.' + b) && !b.endsWith('.' + a))))",message="aliasZones must not overlap each other"
 // +kubebuilder:validation:XValidation:rule="!has(self.staticRecords) || self.staticRecords.all(r, r.name.size() + 1 + self.zone.size() <= 253)",message="static record name exceeds the DNS wire limit"
 // +kubebuilder:validation:XValidation:rule="!has(self.wildcardAddress) || self.zone.size() + 2 <= 253",message="wildcard record name exceeds the DNS wire limit"
 // +kubebuilder:validation:XValidation:rule="!has(self.staticRecords) || self.staticRecords.all(r, !has(r.target) || r.target == self.zone || r.target.endsWith('.' + self.zone))",message="static record target must point inside dns.zone"
@@ -139,6 +142,13 @@ type GatewayDNS struct {
 	// +listType=map
 	// +listMapKey=zone
 	ExtraZones []GatewayExtraZone `json:"extraZones,omitempty"`
+	// Zones answered only from the Tailnet hosts source, without an upstream: typically
+	// another cluster's tailnet zone whose names this cluster reaches through TailnetEgress
+	// aliases. Unknown names in such a zone get SERVFAIL. Reconciled live, not identity.
+	// +optional
+	// +kubebuilder:validation:MaxItems=16
+	// +listType=set
+	AliasZones []GatewayName `json:"aliasZones,omitempty"`
 	// +optional
 	// +kubebuilder:validation:MaxItems=128
 	// +listType=map

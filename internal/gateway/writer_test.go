@@ -46,6 +46,9 @@ func TestFreshCompletionScope(t *testing.T) {
 			g.Spec.DNS.StaticRecords = []tnv1.GatewayStaticRecord{{Name: "app", Address: "198.51.100.8"}}
 		},
 		"wildcard": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) { g.Spec.DNS.WildcardAddress = "198.51.100.9" },
+		"alias zones": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) {
+			g.Spec.DNS.AliasZones = []tnv1.GatewayName{"prod-2.example"}
+		},
 		"deletion policy": func(g *tnv1.TailnetGateway, _ *tnv1.Tailnet) {
 			g.Spec.DeletionPolicy = tnv1.GatewayDeletionPolicyDelete
 		},

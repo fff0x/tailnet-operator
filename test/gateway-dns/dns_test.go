@@ -500,6 +500,53 @@ func TestRenderedDNSExtraZones(t *testing.T) {
 	assertMetricsServed(t, "127.0.0.1:9153")
 }
 
+// dns.aliasZones renders inline hosts blocks without an upstream: known names
+// answer locally, unknown names are SERVFAIL, an empty zone still starts and a
+// Corefile change lands through the reload plugin without a restart.
+func TestRenderedDNSAliasZones(t *testing.T) {
+	binary := coreDNSBinary(t)
+	root := t.TempDir()
+	in := gateway.DNSInputs{
+		Config:        tnv1.GatewayDNS{Zone: "tail.example", AliasZones: []tnv1.GatewayName{"prod-2.example", "empty.example"}},
+		ServerIP:      "192.0.2.1",
+		Serial:        1,
+		BindAddresses: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
+		Hosts:         "192.0.2.7 app.tail.example\n10.96.0.9 talos.prod-2.example\n",
+	}
+	plan, err := gateway.RenderDNS(in)
+	if err != nil || plan.HostsFile != "" {
+		t.Fatal("render alias-zone fixture")
+	}
+	project(t, root, "v1", map[string]string{"Corefile": plan.Corefile, "zone.db": plan.ZoneFile}, true)
+	address := start(t, binary, root, "app.tail.example", "127.0.0.1")
+	assertAnswer(t, address, "talos.prod-2.example", dnsmessage.TypeA, dnsmessage.RCodeSuccess, "10.96.0.9")
+	assertAnswer(t, address, "talos.prod-2.example", dnsmessage.TypeAAAA, dnsmessage.RCodeSuccess, "")
+	assertAnswer(t, address, "missing.prod-2.example", dnsmessage.TypeA, dnsmessage.RCodeServerFailure, "")
+	assertAnswer(t, address, "any.empty.example", dnsmessage.TypeA, dnsmessage.RCodeServerFailure, "")
+	assertAnswer(t, address, "missing.tail.example", dnsmessage.TypeA, dnsmessage.RCodeNameError, "")
+	assertAnswer(t, address, "other.example", dnsmessage.TypeA, dnsmessage.RCodeRefused, "")
+	// A new alias changes only the Corefile; the reload plugin checks every 30 s plus jitter.
+	in.Hosts += "10.96.0.11 new.prod-2.example\n"
+	next, err := gateway.RenderDNS(in)
+	if err != nil || next.Corefile == plan.Corefile {
+		t.Fatal("render updated alias-zone fixture")
+	}
+	project(t, root, "v2", map[string]string{"Corefile": next.Corefile, "zone.db": next.ZoneFile}, false)
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		m, err := exchange("udp", address, "new.prod-2.example", dnsmessage.TypeA)
+		if err == nil && m.RCode == dnsmessage.RCodeSuccess && len(m.Answers) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("alias-zone Corefile change did not reload")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	assertAnswer(t, address, "new.prod-2.example", dnsmessage.TypeA, dnsmessage.RCodeSuccess, "10.96.0.11")
+	assertAnswer(t, address, "talos.prod-2.example", dnsmessage.TypeA, dnsmessage.RCodeSuccess, "10.96.0.9")
+}
+
 // This is an intentionally unsafe control, not renderer output. It demonstrates
 // the weaker hosts+forward contract that dns.extraZones opts into, as opposed
 // to the strict locality of the primary zone.

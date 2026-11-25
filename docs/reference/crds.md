@@ -211,6 +211,7 @@ TailnetGatewaySpec is an experimental API contract, suspended by default. Explic
 | `authKeySecretRef.name` | string | yes | GatewayName is a namespace-local Kubernetes object name. Max length 253. |
 | `deletionPolicy` | string | no | Retain leaves every resource, node and key in place when the CR is deleted. Delete records consent through a finalizer: the operator removes only the fresh resources it created (matched by recorded UID or its own gateway-uid label), the Headscale node and the minted bootstrap key, in a fixed order and fail-closed. User-supplied objects are never deleted. Default `Retain`. One of `Retain`, `Delete`. |
 | `dns` | object | yes | GatewayDNS leaves the cluster CoreDNS Corefile and Headscale split-DNS config externally managed. Dynamic hosts remain owned by the existing DNS reconciler. |
+| `dns.aliasZones[]` | []string | no | Zones answered only from the Tailnet hosts source, without an upstream: typically another cluster's tailnet zone whose names this cluster reaches through TailnetEgress aliases. Unknown names in such a zone get SERVFAIL. Reconciled live, not identity. Items ≤ 16. |
 | `dns.extraZones[]` | []object | no | Items ≤ 16. |
 | `dns.extraZones[].upstreams[]` | []string | yes | Items 1–8. |
 | `dns.extraZones[].zone` | string | yes | GatewayName is a namespace-local Kubernetes object name. Max length 253. |

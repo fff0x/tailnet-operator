@@ -97,6 +97,21 @@ spec:
                   GatewayDNS leaves the cluster CoreDNS Corefile and Headscale split-DNS config
                   externally managed. Dynamic hosts remain owned by the existing DNS reconciler.
                 properties:
+                  aliasZones:
+                    description: |-
+                      Zones answered only from the Tailnet hosts source, without an upstream: typically
+                      another cluster's tailnet zone whose names this cluster reaches through TailnetEgress
+                      aliases. Unknown names in such a zone get SERVFAIL. Reconciled live, not identity.
+                    items:
+                      description: GatewayName is a namespace-local Kubernetes object
+                        name.
+                      maxLength: 253
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$
+                      type: string
+                    maxItems: 16
+                    type: array
+                    x-kubernetes-list-type: set
                   extraZones:
                     items:
                       description: |-
@@ -241,6 +256,17 @@ spec:
                   rule: '!has(self.extraZones) || self.extraZones.all(a, self.extraZones.all(b,
                     a.zone == b.zone || (!a.zone.endsWith(''.'' + b.zone) && !b.zone.endsWith(''.''
                     + a.zone))))'
+                - message: aliasZones must not overlap the primary zone
+                  rule: '!has(self.aliasZones) || self.aliasZones.all(z, z != self.zone
+                    && !z.endsWith(''.'' + self.zone) && !self.zone.endsWith(''.''
+                    + z))'
+                - message: aliasZones must not overlap extraZones
+                  rule: '!has(self.aliasZones) || !has(self.extraZones) || self.aliasZones.all(a,
+                    self.extraZones.all(e, a != e.zone && !a.endsWith(''.'' + e.zone)
+                    && !e.zone.endsWith(''.'' + a)))'
+                - message: aliasZones must not overlap each other
+                  rule: '!has(self.aliasZones) || self.aliasZones.all(a, self.aliasZones.all(b,
+                    a == b || (!a.endsWith(''.'' + b) && !b.endsWith(''.'' + a))))'
                 - message: static record name exceeds the DNS wire limit
                   rule: '!has(self.staticRecords) || self.staticRecords.all(r, r.name.size()
                     + 1 + self.zone.size() <= 253)'

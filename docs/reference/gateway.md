@@ -119,6 +119,7 @@ There is no configurable target namespace or arbitrary Pod/Corefile/shell templa
 | `dns.serviceName`, `dns.serviceClusterIP` | Explicit stable DNS Service name/address, immutable |
 | `dns.image` | Separate CoreDNS version/digest pin |
 | `dns.extraZones[]` | ≤ 16 unique, non-overlapping zones with 1–8 explicit unicast-IP upstreams each (never the LB IP); no resolver URLs. Rendered as hosts+forward blocks; hosts-source names inside the zone are served locally |
+| `dns.aliasZones[]` | ≤ 16 unique lowercase zones that overlap neither the primary zone, an extra zone nor each other. Answered only from hosts-source names inside the zone, inline in the `Corefile`, without an upstream ([Alias zones](#alias-zones-dnsaliaszones)) |
 | `dns.staticRecords[]` | Unique relative labels below the primary zone with EITHER an explicit A/AAAA `address` OR a `target` FQDN inside the same zone (CNAME, never both and never neither; a target that equals the record's own FQDN is rejected) |
 | `dns.wildcardAddress` | Optional file-zone fallback; never a `template` plugin that shadows dynamic hosts |
 | `forwards[]` | Named TCP port to `targetAddress` IP and `targetPort`; unique listener ports |
@@ -521,7 +522,7 @@ runtime shape; everything else is either reconciled or irrelevant to the retaine
 | Class | Fields | Effect of a change |
 |---|---|---|
 | Pinned identity | `tailnetRef`, `hostname`, `stateSecretRef`, `tags`, `replicas`, `service.loadBalancerIP`, `service.loadBalancerClass`, `dns.zone`, `dns.serviceName`, `dns.serviceClusterIP`, `dns.extraZones`, `forwardImage`, `forwards`; Tailnet `spec.server` and `spec.dns.hostsConfigMap` | `Ready=False/IdentityChanged`; nothing is written. Revert the field, or delete with `deletionPolicy: Delete` and recreate. |
-| Live DNS | `dns.staticRecords`, `dns.wildcardAddress`, the hosts source | Re-rendered into `zone.db` (and `hosts` for extra zones) ([Live DNS reconcile](#live-dns-reconcile)). |
+| Live DNS | `dns.staticRecords`, `dns.wildcardAddress`, `dns.aliasZones`, the hosts source | Re-rendered into `zone.db` (and `hosts` for extra zones) ([Live DNS reconcile](#live-dns-reconcile)). |
 | Images | `image` (tailscale and kernel-preflight), `dns.image` | Written into `spec.template` of the receipt StatefulSet; see below. |
 | Routes | `routes.lan`, `routes.advertiseEgressTargets`, `service.tailnetLBCIDR`, the targets of the Tailnet's `TailnetEgress` objects | The planned set is written into `TS_ROUTES` of the template; see below. |
 | Pool labels | `service.poolLabels` | Written onto the receipt's LoadBalancer Service (same object); see below. |
@@ -643,6 +644,26 @@ items), so upgrading does not advance its serial or rewrite its ConfigMap. The
 the primary zone like any other semantic change. `dns.extraZones` itself stays
 pinned identity (recreate with `deletionPolicy: Delete` to change it).
 
+### Alias zones (`dns.aliasZones`)
+
+Each `dns.aliasZones[]` entry renders one more server block for a zone that this
+cluster reaches only through `TailnetEgress` aliases, typically another cluster's
+tailnet zone ([Connect a second cluster](../how-to/second-cluster.md#3a-reach-a-spoke-service-from-a-pod-on-the-hub)).
+The block is `hosts /dev/null <zone> { <address> <name> … }` plus the shared
+`prometheus :9153` and `reload`, rendered after the extra zones in sorted zone order.
+The entries are the hosts-source names inside the zone, written into the `Corefile`
+itself: the ConfigMap keeps its two keys and the Pod template its two projected items,
+so adding the first alias zone neither rolls nor restarts the Gateway Pod.
+
+Known names answer A/AAAA locally; other types for a known name are NODATA. A name
+the hosts source does not carry is **SERVFAIL**, not NXDOMAIN, because the block has
+no SOA and no upstream. An empty alias zone is valid and answers SERVFAIL throughout.
+The field is live DNS, not identity: a change re-renders the `Corefile`, advances the
+SOA serial and lands through the CoreDNS `reload` plugin (checked every 30 s plus
+jitter) after the kubelet's ConfigMap refresh. A Gateway without alias zones renders
+byte-identical to earlier releases. The answers are ClusterIPs of this cluster, readable
+by every peer that may query the gateway DNS, as for extra zones.
+
 Initial creation checks scope and ownership. Future dynamic DNS integration must also:
 
 - Verify Tailnet/namespace scope and hosts-ConfigMap ownership.
@@ -709,6 +730,9 @@ loopback upstream: local hosts override without an upstream query, forwarded
 A/NXDOMAIN, the documented TXT fallthrough, a `hosts` projection update landing
 without restart, and the primary zone staying strict. An intentionally unsafe
 hosts+forward control reproduces the same TXT fallthrough in isolation.
+`TestRenderedDNSAliasZones` runs alias-zone blocks: a known name's A answer and
+NODATA, SERVFAIL for unknown names and for an empty zone, the strict primary zone,
+REFUSED outside every zone, and a new alias landing through the `reload` plugin.
 
 This does not verify a specific CoreDNS image, a running Kubernetes sidecar,
 external forwarding support, kernel subnet routing or interruption-free adoption.

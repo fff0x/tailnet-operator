@@ -4,6 +4,16 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- **`TailnetGateway` `spec.dns.aliasZones`** ([Gateway](docs/how-to/gateway.md#alias-zones-for-names-of-another-cluster),
+  [reference](docs/reference/gateway.md#alias-zones-dnsaliaszones)). Up to 16 zones that the
+  gateway answers only from the Tailnet hosts source, without an upstream — typically another
+  cluster's tailnet zone whose names this cluster reaches through `TailnetEgress` aliases. The
+  entries are rendered inline into the `Corefile`, so the field is live DNS: it can change at any
+  time without a Pod restart. Unknown names in such a zone answer SERVFAIL. Gateways without the
+  field render byte-identical to earlier releases.
+
 ## [0.26.1] - 2026-11-20
 
 ### Changed

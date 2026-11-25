@@ -212,6 +212,10 @@ func TestGatewayAdmission(t *testing.T) {
 		o = fresh()
 		set(o, "spec.dns.extraZones", []any{map[string]any{"zone": "corp.example", "upstreams": []any{"10.0.0.1", "10.0.0.2"}}, map[string]any{"zone": "partner.example", "upstreams": []any{"10.0.0.3"}}})
 		check(t, o, true)
+		set(o, "spec.dns.aliasZones", []any{"prod-2.example", "prod-3.example"})
+		check(t, o, true)
+		set(o, "spec.dns.aliasZones", []any{"it.corp.example"})
+		check(t, o, false)
 	})
 	t.Run("route-count-limit", func(t *testing.T) {
 		gen := func(n int) []any {
@@ -245,6 +249,9 @@ func TestGatewayAdmission(t *testing.T) {
 		{"primary-overlap", "dns.extraZones", []any{map[string]any{"zone": "sub.tail.example", "upstreams": []any{"10.0.0.1"}}}},
 		{"primary-parent", "dns.extraZones", []any{map[string]any{"zone": "example", "upstreams": []any{"10.0.0.1"}}}},
 		{"extra-overlap", "dns.extraZones", []any{map[string]any{"zone": "extra.example", "upstreams": []any{"10.0.0.1"}}, map[string]any{"zone": "sub.extra.example", "upstreams": []any{"10.0.0.2"}}}},
+		{"alias-primary-overlap", "dns.aliasZones", []any{"sub.tail.example"}},
+		{"alias-nested", "dns.aliasZones", []any{"prod-2.example", "a.prod-2.example"}},
+		{"alias-shell", "dns.aliasZones", []any{"prod-2.example;id"}},
 		{"static-duplicates", "dns.staticRecords", []any{map[string]any{"name": "api", "address": "10.0.0.1"}, map[string]any{"name": "api", "address": "10.0.0.2"}}},
 		{"static-shell", "dns.staticRecords", []any{map[string]any{"name": "api;id", "address": "10.0.0.1"}}},
 		{"static-both-address-and-target", "dns.staticRecords", []any{map[string]any{"name": "a", "address": "10.0.0.1", "target": "x.tail.example"}}},

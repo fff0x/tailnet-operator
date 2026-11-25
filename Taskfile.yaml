@@ -61,7 +61,7 @@ tasks:
     requires:
       vars: [COREDNS_BINARY]
     cmds:
-      - go test -mod=readonly -tags=gatewaydns ./test/gateway-dns -count=1 -v -timeout=90s
+      - go test -mod=readonly -tags=gatewaydns ./test/gateway-dns -count=1 -v -timeout=180s
 
   validate-examples:
     desc: Check invalid fixtures against the current kube-context (server dry-run only)

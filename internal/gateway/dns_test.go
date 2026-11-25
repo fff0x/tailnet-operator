@@ -270,6 +270,63 @@ func TestRenderDNSExtraZones(t *testing.T) {
 	}
 }
 
+func TestRenderDNSAliasZones(t *testing.T) {
+	in := dnsFixture()
+	in.Config.ExtraZones = []tnv1.GatewayExtraZone{{Zone: "corp.example", Upstreams: []tnv1.GatewayIP{"10.0.0.1"}}}
+	in.Config.AliasZones = []tnv1.GatewayName{"prod-2.example", "empty.example"}
+	in.Hosts = "192.0.2.7 alias.tail.example\n10.96.0.9 talos.prod-2.example\n10.96.0.8 k8s.prod-2.example\n2001:db8::8 k8s.prod-2.example\n10.0.0.5 proxy.corp.example\n10.0.0.8 other.example\n"
+	got, err := RenderDNS(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAlias := "prod-2.example {\n    bind 0.0.0.0 ::\n    errors\n    prometheus :9153\n    hosts /dev/null prod-2.example {\n        10.96.0.8 k8s.prod-2.example\n        2001:db8::8 k8s.prod-2.example\n        10.96.0.9 talos.prod-2.example\n    }\n    reload\n}\n"
+	wantEmpty := "empty.example {\n    bind 0.0.0.0 ::\n    errors\n    prometheus :9153\n    hosts /dev/null empty.example {\n    }\n    reload\n}\n"
+	if !strings.HasSuffix(got.Corefile, wantEmpty+wantAlias) || strings.Index(got.Corefile, "corp.example {") > strings.Index(got.Corefile, wantEmpty) {
+		t.Fatalf("corefile %q", got.Corefile)
+	}
+	if strings.Contains(got.ZoneFile, "prod-2") || strings.Contains(got.HostsFile, "prod-2") || strings.Contains(got.Corefile, "other.example") {
+		t.Fatal("alias name leaked into the zone or hosts file, or a foreign name was served")
+	}
+	// Alias zones alone keep the two-key payload, so the Pod template is unchanged.
+	aliasOnly := dnsFixture()
+	aliasOnly.Config.AliasZones = []tnv1.GatewayName{"prod-2.example"}
+	aliasOnly.Hosts = in.Hosts
+	plain, err := RenderDNS(aliasOnly)
+	if err != nil || len(dnsPayload(plain)) != 2 || plain.HostsFile != "" {
+		t.Fatal("alias zones added a hosts key")
+	}
+	base, err := PlanDNSRevision(aliasOnly, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasOnly.Hosts += "10.96.0.10 new.prod-2.example\n"
+	next, err := PlanDNSRevision(aliasOnly, &DNSRevision{Serial: 1, ContentHash: base.ContentHash, ResourceVersion: "rv"})
+	if err != nil || !next.Changed || next.Serial != 2 {
+		t.Fatal("alias hosts change did not advance the serial")
+	}
+	for name, mutate := range map[string]func(*DNSInputs){
+		"primary zone":   func(i *DNSInputs) { i.Config.AliasZones[0] = "tail.example" },
+		"under primary":  func(i *DNSInputs) { i.Config.AliasZones[0] = "sub.tail.example" },
+		"over primary":   func(i *DNSInputs) { i.Config.AliasZones[0] = "example" },
+		"extra zone":     func(i *DNSInputs) { i.Config.AliasZones[0] = "corp.example" },
+		"under extra":    func(i *DNSInputs) { i.Config.AliasZones[0] = "it.corp.example" },
+		"nested alias":   func(i *DNSInputs) { i.Config.AliasZones[1] = "a.prod-2.example" },
+		"duplicate":      func(i *DNSInputs) { i.Config.AliasZones[1] = "prod-2.example" },
+		"injected zone":  func(i *DNSInputs) { i.Config.AliasZones[0] = "injected\n}\nevil.example" },
+		"too many zones": func(i *DNSInputs) { i.Config.AliasZones = make([]tnv1.GatewayName, 17) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := dnsFixture()
+			in.Config.ExtraZones = []tnv1.GatewayExtraZone{{Zone: "corp.example", Upstreams: []tnv1.GatewayIP{"10.0.0.1"}}}
+			in.Config.AliasZones = []tnv1.GatewayName{"prod-2.example", "prod-3.example"}
+			mutate(&in)
+			if got, err := RenderDNS(in); !errors.Is(err, ErrDNSConfiguration) || got != (DNSPlan{}) {
+				t.Fatal("invalid alias zone accepted or partial output returned")
+			}
+		})
+	}
+}
+
 func TestRenderDNSConfigMapSizeLimit(t *testing.T) {
 	in := dnsFixture()
 	var hosts strings.Builder

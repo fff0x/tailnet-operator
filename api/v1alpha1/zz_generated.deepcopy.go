@@ -226,6 +226,11 @@ func (in *GatewayDNS) DeepCopyInto(out *GatewayDNS) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.AliasZones != nil {
+		in, out := &in.AliasZones, &out.AliasZones
+		*out = make([]GatewayName, len(*in))
+		copy(*out, *in)
+	}
 	if in.StaticRecords != nil {
 		in, out := &in.StaticRecords, &out.StaticRecords
 		*out = make([]GatewayStaticRecord, len(*in))

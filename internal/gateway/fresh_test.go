@@ -280,6 +280,30 @@ func TestRenderFreshRejectsUnsupported(t *testing.T) {
 	if !projected || !keyed {
 		t.Fatal("extra zones must add the hosts key and its projection")
 	}
+	// Alias zones render inline in the Corefile: two keys, two projected items.
+	in = freshFixture()
+	in.Gateway.Spec.DNS.AliasZones = []tnv1.GatewayName{"prod-2.example"}
+	if p, err = RenderFresh(in); err != nil {
+		t.Fatal(err)
+	}
+	projected, keyed = false, false
+	for _, obj := range p.Objects {
+		switch obj := obj.(type) {
+		case *corev1.ConfigMap:
+			if strings.HasSuffix(obj.Name, "-coredns") {
+				keyed = len(obj.Data) == 2 && strings.Contains(obj.Data["Corefile"], "hosts /dev/null prod-2.example {")
+			}
+		case *appsv1.StatefulSet:
+			for _, v := range obj.Spec.Template.Spec.Volumes {
+				if v.ConfigMap != nil {
+					projected = len(v.ConfigMap.Items) == 2
+				}
+			}
+		}
+	}
+	if !projected || !keyed {
+		t.Fatal("alias zones must stay inline in the Corefile without a hosts key or projection")
+	}
 }
 
 // Synthetic files exercise only the read-only preflight script, not TUN, network

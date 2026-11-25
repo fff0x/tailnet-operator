@@ -269,7 +269,7 @@ kubectl get tailnetsite prod-1-lan                                              
 | Change | Effect |
 | --- | --- |
 | `image`, `dns.image`, `routes.*`, `service.tailnetLBCIDR`, egress targets | written into the StatefulSet template; apply by deleting the Pod (`PodTemplateStale`), no restart by the operator |
-| `dns.staticRecords`, `dns.wildcardAddress`, the hosts file | re-rendered live into the zone (and the extra-zone `hosts` key); no Pod change |
+| `dns.staticRecords`, `dns.wildcardAddress`, `dns.aliasZones`, the hosts file | re-rendered live into the zone (the extra-zone `hosts` key, the alias-zone blocks of the `Corefile`); no Pod change |
 | `service.poolLabels` | set/removed on the Service in place |
 | `deletionPolicy`, `suspend` | lifecycle only; a suspend/resume cycle keeps the identity |
 | operator upgrade | existing children (PDB, RBAC, Services) stay as recorded in the receipt; to pick up a changed child template, recreate the gateway with `deletionPolicy: Delete` |
@@ -304,6 +304,28 @@ the two run side by side until you delete the old one.
 Anything that only the old router answered (API proxies on its tailnet IP, MagicDNS names such
 as `<old-hostname>`) needs its own replacement before step 5: a `TailnetIngress` per API
 ([Ingress: TCP](ingress-tcp.md)) and the gateway's `dns.staticRecords` for the names.
+
+## Alias zones for names of another cluster
+
+Pods that reach another cluster's service through a `TailnetEgress` dial the service's real
+name, such as `talos.prod-2.tailnet.example.internal`, so TLS SNI and certificate checks hold.
+The egress publishes that name as an alias; list its zone as `dns.aliasZones` and the gateway
+answers it from the hosts source alone, without an upstream:
+
+```yaml
+spec:
+  dns:
+    zone: prod-1.tailnet.example.internal
+    aliasZones:
+      - prod-2.tailnet.example.internal
+```
+
+Forward the zone from the cluster CoreDNS to `dns.serviceClusterIP`, as for the primary zone
+([Wire the cluster CoreDNS](dns-coredns.md#wire-the-cluster-coredns)); a block for the common
+parent zone covers every cluster at once. Names the hosts source does not carry answer
+SERVFAIL. The field can change at any time: the gateway re-renders its `Corefile` and CoreDNS
+reloads it without a Pod restart. The walk-through is in
+[Connect a second cluster](second-cluster.md#3a-reach-a-spoke-service-from-a-pod-on-the-hub).
 
 ## Extra zones for corporate resolvers
 

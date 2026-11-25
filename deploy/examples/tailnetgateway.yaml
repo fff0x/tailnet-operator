@@ -41,3 +41,7 @@ spec:
       - name: router
         address: 192.0.2.1
     wildcardAddress: 198.51.100.80
+    # Another cluster's zone, answered only from TailnetEgress aliases of this cluster
+    # (docs/how-to/second-cluster.md §3a); no upstream.
+    aliasZones:
+      - prod-2.example.internal

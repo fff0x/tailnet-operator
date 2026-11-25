@@ -31,7 +31,8 @@ var ErrDNSConfiguration = errors.New("gateway DNS configuration is invalid")
 // DNSInputs contains public DNS configuration, never Secret contents. Hosts is
 // a snapshot of the selected Tailnet's owned hosts ConfigMap; ownership and scope
 // must be checked by the caller. Names outside the primary zone are served only
-// when they fall inside a dns.extraZones entry (as hosts overrides of that zone).
+// when they fall inside a dns.extraZones entry (as hosts overrides of that zone)
+// or a dns.aliasZones entry (answered from the hosts source alone).
 // Serial must advance for every zone-data change, including hosts-only changes;
 // gateway generation alone is not sufficient. This renderer has no clock or I/O.
 // BindAddresses must be chosen explicitly. CoreDNS's -dns.port flag selects the
@@ -70,6 +71,10 @@ type DNSPlan struct {
 // locally known name falls through to the upstream. Extra zones never overlap
 // the primary zone or each other, and an upstream is never the gateway itself.
 //
+// Each dns.aliasZones entry becomes a server block that answers only the
+// hosts-source names inside that zone, inline and without an upstream. Alias
+// zones overlap neither the primary zone, an extra zone nor each other.
+//
 // The Corefile exposes Prometheus metrics on :9153 and enables the global reload
 // plugin so a Corefile change (e.g. a new static record targeting CNAME) takes
 // effect on the running Pod without a restart; zone-file changes are picked up
@@ -82,6 +87,10 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 		return DNSPlan{}, ErrDNSConfiguration
 	}
 	extraZones, err := dnsExtraZones(cfg, server)
+	if err != nil {
+		return DNSPlan{}, err
+	}
+	aliasZones, err := dnsAliasZones(cfg, extraZones)
 	if err != nil {
 		return DNSPlan{}, err
 	}
@@ -136,6 +145,10 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 		return DNSPlan{}, err
 	}
 	extraHosts := make(map[string][]netip.Addr)
+	aliasHosts := make(map[string]map[string][]netip.Addr, len(aliasZones))
+	for _, zone := range aliasZones {
+		aliasHosts[zone] = make(map[string][]netip.Addr)
+	}
 	for name, addresses := range hosts {
 		if name == string(cfg.Zone) {
 			// Keep the authoritative apex/nameserver tied to the gateway Service.
@@ -151,6 +164,12 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 		for _, extra := range extraZones {
 			if name == extra.zone || strings.HasSuffix(name, "."+extra.zone) {
 				extraHosts[name] = addresses
+				break
+			}
+		}
+		for _, zone := range aliasZones {
+			if name == zone || strings.HasSuffix(name, "."+zone) {
+				aliasHosts[zone][name] = addresses
 				break
 			}
 		}
@@ -211,6 +230,22 @@ func RenderDNS(in DNSInputs) (DNSPlan, error) {
 				extra.zone, bind, DNSHostsFile, extra.zone, strings.Join(extra.upstreams, " "))
 		}
 	}
+	// Alias zones carry their entries inline, so neither the ConfigMap keys nor the
+	// projected Pod template change and adding a zone needs no Pod restart. /dev/null is
+	// an always-present empty file for the plugin's mandatory file argument.
+	// ponytail: hosts plugin without SOA, so an unknown name in an alias zone is SERVFAIL,
+	// not NXDOMAIN. Upgrade path: one generated file zone per alias zone.
+	for _, zone := range aliasZones {
+		var entries strings.Builder
+		for _, name := range slices.Sorted(maps.Keys(aliasHosts[zone])) {
+			addresses := aliasHosts[zone][name]
+			slices.SortFunc(addresses, func(a, b netip.Addr) int { return a.Compare(b) })
+			for _, addr := range slices.Compact(addresses) {
+				fmt.Fprintf(&entries, "        %s %s\n", addr, name)
+			}
+		}
+		core += fmt.Sprintf("%s {\n    bind %s\n    errors\n    prometheus :9153\n    hosts /dev/null %s {\n%s    }\n    reload\n}\n", zone, bind, zone, entries.String())
+	}
 	if len(core)+zone.Len()+hostsFile.Len() > maxDNSConfigBytes {
 		return DNSPlan{}, ErrDNSConfiguration
 	}
@@ -251,6 +286,34 @@ func dnsExtraZones(cfg tnv1.GatewayDNS, server netip.Addr) ([]dnsExtraZone, erro
 		}
 		out = append(out, dnsExtraZone{zone: zone, upstreams: upstreams})
 	}
+	return out, nil
+}
+
+// dnsAliasZones validates dns.aliasZones against the primary zone, the extra
+// zones and each other and returns them sorted, so spec order never changes
+// the rendered Corefile.
+func dnsAliasZones(cfg tnv1.GatewayDNS, extraZones []dnsExtraZone) ([]string, error) {
+	if len(cfg.AliasZones) > 16 {
+		return nil, ErrDNSConfiguration
+	}
+	known := []string{string(cfg.Zone)}
+	for _, extra := range extraZones {
+		known = append(known, extra.zone)
+	}
+	out := make([]string, 0, len(cfg.AliasZones))
+	for _, raw := range cfg.AliasZones {
+		zone := string(raw)
+		if !dnsZone(zone) {
+			return nil, ErrDNSConfiguration
+		}
+		for _, other := range slices.Concat(known, out) {
+			if zone == other || strings.HasSuffix(zone, "."+other) || strings.HasSuffix(other, "."+zone) {
+				return nil, ErrDNSConfiguration
+			}
+		}
+		out = append(out, zone)
+	}
+	slices.Sort(out)
 	return out, nil
 }
 
