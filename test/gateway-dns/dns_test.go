@@ -489,10 +489,12 @@ func TestRenderedDNSExtraZones(t *testing.T) {
 	if count.Load() <= before {
 		t.Fatal("extra zone never reached the upstream")
 	}
-	// Documented weaker contract: a non-address type for an overridden name falls through.
-	m, err := exchange("udp", address, "dyn.site.example", dnsmessage.TypeTXT)
-	if err != nil || m.RCode != dnsmessage.RCodeSuccess || len(m.Answers) != 1 {
-		t.Fatal("TXT for an overridden name did not fall through to the upstream")
+	// CoreDNS 1.15 answers a non-address type for an overridden name with local
+	// NODATA; 1.14 forwarded it. Either way the A/AAAA override stays local.
+	before = count.Load()
+	assertAnswer(t, address, "dyn.site.example", dnsmessage.TypeTXT, dnsmessage.RCodeSuccess, "")
+	if count.Load() != before {
+		t.Fatal("TXT for an overridden name reached the upstream")
 	}
 	// A hosts projection update lands without a restart (hosts plugin reload).
 	project(t, root, "v2", map[string]string{"Corefile": core, "zone.db": plan.ZoneFile, "hosts": plan.HostsFile + "192.0.2.11 new.site.example\n"}, false)
@@ -549,7 +551,9 @@ func TestRenderedDNSAliasZones(t *testing.T) {
 
 // This is an intentionally unsafe control, not renderer output. It demonstrates
 // the weaker hosts+forward contract that dns.extraZones opts into, as opposed
-// to the strict locality of the primary zone.
+// to the strict locality of the primary zone: every name the hosts file does
+// not carry reaches the upstream. Since CoreDNS 1.15 a known name's other
+// record types stay local (NODATA) instead of falling through.
 func TestCoreDNSForwardingBoundary(t *testing.T) {
 	binary := coreDNSBinary(t)
 	root := t.TempDir()
@@ -563,10 +567,14 @@ func TestCoreDNSForwardingBoundary(t *testing.T) {
 	if count.Load() != before {
 		t.Fatal("A-only host unexpectedly forwarded AAAA")
 	}
+	assertAnswer(t, address, "app.tail.example", dnsmessage.TypeTXT, dnsmessage.RCodeSuccess, "")
+	if count.Load() != before {
+		t.Fatal("known name's TXT unexpectedly forwarded")
+	}
 	for _, network := range []string{"udp", "tcp"} {
-		m, err := exchange(network, address, "app.tail.example", dnsmessage.TypeTXT)
+		m, err := exchange(network, address, "other.tail.example", dnsmessage.TypeTXT)
 		if err != nil || m.RCode != dnsmessage.RCodeSuccess || len(m.Answers) != 1 {
-			t.Fatal("unsafe control did not reproduce TXT fallthrough")
+			t.Fatal("unsafe control did not forward an unknown name")
 		}
 		rr, ok := m.Answers[0].Body.(*dnsmessage.TXTResource)
 		if !ok || len(rr.TXT) != 1 || rr.TXT[0] != "upstream" {

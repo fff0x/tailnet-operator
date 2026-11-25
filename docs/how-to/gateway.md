@@ -351,7 +351,7 @@ Overrides come from the hosts source (`spec.dns.hostsConfigMap` of the Tailnet, 
 `TailnetEgress` DNS aliases and `TailnetIngress` names): an alias such as
 `proxy.corp.example` on an egress makes the gateway answer it with the egress
 address instead of forwarding. Only A/AAAA are served locally; other record types for
-an overridden name reach the upstream. Zones must not overlap each other or the
+an overridden name are NODATA with CoreDNS 1.15 and reached the upstream with 1.14. Zones must not overlap each other or the
 primary zone; `dns.extraZones` is immutable after creation.
 
 Declared in the schema but **rejected by the current writer** (`Ready=False/FreshBlocked` or

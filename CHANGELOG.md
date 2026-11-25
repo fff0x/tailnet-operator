@@ -14,6 +14,14 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   time without a Pod restart. Unknown names in such a zone answer SERVFAIL. Gateways without the
   field render byte-identical to earlier releases.
 
+### Fixed
+
+- **Docs and the local CoreDNS gate describe CoreDNS 1.15.** In a `dns.extraZones` zone, CoreDNS
+  1.15 answers a non-address query for a name the hosts source overrides with NODATA; 1.14
+  forwarded it to the upstream. The reference still described the 1.14 behaviour, and two tests
+  of `task test-gateway-dns` failed against 1.15.0, the release the gateways pin. The operator's
+  rendering is unchanged.
+
 ## [0.26.1] - 2026-11-20
 
 ### Changed

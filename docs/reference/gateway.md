@@ -628,8 +628,8 @@ name). The block is `hosts hosts <zone> { fallthrough }`, `cache 30`,
 `forward . <upstreams> { max_concurrent 1000 }`, plus the shared `prometheus :9153`
 and `reload`. Hosts-source names that fall inside an extra zone are written to a
 third ConfigMap key, `hosts`, and answered locally (A/AAAA); every other name in
-the zone — and every non-address type, even for a locally known name — is forwarded
-to the upstreams. **This is the weaker hosts+forward contract by design**, opted
+the zone is forwarded to the upstreams. A non-address type for a locally known name
+depends on the `dns.image`: CoreDNS 1.15 answers it NODATA, 1.14 forwarded it. **This is the weaker hosts+forward contract by design**, opted
 into per zone; the primary zone keeps strict known-name locality. Names outside
 every configured zone are still not served.
 
@@ -721,15 +721,16 @@ COREDNS_BINARY=/absolute/path/to/coredns task test-gateway-dns
 ```
 
 Supply a trusted binary explicitly. The gate starts only owned loopback listeners,
-requires IPv4 and IPv6 loopback, and uses no Kubernetes context. CoreDNS **1.14.6**
+requires IPv4 and IPv6 loopback, and uses no Kubernetes context. CoreDNS **1.15.0**
 was checked over UDP/TCP. Cases cover A/AAAA, negative record types (including
 HTTPS/SVCB), wildcards, closest-encloser behavior, NXDOMAIN, refused zones and
 dynamic/static priority. Atomic directory-projection reloads were also checked.
 `TestRenderedDNSExtraZones` runs the rendered extra-zone block against an owned
 loopback upstream: local hosts override without an upstream query, forwarded
-A/NXDOMAIN, the documented TXT fallthrough, a `hosts` projection update landing
-without restart, and the primary zone staying strict. An intentionally unsafe
-hosts+forward control reproduces the same TXT fallthrough in isolation.
+A/NXDOMAIN, local NODATA for a TXT query on an overridden name, a `hosts` projection
+update landing without restart, and the primary zone staying strict. An intentionally
+unsafe hosts+forward control shows in isolation that every name outside the hosts
+file reaches the upstream.
 `TestRenderedDNSAliasZones` runs alias-zone blocks: a known name's A answer and
 NODATA, SERVFAIL for unknown names and for an empty zone, the strict primary zone,
 REFUSED outside every zone, and a new alias landing through the `reload` plugin.

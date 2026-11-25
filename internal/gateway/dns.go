@@ -67,8 +67,9 @@ type DNSPlan struct {
 // Each dns.extraZones entry becomes a forwarding server block: hosts-source
 // names inside that zone are answered locally (hosts plugin, A/AAAA only),
 // everything else in the zone is forwarded to the listed upstreams. This is the
-// weaker hosts+forward contract by design: a non-address query type for a
-// locally known name falls through to the upstream. Extra zones never overlap
+// weaker hosts+forward contract by design: every name the hosts source does not
+// carry is forwarded, and before CoreDNS 1.15 so was a non-address query type for
+// a locally known name (1.15 answers it NODATA). Extra zones never overlap
 // the primary zone or each other, and an upstream is never the gateway itself.
 //
 // Each dns.aliasZones entry becomes a server block that answers only the
