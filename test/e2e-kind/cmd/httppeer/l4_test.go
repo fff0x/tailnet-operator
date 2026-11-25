@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -161,15 +162,19 @@ func TestL4ReplyValidation(t *testing.T) {
 
 func TestL4DialFailureClassification(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		err      error
-		timedOut bool
+		name      string
+		err       error
+		timedOut  bool
+		dialError string
 	}{
-		{"refused", errors.New("private 100.64.0.9"), false},
-		{"deadline", context.DeadlineExceeded, true},
-		{"network-timeout", &net.DNSError{Err: "private", IsTimeout: true}, true},
-		{"canceled", context.Canceled, false},
-		{"nil-connection", nil, false},
+		{"untyped", errors.New("private 100.64.0.9"), false, "other"},
+		{"refused", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, false, "refused"},
+		{"no-route", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.EHOSTUNREACH}, false, "noRoute"},
+		{"unreachable", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ENETUNREACH}, false, "unreachable"},
+		{"deadline", context.DeadlineExceeded, true, "timeout"},
+		{"dns-timeout", &net.DNSError{Err: "private", IsTimeout: true}, true, "other"},
+		{"canceled", context.Canceled, false, "canceled"},
+		{"nil-connection", nil, false, "other"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := probeL4(context.Background(), l4ProbeInput{Target: "100.64.0.9"}, func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -181,7 +186,7 @@ func TestL4DialFailureClassification(t *testing.T) {
 				}
 				return nil, tc.err
 			})
-			if got != (l4ProbeResult{TimedOut: tc.timedOut}) {
+			if got != (l4ProbeResult{TimedOut: tc.timedOut, DialError: tc.dialError}) {
 				t.Fatalf("result: %+v", got)
 			}
 		})
@@ -195,7 +200,7 @@ func TestL4ContextCancellationAndTimeout(t *testing.T) {
 	defer expire()
 	for _, ctx := range []context.Context{canceled, expired} {
 		got := probeL4(ctx, l4ProbeInput{Target: publicDNS}, nil)
-		if got != (l4ProbeResult{TimedOut: ctx == expired}) {
+		if got != (l4ProbeResult{TimedOut: ctx == expired, DialError: "canceled"}) {
 			t.Fatalf("pre-dial cancellation: %+v", got)
 		}
 	}
@@ -208,7 +213,7 @@ func TestL4ContextCancellationAndTimeout(t *testing.T) {
 					<-ctx.Done()
 					return nil, ctx.Err()
 				})
-				if got != (l4ProbeResult{TimedOut: true}) {
+				if got != (l4ProbeResult{TimedOut: true, DialError: "timeout"}) {
 					t.Fatalf("dial timeout: %+v", got)
 				}
 				return
@@ -285,7 +290,7 @@ func TestL4DialErrorClosesPartialConnection(t *testing.T) {
 	got := probeL4(context.Background(), l4ProbeInput{Target: publicDNS}, func(context.Context, string, string) (net.Conn, error) {
 		return observed, errors.New("private dial failure")
 	})
-	if got != (l4ProbeResult{}) || !observed.closed.Load() {
+	if got != (l4ProbeResult{DialError: "other"}) || !observed.closed.Load() {
 		t.Fatal("failed dial leaked connection/result")
 	}
 }
@@ -309,10 +314,10 @@ func TestL4ControlRoutesAndBoundedResult(t *testing.T) {
 	} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
-		if w.Code != tc.status || w.Body.Len() > 64 || strings.Contains(w.Body.String(), "private") || strings.Contains(w.Body.String(), "100.64") {
+		if w.Code != tc.status || w.Body.Len() > 96 || strings.Contains(w.Body.String(), "private") || strings.Contains(w.Body.String(), "100.64") {
 			t.Fatalf("route result: %d %s", w.Code, w.Body.String())
 		}
-		if tc.status == 200 && (w.Body.String() != "{\"ok\":false,\"connected\":false,\"timedOut\":false}\n" || w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Cache-Control") != "no-store") {
+		if tc.status == 200 && (w.Body.String() != "{\"ok\":false,\"connected\":false,\"timedOut\":false,\"dialError\":\"other\"}\n" || w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Cache-Control") != "no-store") {
 			t.Fatal("unexpected result shape/headers")
 		}
 	}

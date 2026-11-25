@@ -225,7 +225,7 @@ func probeL4Exchange(t *testing.T, x *httpPeerFixture, label, address string) l4
 		if err != nil || len(b) > 1024 || json.Unmarshal(b, &raw) != nil || raw.OK == nil || raw.Connected == nil || raw.TimedOut == nil {
 			return false
 		}
-		got = l4Observation{*raw.OK, *raw.Connected, *raw.TimedOut}
+		got = l4Observation{OK: *raw.OK, Connected: *raw.Connected, TimedOut: *raw.TimedOut}
 		return got.OK && got.Connected && !got.TimedOut
 	})
 	return got

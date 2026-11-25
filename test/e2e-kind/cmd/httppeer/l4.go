@@ -27,9 +27,10 @@ type l4ProbeInput struct {
 }
 
 type l4ProbeResult struct {
-	OK        bool `json:"ok"`
-	Connected bool `json:"connected"`
-	TimedOut  bool `json:"timedOut"`
+	OK        bool   `json:"ok"`
+	Connected bool   `json:"connected"`
+	TimedOut  bool   `json:"timedOut"`
+	DialError string `json:"dialError"` // Same categories as the HTTP ACL probe; empty after a dial.
 }
 
 // Exactly one string field; duplicate (including escaped) keys, nested values,
@@ -81,6 +82,7 @@ func probeL4(ctx context.Context, input l4ProbeInput, dial dialFunc) l4ProbeResu
 	defer cancel()
 	if ctx.Err() != nil {
 		result.TimedOut = l4TimedOut(ctx, ctx.Err())
+		result.DialError = "canceled" // No attempted dial means no denial observation.
 		return result
 	}
 	var nonce [l4NonceBytes]byte
@@ -93,6 +95,10 @@ func probeL4(ctx context.Context, input l4ProbeInput, dial dialFunc) l4ProbeResu
 	}
 	if err != nil || conn == nil {
 		result.TimedOut = l4TimedOut(ctx, err)
+		result.DialError = classifyHTTPACLDialError(err)
+		if err == nil {
+			result.DialError = "other" // A nil connection is not a successful dial.
+		}
 		return result
 	}
 	result.Connected = true

@@ -4,6 +4,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed
+
+- **Local kind suites: the L4 denial check uses the HTTP ACL categories.** The L4 peer probe
+  now reports the same dial-error category as the HTTP ACL probe, and a denial counts only for
+  `timeout`, `noRoute` or `unreachable`; refused, reset, canceled and unclassified dials fail the
+  check.
+
 ## [0.27.0] - 2026-11-25
 
 ### Added

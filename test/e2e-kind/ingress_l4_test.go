@@ -59,15 +59,33 @@ func TestL4PolicyFixture(t *testing.T) {
 }
 
 type l4Observation struct {
-	OK        bool `json:"ok"`
-	Connected bool `json:"connected"`
-	TimedOut  bool `json:"timedOut"`
+	OK        bool   `json:"ok"`
+	Connected bool   `json:"connected"`
+	TimedOut  bool   `json:"timedOut"`
+	DialError string `json:"dialError"`
 }
 
 const l4NegativeSamples = 3
 
+// The HTTP ACL rule: only a TCP dial that timed out or found no route is a denial. A refused or
+// reset dial, a cancellation and every unclassified failure prove nothing about the policy.
 func l4Denied(got l4Observation) bool {
-	return !got.OK && !got.Connected && got.TimedOut
+	switch got.DialError {
+	case "timeout":
+		return got == (l4Observation{TimedOut: true, DialError: "timeout"})
+	case "noRoute", "unreachable":
+		return got == (l4Observation{DialError: got.DialError})
+	default:
+		return false
+	}
+}
+
+func knownL4DialError(category string) bool {
+	switch category {
+	case "", "timeout", "noRoute", "unreachable", "refused", "reset", "canceled", "other":
+		return true
+	}
+	return false
 }
 
 // requireL4Denials never retries a contradictory or unclassified observation.
@@ -79,14 +97,16 @@ func requireL4Denials(probe func() (l4Observation, error)) error {
 			return errors.New("L4 negative probe unavailable")
 		}
 		if !l4Denied(got) {
-			return errors.New("L4 negative probe connected or lacked timeout evidence")
+			return errors.New("L4 negative probe connected or lacked a timeout/no-route dial error")
 		}
 	}
 	return nil
 }
 
 func TestL4NegativeAssertions(t *testing.T) {
-	timeout := l4Observation{TimedOut: true}
+	timeout := l4Observation{TimedOut: true, DialError: "timeout"}
+	noRoute := l4Observation{DialError: "noRoute"}
+	unreachable := l4Observation{DialError: "unreachable"}
 	success := l4Observation{OK: true, Connected: true}
 	for _, tc := range []struct {
 		name         string
@@ -100,7 +120,14 @@ func TestL4NegativeAssertions(t *testing.T) {
 		{name: "timeout then success cannot pass", observations: []l4Observation{timeout, success, timeout}, wantCalls: 2},
 		{name: "connected without exchange", observations: []l4Observation{{Connected: true}}, wantCalls: 1},
 		{name: "timeout after connect", observations: []l4Observation{{Connected: true, TimedOut: true}}, wantCalls: 1},
+		{name: "timeout and no-route mix", observations: []l4Observation{noRoute, timeout, unreachable}, wantCalls: 3, wantSuccess: true},
 		{name: "unclassified failure", observations: []l4Observation{{}}, wantCalls: 1},
+		{name: "refused", observations: []l4Observation{{DialError: "refused"}}, wantCalls: 1},
+		{name: "reset", observations: []l4Observation{{DialError: "reset"}}, wantCalls: 1},
+		{name: "canceled", observations: []l4Observation{{DialError: "canceled"}}, wantCalls: 1},
+		{name: "other", observations: []l4Observation{{DialError: "other"}}, wantCalls: 1},
+		{name: "timeout flag without category", observations: []l4Observation{{TimedOut: true}}, wantCalls: 1},
+		{name: "no route with timeout flag", observations: []l4Observation{{TimedOut: true, DialError: "noRoute"}}, wantCalls: 1},
 		{name: "inconsistent success", observations: []l4Observation{{OK: true, TimedOut: true}}, wantCalls: 1},
 		{name: "probe transport failure", probeError: true, wantCalls: 1},
 	} {
@@ -339,15 +366,16 @@ func TestIngressL4(t *testing.T) {
 		input, _ := json.Marshal(map[string]string{"target": address})
 		b, err := x.proxy(pod, 9081, "probe-l4", string(input))
 		var raw struct {
-			OK        *bool `json:"ok"`
-			Connected *bool `json:"connected"`
-			TimedOut  *bool `json:"timedOut"`
+			OK        *bool   `json:"ok"`
+			Connected *bool   `json:"connected"`
+			TimedOut  *bool   `json:"timedOut"`
+			DialError *string `json:"dialError"`
 		}
-		valid := err == nil && len(b) <= 1024 && json.Unmarshal(b, &raw) == nil && raw.OK != nil && raw.Connected != nil && raw.TimedOut != nil
+		valid := err == nil && len(b) <= 1024 && json.Unmarshal(b, &raw) == nil && raw.OK != nil && raw.Connected != nil && raw.TimedOut != nil && raw.DialError != nil
 		var got l4Observation
 		if valid {
-			got = l4Observation{*raw.OK, *raw.Connected, *raw.TimedOut}
-			valid = !got.OK || (got.Connected && !got.TimedOut)
+			got = l4Observation{OK: *raw.OK, Connected: *raw.Connected, TimedOut: *raw.TimedOut, DialError: *raw.DialError}
+			valid = knownL4DialError(got.DialError) && got.Connected == (got.DialError == "") && (!got.OK || (got.Connected && !got.TimedOut))
 		}
 		observations = append(observations, probeRecord{Phase: label, Address: kind, Valid: valid, l4Observation: got})
 		if !valid {
@@ -369,7 +397,7 @@ func TestIngressL4(t *testing.T) {
 	}
 	probeDenied := func(label string) {
 		t.Helper()
-		// Only fresh IPv4 timeouts count. Unclassified MagicDNS lookup failures
+		// Only fresh IPv4 dial timeouts or no-route errors count. Unclassified MagicDNS lookup failures
 		// are not ACL proof; DNS forwarding is checked in the positive phases.
 		if err := requireL4Denials(func() (l4Observation, error) {
 			got, err := probeOnce(label, denied.Name, target)
@@ -419,5 +447,5 @@ func TestIngressL4(t *testing.T) {
 		}
 	}
 	x.save("result.json", map[string]any{"realChartAndReconciler": true, "generatedAgentStartupGate": true, "l4ByteExchange": true, "separateUserACLNegative": true, "denyAllowDenyRecovery": true, "sameParticipants": true, "probes": results, "egressSubnetRoutingTested": false, "httpCoexistenceTested": false, "aclNegativeAddress": "tailnet-ipv4", "negativeSamplesPerPhase": l4NegativeSamples, "dnsACLNegativeTested": false, "immediateRevocationTested": false})
-	t.Log("gate: generated L4 ingress, IPv4/MagicDNS byte exchange, independent user IPv4 deny/allow/deny with fixed timeout samples and positive controls; unchanged participants; revocation convergence recorded separately")
+	t.Log("gate: generated L4 ingress, IPv4/MagicDNS byte exchange, independent user IPv4 deny/allow/deny with fixed timeout/no-route samples and positive controls; unchanged participants; revocation convergence recorded separately")
 }

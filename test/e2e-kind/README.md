@@ -159,13 +159,15 @@ The generated agent and both peers pass the same pre-start network gates as the 
 
 One user remains allowed throughout. The other is denied, temporarily added to the allowed group,
 then removed again through the operator-owned policy. Positive stages check fresh connections through both address forms.
-Each negative stage requires three fresh IPv4 dial timeouts: any connection or unclassified failure fails immediately, without retries.
+Each negative stage requires three fresh IPv4 dials that fail with the HTTP ACL categories `timeout`, `noRoute` or
+`unreachable`. Any connection, a `refused`, `reset` or `canceled` dial and any other failure fail immediately, without retries.
 Only revocation has a separate bounded convergence window before these assertions; initial denial has none.
 Unclassified MagicDNS failures do not count as ACL evidence. Positive controls and successful temporary access
 help distinguish denial from an unusable peer/backend, but do not prove every ACL behavior.
 Final checks require unchanged peer/agent identities and restart counts, an unchanged agent Deployment generation,
 and a Ready ingress. `probe-observations.json` retains every attempt, including convergence and failed-run observations.
-Probe results expose only bounded booleans and fixed phase/address-kind labels, not credentials or raw network errors.
+Probe results expose only bounded booleans, a fixed dial-error category and fixed phase/address-kind labels, not
+credentials or raw network errors.
 
 The peer helper has fixed ports and framing, bounded deadlines/concurrency, strict control JSON and no arbitrary dial mode.
 Its optional `--identity=denied` selects one fixed second hostname.
