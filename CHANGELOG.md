@@ -8,6 +8,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 - **Local tests and the CI test image use Helm v4.3.2** instead of v3.19.0. The projection runner
   now requires Helm 4.
+- **The kind suites run on kind v0.33.0 with Kubernetes v1.37.0** (node image pinned by digest)
+  instead of kind v0.32.0 with v1.36.1.
 
 ### Fixed
 

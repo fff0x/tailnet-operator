@@ -329,7 +329,7 @@ systemd-run --user --scope -p Delegate=yes -- \
   bash hack/e2e-kind-projection.sh --gateway-preflight-only
 ```
 
-The runner requires its usual tools and cached assets, including Kind 0.32.0 and
+The runner requires its usual tools and cached assets, including Kind 0.33.0 and
 Helm 4. It creates a disposable isolated cluster; it never uses the current context.
 The new selection has a 10-minute test budget. Existing selections and budgets are
 unchanged. Evidence and cleanup results remain under the runner's XDG State directory.

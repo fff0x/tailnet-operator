@@ -21,7 +21,7 @@ done
 podman_bin=$(type -P podman)
 [[ $("$podman_bin" --remote=false info --format '{{.Host.Security.Rootless}}') == true ]] || fail 'local Podman is not rootless'
 # kind.yaml pins this version's verified default node image.
-[[ $(kind version) == 'kind v0.32.0 '* ]] || fail 'expected kind v0.32.0; review its default node pin before updating'
+[[ $(kind version) == 'kind v0.33.0 '* ]] || fail 'expected kind v0.33.0; review its default node pin before updating'
 case $(uname -m) in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) fail 'unsupported architecture' ;; esac
 work=$(mktemp -d "${TMPDIR:-/tmp}/tn-kind-XXXXXXXXXX")
 cluster=$(basename "$work" | tr '[:upper:]' '[:lower:]')

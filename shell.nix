@@ -4,20 +4,12 @@
 
 let
   # hack/e2e-kind.sh and hack/e2e-kind-projection.sh require exactly this release: kind.yaml pins
-  # its verified default node image. nixpkgs has moved on, so build the pinned sources with the
-  # current recipe plus the upstream fix nixpkgs carried for this release. Move the version, both
-  # hashes and the scripts' version check together.
+  # its verified default node image. Build the pinned sources with the current nixpkgs recipe. Move
+  # the version, both hashes and the scripts' version check together.
   kind = pkgs.kind.overrideAttrs (old: {
-    version = "0.32.0";
-    src = old.src.override { hash = "sha256-ii0VhS1Nib+r2ZFIIkRvkcGY1fLxev6WnhbqvaZW7j8="; };
+    version = "0.33.0";
+    src = old.src.override { hash = "sha256-exqO/KERw/SOv3dywcrm/DSHY37dfTOhQezg6Nroew0="; };
     vendorHash = "sha256-tRpylYpEGF6XqtBl7ESYlXKEEAt+Jws4x4VlUVW8SNI=";
-    patches = old.patches ++ [
-      # apiserver connection loss after the envoy load-balancer container restarts
-      (pkgs.fetchpatch {
-        url = "https://github.com/kubernetes-sigs/kind/commit/9a24e6c1ae3d59f8de052ee5c3842820450a369a.patch";
-        hash = "sha256-BP2Ub8b1GA7V0CGvhcoGuHRm7u+IMRTmN3mDc2rePnY=";
-      })
-    ];
   });
 
   # hack/e2e-kind-projection.sh requires Helm 4, and the CI test image (Dockerfile, stage TEST) pins

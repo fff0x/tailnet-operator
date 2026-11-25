@@ -28,7 +28,7 @@ func TestHTTPKindConfig(t *testing.T) {
 	if yaml.UnmarshalStrict(httpKindConfig, &cfg) != nil || cfg.Kind != "Cluster" || cfg.APIVersion != "kind.x-k8s.io/v1alpha4" || cfg.Networking.APIServerAddress != "127.0.0.1" || len(cfg.Nodes) != 1 || len(cfg.Patches) != 2 {
 		t.Fatal("unexpected owned HTTP kind configuration")
 	}
-	if cfg.Nodes[0].Role != "control-plane" || cfg.Nodes[0].Image != "kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5" {
+	if cfg.Nodes[0].Role != "control-plane" || cfg.Nodes[0].Image != "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5" {
 		t.Fatal("unexpected HTTP fixture node pin")
 	}
 	var patch struct {

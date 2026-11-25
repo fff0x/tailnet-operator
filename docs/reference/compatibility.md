@@ -11,7 +11,7 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 
 | Component | Supported | Notes |
 | --- | --- | --- |
-| Kubernetes | ≥ 1.31 | CRD admission uses the CEL IP library; tested against 1.31 and 1.36 |
+| Kubernetes | ≥ 1.31 | CRD admission uses the CEL IP library; tested against 1.31 and 1.37 |
 | Headscale | 0.29.x | REST API for nodes, keys and policy; `POST /api/v1/policy/check` is required for operator-owned policy |
 | Headscale 0.28.x | detected, not supported | Preflight reports `HeadscaleCompatible=False/Incompatible`; L4 egress/ingress with a hand-maintained policy still works |
 | Headscale policy mode | `database` for operator-owned policy; `file` for read-only operation | In `file` mode the operator renders but never writes (`PolicyApplied=False/PolicyModeFile`) |

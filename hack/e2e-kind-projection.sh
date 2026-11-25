@@ -147,7 +147,7 @@ image=localhost/tn-source-netprobe:$cluster
 agent_image=localhost/tailnet-operator-e2e:$cluster
 node=$cluster-control-plane
 ctx=kind-$cluster
-pin=docker.io/kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
+pin=docker.io/kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
 base+=("KIND_EXPERIMENTAL_PROVIDER=podman" "KIND_EXPERIMENTAL_PODMAN_NETWORK=$network" "KUBECONFIG=$work/kubeconfig")
 k() { run "${bins[kubectl]}" --kubeconfig "$work/kubeconfig" --context "$ctx" --request-timeout=15s "$@"; }
 # An exists command returning 125 (or any unexpected status) is not absence.
@@ -233,7 +233,7 @@ scope=$(py scope)
 run "${bins[systemctl]}" --user show "$scope" --property=Delegate --property=Transient --property=ControlGroup > "$out/delegation.txt"
 py delegation "$out/delegation.txt"
 [[ $(p info --format '{{.Host.Security.Rootless}}') == true ]]
-[[ $(run "${bins[kind]}" version) == 'kind v0.32.0 '* ]]
+[[ $(run "${bins[kind]}" version) == 'kind v0.33.0 '* ]]
 p ps -a --filter "label=io.x-k8s.kind.cluster=$cluster" --format json > "$out/initial-cluster.json"
 p ps -a --filter "name=^${node}$" --format json > "$out/initial-node.json"
 py empty "$out/initial-cluster.json" "$out/initial-node.json"

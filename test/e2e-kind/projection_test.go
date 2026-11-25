@@ -70,7 +70,7 @@ func TestFixtureCAProjection(t *testing.T) {
 	}
 	// The isolated node has no default route. Use Kubernetes' endpoint service
 	// resolver rather than adding a route for host-originated ClusterIP traffic.
-	// Service DNS/SNI and CA verification remain unchanged (Kubernetes v1.36.1).
+	// Service DNS/SNI and CA verification remain unchanged (Kubernetes v1.37.0).
 	var apiPod corev1.Pod
 	if f.kube.Get(t.Context(), client.ObjectKey{Namespace: "kube-system", Name: "kube-apiserver-" + f.cluster + "-control-plane"}, &apiPod) != nil || len(apiPod.Spec.Containers) != 1 {
 		t.Fatal("owned API server lookup failed")

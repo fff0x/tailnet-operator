@@ -6,12 +6,12 @@ created. Neither touches an existing kube-context, Docker socket or host configu
 | Runner | Tests | Typical duration |
 | --- | --- | --- |
 | `hack/e2e-kind.sh` | `TestInstall`, `TestLeaderFailover` | 3–4 min |
-| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP`, `TestIngressL4`; opt-in gateway gates below | About 17 min for `--http-only`; full test-process budget 26 min, HTTP-only 22 min, L4-only 10 min (setup/cleanup additional) |
+| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP`, `TestIngressL4`; opt-in gateway gates below | About 13 min of test time and 15 min in total; full test-process budget 26 min, HTTP-only 22 min, L4-only 10 min (setup/cleanup additional) |
 | `hack/e2e-kind-projection.sh --rest-only` | `TestEgressReach`, `TestRestartNoFlap`, `TestMagicDNSRename`, `TestIngressIdentityPersists` | 26-minute test-process budget, about 10 min used; setup/cleanup additional |
 | `hack/e2e-kind-projection.sh --gateway-fresh-only` | `TestGatewayFreshPod` | 10-minute test-process budget; setup/cleanup additional |
 
 ```sh
-# kind must be v0.32.0 (its embedded node image is pinned in kind.yaml / kind-http.yaml)
+# kind must be v0.33.0 (its embedded node image is pinned in kind.yaml / kind-http.yaml)
 nix-shell --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind.sh'
 nix-shell --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kind-projection.sh'
 # Focused L4 acceptance; use --http-only instead for the HTTP/cert-manager path.
@@ -20,7 +20,7 @@ nix-shell --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kin
 
 ## Requirements
 
-- Linux, rootless Podman (`podman info` must report rootless), kind v0.32.0, kubectl, Helm 4, Go,
+- Linux, rootless Podman (`podman info` must report rootless), kind v0.33.0, kubectl, Helm 4, Go,
   Python 3, `timeout`. The user scope needs cgroup delegation (`Delegate=yes`); the runner stops if
   kind reports it missing and never changes sysctls, services or delegation itself.
 - Go builds use the populated module cache with downloads disabled (`GOMODCACHE` if it differs from
@@ -64,7 +64,7 @@ timings) is written under `~/.local/state/tailnet-operator/evidence/`; nothing i
   runner rejects root and remote Podman.
 - No credentials or raw fixture logs are printed; Headscale keys travel through captured CLI stdout
   and the Kubernetes API only. Failure diagnostics are counts, booleans and fixed categories.
-- Images are pinned by digest (`kindest/node:v1.36.1`, `ghcr.io/juanfont/headscale:0.29.6`,
+- Images are pinned by digest (`kindest/node:v1.37.0`, `ghcr.io/juanfont/headscale:0.29.6`,
   cert-manager v1.21.2); the operator image is built from the checkout per run and never published.
 - Fixture subprocesses are cancelled by process-group pidfd (Linux ≥ 6.9); older kernels fail closed.
 
