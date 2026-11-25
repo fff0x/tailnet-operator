@@ -24,7 +24,7 @@ import (
 )
 
 func policyBase(action, destination string) string {
-	return fmt.Sprintf(`{"tagOwners":{},"acls":[{"action":%q,"src":["*"],"dst":[%q]}]}`, action, destination)
+	return fmt.Sprintf(`{"tagOwners":{"tag:fabric":[]},"acls":[{"action":%q,"src":["*"],"dst":[%q]}]}`, action, destination)
 }
 
 func livePolicy(t *testing.T, ctx context.Context, hs *headscaleProcess) string {
@@ -219,7 +219,7 @@ func TestPolicyGatewayRoutes(t *testing.T) {
 					return false
 				}
 				owner, _ := json.Marshal(doc["tagOwners"].(map[string]any)["tag:e2e-site"])
-				return string(owner) == `["autogroup:member"]` && approvers(doc, "10.77.0.0/24") == `["tag:e2e-site"]` && approvers(doc, "198.51.100.0/24") == `["tag:e2e-site"]`
+				return string(owner) == `["tag:fabric"]` && approvers(doc, "10.77.0.0/24") == `["tag:e2e-site"]` && approvers(doc, "198.51.100.0/24") == `["tag:e2e-site"]`
 			})
 			if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 				if err := kube.Get(ctx, client.ObjectKeyFromObject(gw), gw); err != nil {

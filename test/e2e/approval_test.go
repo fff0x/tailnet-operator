@@ -47,7 +47,7 @@ func TestApprovalReplay(t *testing.T) {
 			hs := startHeadscale(t, ctx, version, "database", false)
 			const desired = "192.0.2.7/32"
 			const unrelated = "198.51.100.9/32"
-			const base = `{"tagOwners":{"tag:route-fixture":[],"tag:unmatched":[]},"acls":[{"action":"accept","src":["*"],"dst":["192.0.2.7:443"]}]}`
+			const base = `{"tagOwners":{"tag:fabric":[],"tag:route-fixture":[],"tag:unmatched":[]},"acls":[{"action":"accept","src":["*"],"dst":["192.0.2.7:443"]}]}`
 			// Tags must be declared before assigning them. There are deliberately no autoApprovers.
 			if err := hs.client().SetPolicy(ctx, base); err != nil {
 				t.Fatal(err)
@@ -79,7 +79,7 @@ func TestApprovalReplay(t *testing.T) {
 			if len(routeNode(t, ctx, hs, matching).ApprovedRoutes) != 0 || len(routeNode(t, ctx, hs, unmatched).ApprovedRoutes) != 0 {
 				t.Fatal("base without autoApprovers unexpectedly approved a route")
 			}
-			const withApprover = `{"tagOwners":{"tag:route-fixture":[],"tag:unmatched":[]},"acls":[{"action":"accept","src":["*"],"dst":["192.0.2.7:443"]}],"autoApprovers":{"routes":{"192.0.2.7/32":["tag:route-fixture"]}}}`
+			const withApprover = `{"tagOwners":{"tag:fabric":[],"tag:route-fixture":[],"tag:unmatched":[]},"acls":[{"action":"accept","src":["*"],"dst":["192.0.2.7:443"]}],"autoApprovers":{"routes":{"192.0.2.7/32":["tag:route-fixture"]}}}`
 			updateBase(t, ctx, name, withApprover)
 			eventually(t, ctx, "autoApprovers policy applied", func() bool {
 				live := livePolicy(t, ctx, hs)

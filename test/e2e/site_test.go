@@ -45,7 +45,7 @@ func TestSiteApprovalReplay(t *testing.T) {
 			ctx := testContext(t)
 			hs := startHeadscale(t, ctx, version, "database", false)
 			const site, host, overlap, foreignRoute = "192.0.2.0/24", "198.51.100.9/32", "192.0.2.128/25", "192.0.2.0/26"
-			const base = `{"tagOwners":{"tag:route-fixture":[],"tag:unmatched":[]},"acls":[{"action":"accept","src":["*"],"dst":["192.0.2.7:443"]}]}`
+			const base = `{"tagOwners":{"tag:fabric":[],"tag:route-fixture":[],"tag:unmatched":[]},"acls":[{"action":"accept","src":["*"],"dst":["192.0.2.7:443"]}]}`
 			if err := hs.client().SetPolicy(ctx, base); err != nil {
 				t.Fatal(err)
 			}

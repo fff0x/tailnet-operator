@@ -23,7 +23,7 @@ func TestTestsSrcResolution(t *testing.T) {
 			ctx, cancel := context.WithTimeout(testContext(t), 60*time.Second)
 			defer cancel()
 			hs := startHeadscale(t, ctx, version, "database", false)
-			const base = `{"tagOwners":{"tag:source":[]},"acls":[{"action":"accept","src":["tag:source"],"dst":["192.0.2.7:443"]}]}`
+			const base = `{"tagOwners":{"tag:fabric":[],"tag:source":[]},"acls":[{"action":"accept","src":["tag:source"],"dst":["192.0.2.7:443"]}]}`
 			if err := hs.client().SetPolicy(ctx, base); err != nil {
 				t.Fatal(err)
 			}

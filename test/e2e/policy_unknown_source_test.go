@@ -32,10 +32,8 @@ func TestUndeclaredSourceTagDoesNotFreezePolicy(t *testing.T) {
 			base := `{"tagOwners":{"tag:fabric":[]},"acls":[{"action":"accept","src":["*"],"dst":["192.0.2.1:443"]}]}`
 			enablePolicy(t, ctx, name, base, "Apply")
 			// Permit both an autogroup source and tag sources through the admin allowlist, so the
-			// undeclared tag reaches the renderer rather than being refused as PolicyDenied. The
-			// generated tag needs an owner Headscale accepts; autogroup:member is not a valid owner.
+			// undeclared tag reaches the renderer rather than being refused as PolicyDenied.
 			updateTailnet(t, ctx, name, func(tn *tnv1.Tailnet) {
-				tn.Spec.Policy.TagOwners = []string{"tag:fabric"}
 				tn.Spec.Policy.IngressSourceAllowlist = []string{"autogroup:member", "tag:*"}
 			})
 			waitApplied(t, ctx, name, "192.0.2.1:443", hs)

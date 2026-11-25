@@ -132,10 +132,12 @@ func enablePolicy(t *testing.T, ctx context.Context, name, base, mode string) {
 	if err := kube.Create(ctx, cm); err != nil {
 		t.Fatal(err)
 	}
+	// Headscale accepts a tag as owner or route approver only when tagOwners declares it, so the
+	// base must declare tag:fabric.
 	updateTailnet(t, ctx, name, func(tn *tnv1.Tailnet) {
 		tn.Spec.Policy = tnv1.PolicySpec{
 			BaseConfigMap: cm.Name, Mode: mode,
-			TagOwners: []string{"autogroup:member"}, RouteApprovers: []string{"tag:fabric"},
+			TagOwners: []string{"tag:fabric"}, RouteApprovers: []string{"tag:fabric"},
 		}
 	})
 }

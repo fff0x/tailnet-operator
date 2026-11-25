@@ -41,7 +41,7 @@ import (
 )
 
 const namespace = "tailnet-system"
-const basePolicy = `{"tagOwners":{},"acls":[{"action":"accept","src":["*"],"dst":["192.0.2.1:443"]}]}`
+const basePolicy = `{"tagOwners":{"tag:fabric":[]},"acls":[{"action":"accept","src":["*"],"dst":["192.0.2.1:443"]}]}`
 
 //go:embed headscale.yaml
 var headscaleManifest string
@@ -346,7 +346,7 @@ func installFixture(t *testing.T) *fixture {
 		Server: "https://unused.invalid", APIURL: "http://headscale.tailnet-system.svc:8080",
 		APISecretRef:   tnv1.SecretKeyRef{Name: "headscale-bootstrap", Key: "apiKey"},
 		APIKeyLifetime: metav1.Duration{Duration: time.Hour}, // a typed zero duration serializes as 0s, not omission
-		Policy:         tnv1.PolicySpec{BaseConfigMap: "headscale-policy", Mode: "Apply", TagOwners: []string{"autogroup:member"}, RouteApprovers: []string{"autogroup:member"}},
+		Policy:         tnv1.PolicySpec{BaseConfigMap: "headscale-policy", Mode: "Apply", TagOwners: []string{"tag:fabric"}, RouteApprovers: []string{"tag:fabric"}},
 	}}
 	if err := f.kube.Create(t.Context(), tn); err != nil {
 		t.Fatalf("create Tailnet failed: invalid=%t forbidden=%t conflict=%t (details withheld)",
