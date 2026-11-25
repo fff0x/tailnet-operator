@@ -204,7 +204,8 @@ func reason(s string) string {
 		"DNSInSync", "DNSUpdateConflict", "DNSUpdateBlocked", "LBPending", "LoadBalancerAssigned",
 		"FragmentMissing", "FragmentInvalid", "Export", "AllMerged", "SpokeUnreachable", "SpokeFragmentInvalid", "ApprovalPending", "NothingApproved",
 		"SourceTagUnknown", "SourceGroupUnknown", "TLSChainInvalid", "NameUnresolved", "TLSNameMismatch",
-		"Denied", "WorkloadBlocked", "WorkloadMigrating", "HTTPTransitionPending", "AddressAssigned", "PendingAddress", "BackendProbePending",
+		"Denied", "WorkloadBlocked", "WorkloadMigrating", "WorkloadMigrationBlocked", "HTTPTransitionPending", "HTTPTransitionBlocked",
+		"AddressAssigned", "PendingAddress", "BackendProbePending",
 		"BackendCAUnavailable", "BackendCAMissing", "BackendCAInvalid", "BackendCAForbidden", "BackendTLSConfigurationInvalid",
 		"WorkloadUpdateConflict", "WorkloadUpdateBlocked", "ServiceUpdateConflict", "ServiceUpdateBlocked", "PodCurrent", "PodTemplateStale", "HubMerged":
 		return s

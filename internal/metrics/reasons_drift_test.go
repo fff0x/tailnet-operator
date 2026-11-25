@@ -21,11 +21,14 @@ func TestReasonAllowlistCoversControllerReasons(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Reasons reach a condition as: the 5th setCond arg right after the status, an assignment to a
-	// reason variable, or the inspect return (result, reason, name).
+	// Reasons reach a condition as: the 5th setCond arg right after the status, the reason argument
+	// of fail(), an assignment to a reason variable, a condition helper returning (reason, message),
+	// or the inspect return (result, reason, name).
 	producers := []*regexp.Regexp{
 		regexp.MustCompile(`metav1\.Condition(?:True|False|Unknown),\s*"([A-Za-z]+)"`),
+		regexp.MustCompile(`\.fail\(ctx,\s*&\w+,\s*"([A-Za-z]+)"`),
 		regexp.MustCompile(`(?:localReason|state\.reason|targetReason|trReason)\s*(?:,\s*\w+\s*)?=\s*"([A-Za-z]+)"`),
+		regexp.MustCompile(`return\s+"([A-Za-z]+)",`),
 		regexp.MustCompile(`return\s+\w+,\s*"([A-Za-z]+)",`),
 	}
 	multiWord := regexp.MustCompile(`[A-Z]`)

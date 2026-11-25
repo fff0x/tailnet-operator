@@ -13,6 +13,10 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Fixed
 
+- **The transition failure reasons survive as metric labels.** `Ready=False/WorkloadMigrationBlocked`
+  and `HTTPTransitionBlocked` reached `tailnet_resource_condition` as `reason="Other"`. Both are
+  now in the allowlist, and the drift test also scans the reasons passed to `fail()` and returned
+  by the condition helpers, so the next one cannot collapse silently either.
 - **An undeclared group in `allowFrom` no longer freezes the policy.** Headscale 0.29 rejects the
   whole policy when a grant names a group the policy does not define. The operator now drops an
   `allowFrom` `group:` source that the base `groups` do not declare from generated and spoke
