@@ -23,6 +23,12 @@ Nothing is ever removed from the base; identical grants are not duplicated; unkn
 `tests`, `nodeAttrs`, …) pass through. Targets addressed by **name** get no grant (a policy cannot
 route a name) and are listed in the `PolicyRendered` message.
 
+A generated or spoke grant keeps only sources the rendered policy declares: a `tag:` source needs a
+`tagOwners` entry, a `group:` source an entry in the base `groups`. Headscale rejects the whole
+policy over one undeclared tag or group, so the operator drops such a source, keeps the others,
+names it in the `PolicyApplied` message and reports `SourceTagUnknown` or `SourceGroupUnknown` on
+the ingress. Base grants are never changed.
+
 **Route approval replay.** Headscale's `autoApprovers` act only on a route *change* event, so a route
 advertised before its approver existed stays "available, not approved". After every successful write
 (and every `InSync` check) the operator lists the nodes and approves each advertised route that lies

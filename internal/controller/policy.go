@@ -227,7 +227,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		msg += "; denied ingress tags: " + strings.Join(sum.Denied, ", ")
 	}
 	if len(sum.UnknownSources) > 0 {
-		msg += "; skipped undeclared source tags: " + strings.Join(sum.UnknownSources, ", ")
+		msg += "; skipped undeclared sources: " + strings.Join(sum.UnknownSources, ", ")
 	}
 	if len(skipped) > 0 {
 		msg += "; skipped (name-addressed target without grant, gateway routes that do not plan, or blocked site): " + strings.Join(skipped, ", ")
@@ -407,7 +407,7 @@ func (r *TailnetPolicyReconciler) export(ctx context.Context, tn *tnv1.Tailnet) 
 		msg += "; denied ingress tags: " + strings.Join(sum.Denied, ", ")
 	}
 	if len(sum.UnknownSources) > 0 {
-		msg += "; skipped undeclared source tags: " + strings.Join(sum.UnknownSources, ", ")
+		msg += "; skipped undeclared sources: " + strings.Join(sum.UnknownSources, ", ")
 	}
 	if len(skipped) > 0 {
 		msg += "; skipped: " + strings.Join(skipped, ", ")

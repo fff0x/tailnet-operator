@@ -80,8 +80,8 @@ type Summary struct {
 	Tags, Grants, Routes int
 	Fragments            int
 	Denied               []string
-	// Undeclared tag: sources that were dropped from generated/fragment grants (not owned by any
-	// tagOwner after the merge). Base grants are never touched. See dropUnknownSources.
+	// Undeclared tag: and group: sources that were dropped from generated/fragment grants (no
+	// tagOwner or groups entry after the merge). Base grants are never touched. See dropUnknownSources.
 	UnknownSources []string
 }
 
@@ -266,14 +266,16 @@ func generate(doc map[string]any, in Inputs, sum *Summary) {
 	doc["grants"] = grants
 }
 
-// dropUnknownSources removes a tag: source that no tagOwner declares (after generate and every
-// fragment merged) from each generated/fragment grant, so one undeclared source tag — a typo, or an
-// egress tag not created yet — can no longer make Headscale reject the whole policy (observed
-// 2026-11-18: HTTP 500, live policy frozen). Base grants (keyed before generate) are never touched:
-// the base is the admin's word. A grant left with no source disappears. Unknown tags are reported
-// so the owning ingress can show SourceTagUnknown.
+// dropUnknownSources removes a tag: source that no tagOwner declares and a group: source that the
+// base groups do not declare (after generate and every fragment merged) from each generated/fragment
+// grant, so one undeclared source — a typo, an egress tag not created yet, a group nobody added —
+// can no longer make Headscale reject the whole policy (observed 2026-11-18: HTTP 500, live policy
+// frozen). Base grants (keyed before generate) are never touched: the base is the admin's word. A
+// grant left with no source disappears. Unknown sources are reported so the owning ingress can show
+// SourceTagUnknown or SourceGroupUnknown. Users are not checked: Headscale accepts unknown users.
 func dropUnknownSources(doc map[string]any, baseGrants map[string]bool, sum *Summary) {
 	owners := ensureMap(doc, "tagOwners")
+	groups, _ := doc["groups"].(map[string]any) // read only: a missing key must stay missing
 	grants := arr(doc["grants"])
 	out := grants[:0]
 	unknown := map[string]bool{}
@@ -286,16 +288,21 @@ func dropUnknownSources(doc map[string]any, baseGrants map[string]bool, sum *Sum
 		src := strs(gm["src"])
 		kept := make([]string, 0, len(src))
 		for _, s := range src {
-			if strings.HasPrefix(s, "tag:") {
-				if _, declared := owners[s]; !declared {
-					unknown[s] = true
-					continue
-				}
+			declared := true
+			switch {
+			case strings.HasPrefix(s, "tag:"):
+				_, declared = owners[s]
+			case strings.HasPrefix(s, "group:"):
+				_, declared = groups[s]
+			}
+			if !declared {
+				unknown[s] = true
+				continue
 			}
 			kept = append(kept, s)
 		}
 		if len(kept) == 0 {
-			sum.Grants-- // the grant had only undeclared tag sources; it vanishes
+			sum.Grants-- // the grant had only undeclared sources; it vanishes
 			continue
 		}
 		if len(kept) != len(src) {

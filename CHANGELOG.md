@@ -13,6 +13,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Fixed
 
+- **An undeclared group in `allowFrom` no longer freezes the policy.** Headscale 0.29 rejects the
+  whole policy when a grant names a group the policy does not define. The operator now drops an
+  `allowFrom` `group:` source that the base `groups` do not declare from generated and spoke
+  grants, as it does for undeclared tags; base grants stay unchanged. The ingress reports
+  `PolicyGranted=False/SourceGroupUnknown` and `Ready=False` until the base declares the group;
+  with an undeclared tag as well it reports `SourceTagUnknown` and names both. The `PolicyApplied`
+  message now reads `skipped undeclared sources: …`.
 - **`ReadyChanged` events name the right from-reason.** `TailnetIngress` and `TailnetEgress` take
   it from the Ready reason the operator last determined for the object, not from the informer
   cache, which can still hold the status from before the last write. A stale cache no longer

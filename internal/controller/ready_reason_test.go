@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -63,6 +64,11 @@ func TestReadyReasonNamesBlockingCondition(t *testing.T) {
 	if got := condReason(in.Status.Conditions, "Ready"); got != "SourceTagUnknown" {
 		t.Fatalf("ingress Ready reason = %s, want SourceTagUnknown", got)
 	}
+	setCond(&in.Status.Conditions, 1, "PolicyGranted", metav1.ConditionFalse, "SourceGroupUnknown", "group not in policy")
+	ri.computeExposeStatus(in, map[string]bool{"web": true}, nil)
+	if got := condReason(in.Status.Conditions, "Ready"); got != "SourceGroupUnknown" {
+		t.Fatalf("ingress Ready reason = %s, want SourceGroupUnknown", got)
+	}
 	setCond(&in.Status.Conditions, 1, "PolicyGranted", metav1.ConditionTrue, "Granted", "ok")
 	ri.computeExposeStatus(in, map[string]bool{"web": false}, nil)
 	if got := condReason(in.Status.Conditions, "Ready"); got != "Unreachable" {
@@ -76,13 +82,29 @@ func TestBlockingReasonFallsBackToNotReady(t *testing.T) {
 	}
 }
 
-func TestUndeclaredTagSources(t *testing.T) {
-	const live = `{"tagOwners":{"tag:known":[]},"grants":[{"src":["tag:known"],"dst":["tag:x"]}]}`
-	got := undeclaredTagSources([]string{"group:ops", "tag:known", "tag:ghost", "tag:absent"}, live)
-	if len(got) != 2 || got[0] != "tag:absent" || got[1] != "tag:ghost" {
-		t.Fatalf("undeclaredTagSources = %v, want [tag:absent tag:ghost]", got)
+// Undeclared tags win over undeclared groups and the message names every undeclared source;
+// groups alone report SourceGroupUnknown; users and autogroups are never reported.
+func TestUnknownSourceCondition(t *testing.T) {
+	const live = `{"groups":{"group:ops":["ops@"]},"tagOwners":{"tag:known":[]},"grants":[{"src":["tag:known"],"dst":["tag:x"]}]}`
+	cases := []struct {
+		allowFrom []string
+		reason    string
+		names     []string
+	}{
+		{[]string{"group:ops", "tag:known", "tag:ghost", "tag:absent"}, "SourceTagUnknown", []string{"tag:absent tag:ghost"}},
+		{[]string{"group:ghost", "tag:ghost", "group:ops"}, "SourceTagUnknown", []string{"[tag:ghost group:ghost]"}},
+		{[]string{"group:ghost", "group:absent", "tag:known"}, "SourceGroupUnknown", []string{"[group:absent group:ghost]"}},
+		{[]string{"group:ops", "tag:known", "nobody@", "autogroup:member"}, "", nil},
 	}
-	if len(undeclaredTagSources([]string{"group:ops", "tag:known"}, live)) != 0 {
-		t.Fatal("declared tag reported as unknown")
+	for _, tc := range cases {
+		reason, msg := unknownSourceCondition(tc.allowFrom, live)
+		if reason != tc.reason {
+			t.Fatalf("%v: reason %q, want %q", tc.allowFrom, reason, tc.reason)
+		}
+		for _, n := range tc.names {
+			if !strings.Contains(msg, n) {
+				t.Fatalf("%v: message %q does not name %s", tc.allowFrom, msg, n)
+			}
+		}
 	}
 }

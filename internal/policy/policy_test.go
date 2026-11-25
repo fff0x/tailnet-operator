@@ -9,7 +9,7 @@ import (
 
 const base = `{
   // comments survive parsing, not rendering
-  "groups": {"group:operator": ["alice@"]},
+  "groups": {"group:operator": ["alice@"], "group:ops": ["ops@"], "group:shop": ["shop@"]},
   "tagOwners": {
     "tag:fabric": ["group:operator"],
     "tag:egress-legacy": ["group:legacy"],

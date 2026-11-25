@@ -10,7 +10,9 @@
 // the write when a test fails — a broken base (or render) then never reaches the tailnet.
 {
   "groups": {
-    "group:operator": ["alice@", "bob@"]
+    "group:operator": ["alice@", "bob@"],
+    // Every group an allowFrom names (deploy/examples/tailnetingress.yaml) must be declared here.
+    "group:shop": ["carol@"]
   },
 
   "tagOwners": {
