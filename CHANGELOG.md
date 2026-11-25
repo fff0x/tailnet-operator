@@ -14,6 +14,14 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   time without a Pod restart. Unknown names in such a zone answer SERVFAIL. Gateways without the
   field render byte-identical to earlier releases.
 
+### Changed
+
+- **Docs: reach a spoke service from a pod on the hub** ([Connect a second cluster § 3a](docs/how-to/second-cluster.md#3a-reach-a-spoke-service-from-a-pod-on-the-hub)).
+  The standard path for hub workloads without a tailnet client: the spoke ingress admits the hub
+  egress tag, a hub `TailnetEgress` targets the ingress node by MagicDNS name with the ingress
+  name as alias, and the hub gateway serves the spoke zone through `dns.aliasZones`. The egress
+  guide and the limitations table point there.
+
 ### Fixed
 
 - **Docs and the local CoreDNS gate describe CoreDNS 1.15.** In a `dns.extraZones` zone, CoreDNS

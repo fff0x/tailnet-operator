@@ -100,6 +100,12 @@ zone's resolver; without it the agent cannot look the name up and the target rep
 resolved but the dial failed — usually a missing `allowFrom` grant). The per-target cause is in
 `status.targets[].reason`.
 
+Clients that must send the ingress's own name (an HTTP ingress checks SNI and `Host`, a
+certificate names the service) dial an **alias** instead of the Service name. The alias usually
+lies in the other cluster's zone; list that zone in the local gateway's `dns.aliasZones` so it
+resolves here — walk-through in
+[Connect a second cluster § 3a](second-cluster.md#3a-reach-a-spoke-service-from-a-pod-on-the-hub).
+
 ## Share targets between prod and dev
 
 *`billing` (prod) already reaches `api.corp.example`; `billing-dev` needs it too.*

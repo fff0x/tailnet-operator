@@ -242,6 +242,96 @@ Grants are tailnet-wide; a cluster boundary is nothing special in the policy. Th
   `tag:fabric → tag:fabric` or egress-tag → ingress-tag. Keep it narrow; a proxy with `--accept-routes`
   installs every route its grants let it reach.
 
+## 3a. Reach a spoke service from a pod on the hub
+
+*A monitoring job in the hub namespace `ops` should read the Talos API and Grafana of `prod-2`,
+which `prod-2` publishes as `TailnetIngress` objects. Ordinary pods have no tailnet client, and
+`prod-2`'s names live in its own zone, which the hub cluster does not resolve.*
+
+The pod dials the spoke service's real name, so TLS SNI and the certificate check hold. On the hub
+a `TailnetEgress` carries that name as an alias and forwards to the ingress node; the hub gateway
+answers the name from its hosts source. Four pieces, all declarative:
+
+**1. Admit the hub egress tag on the spoke.** The egress below gets the tag `tag:egress-prod-1-ops`
+from the hub's `tagTemplate`. List it in the `allowFrom` of each spoke ingress, and allow it in the
+`ingressSourceAllowlist` of **both** `Tailnet`s: the spoke renders the grant only with it, and the hub
+rejects a fragment whose grant source it does not allow.
+
+```yaml
+# spoke: each ingress the hub may reach
+spec:
+  allowFrom: [group:operator, tag:egress-prod-1-ops]
+---
+# spoke and hub Tailnet
+spec:
+  policy:
+    ingressSourceAllowlist: ["group:*", "tag:egress-prod-1-*"]
+```
+
+With `approval: Manual` the hub holds the changed fragment until you approve it ([2](#2-export-on-the-spoke-pull-on-the-hub)).
+
+**2. Egress on the hub.** Each target is the ingress node's MagicDNS name (`status.hostname` plus
+the tailnet's MagicDNS `base_domain`, here `magic.tailnet.example.internal`) with the ingress name
+as alias. No route is involved; the grant from step 1 is the only authorization.
+
+```yaml
+# hub
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetEgress
+metadata:
+  name: ops
+  namespace: tailnet-system
+spec:
+  tailnetRef: {name: corp}
+  consumerNamespaces: [ops]
+  targets:
+    - name: prod-2-talos                              # L4 ingress: Talos API
+      address: prod-2-talos.magic.tailnet.example.internal
+      port: 50000
+      aliases: [talos.prod-2.tailnet.example.internal]
+    - name: prod-2-grafana                            # mode: http ingress: TLS ends on the agent
+      address: prod-2-monitoring.magic.tailnet.example.internal
+      port: 443
+      aliases: [grafana.prod-2.tailnet.example.internal]
+```
+
+An HTTP ingress requires its own name as SNI and `Host`, so the alias must be one of the names in
+the ingress's `status.hosts`. An L4 ingress passes TCP through; the alias must be a name the
+backend's certificate carries.
+
+**3. Serve the spoke zone on the hub gateway.** The aliases land in the hub's hosts file; the hub
+`TailnetGateway` answers them once their zone is listed in `dns.aliasZones`
+([Gateway](gateway.md#alias-zones-for-names-of-another-cluster)). Add one entry per spoke:
+
+```yaml
+# hub TailnetGateway
+spec:
+  dns:
+    zone: prod-1.tailnet.example.internal
+    aliasZones: [prod-2.tailnet.example.internal]
+```
+
+**4. Forward the zone from the hub's cluster CoreDNS** to the gateway's `dns.serviceClusterIP`,
+like the hub's own zone ([Wire the cluster CoreDNS](dns-coredns.md#wire-the-cluster-coredns)). A
+block for the common parent `tailnet.example.internal` covers every spoke at once.
+
+```sh
+# hub
+kubectl -n tailnet-system get tailnetegress ops \
+  -o jsonpath='{range .status.targets[*]}{.name} reachable={.reachable} {.reason}{"\n"}{end}'
+# prod-2-talos reachable=true
+# prod-2-grafana reachable=true
+kubectl -n ops run t --rm -it --image=busybox --restart=Never -- nslookup talos.prod-2.tailnet.example.internal
+# Address: 10.96.41.7                       ← the egress Service ClusterIP
+```
+
+`TargetsReachable=False/Unreachable` with the names resolving means the grant is missing: the
+fragment is not approved yet, or the ingress's `allowFrom` lacks the tag. Names that do not resolve
+in the pod point at step 3 or 4; a name in an alias zone without an alias answers SERVFAIL.
+Authentication stays the service's own: a Talos client certificate, a Kubernetes credential or the
+application login. The egress adds the network path, not an identity, and every pod in
+`consumerNamespaces` may use it.
+
 ## 4. DNS: one zone per cluster
 
 Each cluster renders its own hosts file (`dns.hostsConfigMap`) and serves its own zone — through its
@@ -259,7 +349,9 @@ dns:
 
 Egress **aliases** (`api.corp.example → Service ClusterIP`) are cluster-local by nature: the hosts
 entry points at a ClusterIP, so forward the alias zone from each cluster's own CoreDNS to its own
-resolver; never to the other cluster's.
+resolver; never to the other cluster's. A hub pod that reaches a spoke name through an egress
+alias resolves it on the hub as well: the hub gateway serves the spoke zone from its own hosts file
+([3a](#3a-reach-a-spoke-service-from-a-pod-on-the-hub)).
 
 ## 5. What lives where
 
@@ -268,6 +360,8 @@ resolver; never to the other cluster's.
 | Base policy (`groups`, `hosts`, site grants, `tests`) | hub | one writer, one review queue |
 | Spoke kubeconfig Secret, `spokes[]` entry | hub | the hub pulls the fragment; `approval: Manual` makes the annotation the review |
 | `TailnetEgress` to the spoke API server | hub | the only path to the spoke API; grant and `/32` approval are generated |
+| `TailnetEgress` to spoke services, gateway `dns.aliasZones` | hub | hub pods dial spoke names ([3a](#3a-reach-a-spoke-service-from-a-pod-on-the-hub)) |
+| Hub egress tag in the spoke ingresses' `allowFrom` | spoke | exported as a grant in the fragment |
 | Spoke fragments (`*-policy-fragment.json`, Git path) | hub, generated on the spoke | the hub needs them at render time; the diff is the review |
 | `Tailnet`, CRs, `TailnetGateway`, LB pool, CoreDNS forward | each cluster | cluster-local objects |
 | Headscale `dns.nameservers.split` | Headscale configuration | one entry per zone |
