@@ -46,8 +46,8 @@ pkgs.mkShell {
   name = "tailnet-operator";
 
   packages = with pkgs; [
-    # Go toolchain
-    go
+    # Go toolchain: the release line of go.mod and the CI image (Dockerfile); move them together.
+    go_1_26
     gopls
     gotools # goimports
 
