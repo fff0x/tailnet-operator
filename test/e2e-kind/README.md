@@ -167,7 +167,8 @@ help distinguish denial from an unusable peer/backend, but do not prove every AC
 Final checks require unchanged peer/agent identities and restart counts, an unchanged agent Deployment generation,
 and a Ready ingress. `probe-observations.json` retains every attempt, including convergence and failed-run observations.
 Probe results expose only bounded booleans, a fixed dial-error category and fixed phase/address-kind labels, not
-credentials or raw network errors.
+credentials or raw network errors. The HTTP cluster runs the kubelet with `syncFrequency: 10s`, so projected ConfigMap
+and Secret updates reach running pods well inside the 90 s wait budget.
 
 The peer helper has fixed ports and framing, bounded deadlines/concurrency, strict control JSON and no arbitrary dial mode.
 Its optional `--identity=denied` selects one fixed second hostname.

@@ -43,8 +43,9 @@ func TestHTTPKindConfig(t *testing.T) {
 	var kubelet struct {
 		Kind                 string   `json:"kind"`
 		AllowedUnsafeSysctls []string `json:"allowedUnsafeSysctls"`
+		SyncFrequency        string   `json:"syncFrequency"`
 	}
-	if yaml.UnmarshalStrict([]byte(cfg.Patches[1]), &kubelet) != nil || kubelet.Kind != "KubeletConfiguration" || len(kubelet.AllowedUnsafeSysctls) != 1 || kubelet.AllowedUnsafeSysctls[0] != "net.ipv4.ip_forward" {
-		t.Fatal("unexpected gateway forwarding prerequisite patch")
+	if yaml.UnmarshalStrict([]byte(cfg.Patches[1]), &kubelet) != nil || kubelet.Kind != "KubeletConfiguration" || len(kubelet.AllowedUnsafeSysctls) != 1 || kubelet.AllowedUnsafeSysctls[0] != "net.ipv4.ip_forward" || kubelet.SyncFrequency != "10s" {
+		t.Fatal("unexpected kubelet patch")
 	}
 }

@@ -10,6 +10,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   now reports the same dial-error category as the HTTP ACL probe, and a denial counts only for
   `timeout`, `noRoute` or `unreachable`; refused, reset, canceled and unclassified dials fail the
   check.
+- **Local kind suites: projected files reach running pods in time.** The HTTP kind cluster syncs
+  the kubelet every 10 s, so rotated ConfigMaps and Secrets arrive inside the 90 s wait budget.
 
 ## [0.27.0] - 2026-11-25
 

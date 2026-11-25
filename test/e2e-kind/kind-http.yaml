@@ -20,7 +20,11 @@ kubeadmConfigPatches:
   # enabled forwarding that the real gateway pod inherits. This only PERMITS the
   # namespaced unsafe sysctl; pods that do not request it are unaffected, and the
   # HTTP/L4 fixtures set no sysctls. No host sysctl is changed.
+  # syncFrequency: projected ConfigMap/Secret updates reach a running pod only on
+  # the kubelet pod sync. The default (1m plus jitter) nearly fills the 90 s wait
+  # budget of the rotation checks.
   - |
     kind: KubeletConfiguration
     allowedUnsafeSysctls:
       - "net.ipv4.ip_forward"
+    syncFrequency: 10s
