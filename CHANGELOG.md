@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-25
+
 ### Added
 
 - **`TailnetGateway` `spec.dns.aliasZones`** ([Gateway](docs/how-to/gateway.md#alias-zones-for-names-of-another-cluster),

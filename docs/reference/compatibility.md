@@ -20,6 +20,19 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
+## Alias zones on the gateway (v0.27.0)
+
+One new optional field, `TailnetGateway` `spec.dns.aliasZones`, with three admission rules
+against overlaps. Apply the CRDs before the chart (`task crd-upgrade`; Helm does not upgrade
+CRDs), or the API server drops the field. Without the field nothing changes: the gateway
+`Corefile`, its content hash and the Pod template stay byte-identical, so no serial advances and
+no Pod rolls. Setting the field later is a live DNS change without a Pod restart. The agent image
+is unchanged; with a pinned `agentImage` no agent rolls.
+
+`task test-gateway-dns` now targets CoreDNS 1.15.0: in an extra zone, a non-address query for an
+overridden name is answered NODATA locally where 1.14 forwarded it. This follows the `dns.image`
+you pin, not the operator version.
+
 ## Route diagnosis and sites on a spoke (v0.26.1)
 
 Controller-only; the CRDs change in one description text (`reservedNetworks`), no field or
