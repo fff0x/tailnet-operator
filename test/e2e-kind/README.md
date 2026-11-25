@@ -85,7 +85,9 @@ unchanged and the new Pod's zero.
 init container holds the application until the host has verified a fresh network capture from that
 Pod *and* its node: ownership, Pod UID, container identity, routes and the dial contract. The host
 approves the exact snapshot hash with a random epoch; approvals expire 25 s after node capture and
-snapshots after 30 s; the init fails closed after five minutes.
+snapshots after 30 s; the init fails closed after five minutes. The release counts only when the same gate container
+then exits 0 and the application starts. The release exec may end with 0 or with 137, when the
+gate container exits first and takes the exec with it; any other exec failure fails the test.
 
 *Dial contract* (`test/internal/netproof`): the node capture must return `ENETUNREACH` for both IPv4
 and IPv6 documentation addresses (no default or gateway route). A policy-selected Pod must return

@@ -12,6 +12,9 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   check.
 - **Local kind suites: projected files reach running pods in time.** The HTTP kind cluster syncs
   the kubelet every 10 s, so rotated ConfigMaps and Secrets arrive inside the 90 s wait budget.
+- **Local kind suites: the startup gate release is decided by the pod state.** A release exec that
+  the exiting gate container kills (exit 137) no longer fails the test; the same gate container
+  must still exit 0 and the application must start.
 
 ## [0.27.0] - 2026-11-25
 

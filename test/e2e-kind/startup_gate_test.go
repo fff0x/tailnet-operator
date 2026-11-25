@@ -8,9 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -95,6 +97,13 @@ func singleFixtureStarted(p *corev1.Pod, initID string, _ []string) bool {
 	}
 	i, c := p.Status.InitContainerStatuses[0], p.Status.ContainerStatuses[0]
 	return i.ContainerID == initID && i.RestartCount == 0 && i.State.Terminated != nil && i.State.Terminated.ExitCode == 0 && c.State.Running != nil && c.RestartCount == 0
+}
+
+// kubectl exec exits with the remote status. A valid release ends the gate container, and the
+// kernel then SIGKILLs the exec if it has not exited yet (pid_namespaces(7)).
+func releaseKilled(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() == 137
 }
 
 func fixtureGateID(p *corev1.Pod) string {
@@ -359,7 +368,10 @@ func releaseBoundFixturePod(t *testing.T, f *fixture, pod *corev1.Pod, blockedSt
 	_, releaseErr := execGate(releaseCtx, "release", string(good))
 	cancel()
 	saveJSON("init-release-after.json", map[string]int64{"atMillis": time.Now().UnixMilli()})
-	if releaseErr != nil || time.Now().After(expires) {
+	killed := releaseKilled(releaseErr)
+	saveJSON("init-release-exec.json", map[string]bool{"succeeded": releaseErr == nil, "killedWithGate": killed})
+	// A killed exec decides nothing; the startup check below requires the same gate container to end with 0.
+	if (releaseErr != nil && !killed) || time.Now().After(expires) {
 		t.Fatal("verified init release failed or exceeded host deadline")
 	}
 	eventually(t, "same Pod application startup", func() bool {
@@ -369,4 +381,26 @@ func releaseBoundFixturePod(t *testing.T, f *fixture, pod *corev1.Pod, blockedSt
 	saveJSON("init-pod-started.json", pod)
 	saveJSON("init-result.json", map[string]any{"actualNodeAndPodProof": true, "freshStableBindings": true, "nodeENETUNREACH": true, "podIPv4": podIPv4, "podIPv6": netproof.NetworkUnreachable, "wrongHashRejected": true, "expiredHostProofRejected": true, "applicationBlockedUntilRelease": true, "samePodAndInit": true, "zeroRestarts": true})
 	t.Logf("gate: actual init Pod/UID/node proof, node ENETUNREACH, Pod IPv4 %s, wrong-hash/expired-host-proof rejection, blocked application until fresh release", podIPv4)
+}
+
+func TestReleaseExecClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		script string
+		killed bool
+	}{
+		{"success", "exit 0", false},
+		{"rejected", "exit 2", false},
+		{"remote-kill", "exit 137", true},
+		{"local-signal", "kill -KILL $$", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := releaseKilled(exec.Command("sh", "-c", tc.script).Run()); got != tc.killed {
+				t.Fatalf("killed=%t; want %t", got, tc.killed)
+			}
+		})
+	}
+	if releaseKilled(errors.New("exit status 137")) || releaseKilled(nil) {
+		t.Fatal("non-exit error classified as a killed release")
+	}
 }
