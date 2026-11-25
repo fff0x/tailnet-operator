@@ -42,7 +42,7 @@ about 75 minutes; a failing stage stops the run. Each kind stage needs the deleg
 start the whole task inside one:
 
 ```sh
-# shell.nix pins kind v0.32.0 and Helm v3.19.0, the releases the runners require.
+# shell.nix pins kind v0.32.0 and Helm v4.3.2, the releases the runners require.
 # GOTOOLCHAIN=auto only until the nixpkgs Go matches go.mod — the CI image keeps GOTOOLCHAIN=local.
 nix-shell --run 'systemd-run --user --scope -p Delegate=yes -- env GOTOOLCHAIN=auto task e2e-full'
 ```

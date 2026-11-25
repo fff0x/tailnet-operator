@@ -20,7 +20,7 @@ nix-shell --run 'systemd-run --user --scope -p Delegate=yes -- bash hack/e2e-kin
 
 ## Requirements
 
-- Linux, rootless Podman (`podman info` must report rootless), kind v0.32.0, kubectl, Helm 3, Go,
+- Linux, rootless Podman (`podman info` must report rootless), kind v0.32.0, kubectl, Helm 4, Go,
   Python 3, `timeout`. The user scope needs cgroup delegation (`Delegate=yes`); the runner stops if
   kind reports it missing and never changes sysctls, services or delegation itself.
 - Go builds use the populated module cache with downloads disabled (`GOMODCACHE` if it differs from

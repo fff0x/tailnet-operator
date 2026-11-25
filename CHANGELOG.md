@@ -4,6 +4,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Changed
+
+- **Local tests and the CI test image use Helm v4.3.2** instead of v3.19.0. The projection runner
+  now requires Helm 4.
+
 ### Fixed
 
 - **Local kind suites: the L4 denial check uses the HTTP ACL categories.** The L4 peer probe

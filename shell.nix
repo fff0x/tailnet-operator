@@ -20,28 +20,28 @@ let
     ];
   });
 
-  # hack/e2e-kind-projection.sh requires Helm 3, and the CI test image (Dockerfile, stage TEST) pins
-  # this release; nixpkgs ships Helm 4. Take the same official archive. Move the version and both
-  # checksums together with the Dockerfile.
+  # hack/e2e-kind-projection.sh requires Helm 4, and the CI test image (Dockerfile, stage TEST) pins
+  # this release. Take the same official archive instead of the nixpkgs build. Move the version and
+  # both checksums together with the Dockerfile.
   helm =
     let
       release =
         {
           x86_64-linux = {
             arch = "amd64";
-            sha256 = "a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496";
+            sha256 = "d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983";
           };
           aarch64-linux = {
             arch = "arm64";
-            sha256 = "440cf7add0aee27ebc93fada965523c1dc2e0ab340d4348da2215737fc0d76ad";
+            sha256 = "df31cb61680ef728f82c770e5280dd565617bee6b039d37e85c677288be4bbb0";
           };
         }
         .${pkgs.stdenv.hostPlatform.system};
     in
-    pkgs.runCommand "helm-3.19.0"
+    pkgs.runCommand "helm-4.3.2"
       {
         src = pkgs.fetchurl {
-          url = "https://get.helm.sh/helm-v3.19.0-linux-${release.arch}.tar.gz";
+          url = "https://get.helm.sh/helm-v4.3.2-linux-${release.arch}.tar.gz";
           inherit (release) sha256;
         };
       }

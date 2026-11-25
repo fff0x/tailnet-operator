@@ -281,7 +281,7 @@ sha256sum "$work/agent-image/"{tailnet-operator,tailnet-agent,ca-certificates.cr
 
 stage=cert-manager-asset-preparation
 run "${bins[helm]}" version --short > "$out/helm-version.txt"
-grep -Eq '^v3\.[0-9]+\.[0-9]+' "$out/helm-version.txt"
+grep -Eq '^v4\.[0-9]+\.[0-9]+' "$out/helm-version.txt"
 run "${bins[python3]}" -B -I "$fixture/cert-manager-assets.py" "$cm_cache" "$hs_arch" > "$out/cert-manager-cache.json"
 mkdir -m 700 "$work/cert-manager"
 for component in controller cainjector webhook startupapicheck; do cp -- "$cm_cache/$component.tar" "$work/cert-manager/$component.tar"; done

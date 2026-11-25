@@ -27,13 +27,13 @@ RUN apt-get update \
 # Helm release checksums verified against get.helm.sh; no floating install script.
 RUN set -eux; \
     case "$(dpkg --print-architecture)" in \
-      amd64) arch=amd64; checksum=a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496 ;; \
-      arm64) arch=arm64; checksum=440cf7add0aee27ebc93fada965523c1dc2e0ab340d4348da2215737fc0d76ad ;; \
+      amd64) arch=amd64; checksum=d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983 ;; \
+      arm64) arch=arm64; checksum=df31cb61680ef728f82c770e5280dd565617bee6b039d37e85c677288be4bbb0 ;; \
       *) echo 'TEST supports native Linux amd64/arm64 only' >&2; exit 1 ;; \
     esac; \
     curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
       --connect-timeout 10 --max-time 180 --retry 2 \
-      "https://get.helm.sh/helm-v3.19.0-linux-${arch}.tar.gz" -o /tmp/helm.tar.gz; \
+      "https://get.helm.sh/helm-v4.3.2-linux-${arch}.tar.gz" -o /tmp/helm.tar.gz; \
     printf '%s  /tmp/helm.tar.gz\n' "$checksum" | sha256sum -c -; \
     tar -xzf /tmp/helm.tar.gz -C /tmp; \
     install -m 0755 "/tmp/linux-${arch}/helm" /usr/local/bin/helm; \
