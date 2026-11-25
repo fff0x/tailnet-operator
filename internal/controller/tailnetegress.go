@@ -55,18 +55,21 @@ func (r *TailnetEgressReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Get(ctx, req.NamespacedName, &eg); err != nil {
 		if apierrors.IsNotFound(err) {
 			r.Metrics.Delete("TailnetEgress", req.Namespace, req.Name)
+			forgetReady("TailnetEgress", req.NamespacedName)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	// Emit one event per Ready-reason flip, from whatever this reconcile leaves persisted.
-	oldReady := readyReason(eg.Status.Conditions)
-	defer func() { emitReadyChange(r.Recorder, &eg, oldReady, readyReason(eg.Status.Conditions)) }()
 	if !eg.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, releaseAuthKey(ctx, r.Client, r.OperatorNamespace, &eg, eg.Spec.TailnetRef.Name, r.Metrics.Headscale(eg.Spec.TailnetRef.Name))
 	}
 	if err := ensureAuthKeyFinalizer(ctx, r.Client, &eg); err != nil {
 		return ctrl.Result{}, err
 	}
+	// Every return below determines Ready; emit one event per Ready-reason flip.
+	statusReady := readyReason(eg.Status.Conditions)
+	defer func() {
+		emitReadyChange(r.Recorder, &eg, "TailnetEgress", statusReady, readyReason(eg.Status.Conditions))
+	}()
 	ns := eg.Namespace
 
 	// Resolve the Tailnet and its working API key (minted by the Tailnet controller).

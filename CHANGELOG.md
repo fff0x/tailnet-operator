@@ -13,6 +13,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Fixed
 
+- **`ReadyChanged` events name the right from-reason.** `TailnetIngress` and `TailnetEgress` take
+  it from the Ready reason the operator last determined for the object, not from the informer
+  cache, which can still hold the status from before the last write. A stale cache no longer
+  produces a wrong from-reason, a duplicate event or a missed flip. Deleting a resource emits no
+  event.
 - **Local kind suites: the L4 denial check uses the HTTP ACL categories.** The L4 peer probe
   now reports the same dial-error category as the HTTP ACL probe, and a denial counts only for
   `timeout`, `noRoute` or `unreachable`; refused, reset, canceled and unclassified dials fail the

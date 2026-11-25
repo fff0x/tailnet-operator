@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -280,10 +281,33 @@ func readyReason(conds []metav1.Condition) string {
 	return ""
 }
 
+// readyMemory holds the Ready reason this process last determined per object. The informer cache
+// can still carry the status from before the last write, so a reconcile that starts right after it
+// would otherwise report a stale from-reason, or miss a flip.
+var readyMemory sync.Map // readyKey -> readyEntry
+
+type readyKey struct {
+	kind string
+	name types.NamespacedName
+}
+
+type readyEntry struct {
+	uid    types.UID
+	reason string
+}
+
 // emitReadyChange records an event whenever a resource's Ready reason flips, so an operator sees
 // transitions (e.g. Granted -> SourceTagUnknown, or back to Ready) in `kubectl describe` without
-// scraping controller logs. No event on an unchanged reason; the first observed reason emits once.
-func emitReadyChange(rec record.EventRecorder, obj runtime.Object, oldReason, newReason string) {
+// scraping controller logs. The from-reason is the one this process last determined for the same
+// object (same UID); without one, statusReason, the reason read with the object, counts. No event
+// on an unchanged reason.
+func emitReadyChange(rec record.EventRecorder, obj client.Object, kind, statusReason, newReason string) {
+	key := readyKey{kind, client.ObjectKeyFromObject(obj)}
+	oldReason := statusReason
+	if v, ok := readyMemory.Load(key); ok && v.(readyEntry).uid == obj.GetUID() {
+		oldReason = v.(readyEntry).reason
+	}
+	readyMemory.Store(key, readyEntry{obj.GetUID(), newReason})
 	if rec == nil || oldReason == newReason {
 		return
 	}
@@ -296,6 +320,11 @@ func emitReadyChange(rec record.EventRecorder, obj runtime.Object, oldReason, ne
 		from = "<none>"
 	}
 	rec.Eventf(obj, etype, "ReadyChanged", "Ready: %s -> %s", from, newReason)
+}
+
+// forgetReady drops the remembered Ready reason of an object that no longer exists.
+func forgetReady(kind string, name types.NamespacedName) {
+	readyMemory.Delete(readyKey{kind, name})
 }
 
 // setCond is meta.SetStatusCondition with the observed generation stamped in.

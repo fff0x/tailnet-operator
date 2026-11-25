@@ -58,12 +58,10 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.Get(ctx, req.NamespacedName, &in); err != nil {
 		if apierrors.IsNotFound(err) {
 			r.Metrics.Delete("TailnetIngress", req.Namespace, req.Name)
+			forgetReady("TailnetIngress", req.NamespacedName)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	// Emit one event per Ready-reason flip, from whatever this reconcile leaves persisted.
-	oldReady := readyReason(in.Status.Conditions)
-	defer func() { emitReadyChange(r.Recorder, &in, oldReady, readyReason(in.Status.Conditions)) }()
 	if !in.DeletionTimestamp.IsZero() {
 		// The node is persistent, so Headscale will not age it out: remove it with the CR.
 		return ctrl.Result{}, releaseAuthKey(ctx, r.Client, r.OperatorNamespace, &in, in.Spec.TailnetRef.Name, r.Metrics.Headscale(in.Spec.TailnetRef.Name),
@@ -74,6 +72,11 @@ func (r *TailnetIngressReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := ensureAuthKeyFinalizer(ctx, r.Client, &in); err != nil {
 		return ctrl.Result{}, err
 	}
+	// Every return below determines Ready; emit one event per Ready-reason flip.
+	statusReady := readyReason(in.Status.Conditions)
+	defer func() {
+		emitReadyChange(r.Recorder, &in, "TailnetIngress", statusReady, readyReason(in.Status.Conditions))
+	}()
 	legacy, err := r.retireLegacyIngressWorkload(ctx, &in)
 	if err != nil {
 		return r.fail(ctx, &in, "WorkloadMigrationBlocked", err)
