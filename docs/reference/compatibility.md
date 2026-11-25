@@ -20,6 +20,26 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
+## Undeclared groups and Ready-change events (v0.27.1)
+
+Controller-only: the CRDs do not change, and the agent image is unchanged — with a pinned
+`agentImage` no agent rolls. One status change can appear after the upgrade:
+
+- **An undeclared `allowFrom` group is dropped from the grant.** A `group:` source that the base
+  policy `groups` do not declare is removed from the generated or spoke grant, as an undeclared
+  `tag:` source already was; base grants stay unchanged. Such an ingress **newly reports
+  `PolicyGranted=False/SourceGroupUnknown` and `Ready=False`** until the base declares the group,
+  and with an undeclared tag as well it reports `SourceTagUnknown` naming both. Headscale 0.29
+  rejected the whole policy over such a grant, so before the upgrade check that every `allowFrom`
+  `group:` of every cluster, spokes included, exists in the hub's base `groups`. The
+  `PolicyApplied` message now reads `skipped undeclared sources: …` instead of
+  `skipped undeclared source tags: …`.
+
+Two reporting fixes need no action: `ReadyChanged` events name the reason the operator last
+determined instead of a possibly stale cached one, and deleting a resource emits no event; the
+reasons `SourceGroupUnknown`, `WorkloadMigrationBlocked` and `HTTPTransitionBlocked` now reach
+`tailnet_resource_condition` as themselves instead of `Other`.
+
 ## Alias zones on the gateway (v0.27.0)
 
 One new optional field, `TailnetGateway` `spec.dns.aliasZones`, with three admission rules

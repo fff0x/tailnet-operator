@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-11-25
+
 ### Changed
 
 - **Local tests and the CI test image use Helm v4.3.2** instead of v3.19.0. The projection runner
