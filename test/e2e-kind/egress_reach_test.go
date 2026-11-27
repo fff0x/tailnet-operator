@@ -38,7 +38,7 @@ func peerTailnetIPv4(t *testing.T, x *httpPeerFixture) string {
 	return address
 }
 
-// TestEgressReach is the P1.4 egress gate: a TailnetEgress must turn a host that exists only on the
+// TestEgressReach is the egress gate: a TailnetEgress must turn a host that exists only on the
 // tailnet into an ordinary ClusterIP Service. The target is the fixture peer, which serves the same
 // bounded nonce/digest exchange on its tsnet listener as on its Pod-network one. The consumer has
 // to be an in-cluster Pod rather than the peer itself, because a ClusterIP is not dialable from

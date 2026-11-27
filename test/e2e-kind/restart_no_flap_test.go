@@ -23,7 +23,7 @@ import (
 	"tsunaro.io/tailnet-operator/test/internal/kindfixture"
 )
 
-// tailnetFixture is the starting point the CR-driven P1.4 gates share: the chart installed from
+// tailnetFixture is the starting point the CR-driven gates share: the chart installed from
 // this tree, fixture trust patched into the operator, and a Tailnet whose policy has been applied.
 // Callers register their own CRs with track() so each is deleted, and its finalizer awaited, before
 // the Tailnet and the release go away. TestIngressL4 keeps its own copy of this sequence because
@@ -249,7 +249,7 @@ func conditionStates(conditions []metav1.Condition) map[string]conditionState {
 	return out
 }
 
-// TestRestartNoFlap is the P0.2 proof: restarting the operator must not flip a healthy CR's
+// TestRestartNoFlap is the restart proof: restarting the operator must not flip a healthy CR's
 // conditions. The subject is deliberately the operator, not the agent — an agent restart is a real
 // interruption (TestIngressIdentityPersists covers what it keeps), and the fixture holds every
 // replacement pod in the startup gate.
@@ -332,8 +332,9 @@ func TestRestartNoFlap(t *testing.T) {
 	if holder == previousHolder {
 		t.Fatal("election Lease identity did not change across the restart")
 	}
-	// 35s is one full requeue interval plus slack. The flip P0.2 describes appears on the restarted
-	// operator's first reconcile, which is after it took the Lease, not while it was starting.
+	// 35s is one full requeue interval plus slack. The flip this test guards against appears on
+	// the restarted operator's first reconcile, which is after it took the Lease, not while it
+	// was starting.
 	phase = "post-restart"
 	settle(35 * time.Second)
 

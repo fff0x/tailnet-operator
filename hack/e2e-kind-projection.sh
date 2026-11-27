@@ -23,7 +23,7 @@ elif [[ $# == 1 && $1 == --l4-only ]]; then
     # then watch the held connections for 60 s.
     test_timeout=18m
 elif [[ $# == 1 && $1 == --rest-only ]]; then
-    # The remaining P1.4 gates share one bootstrap; each builds its own namespace, control
+    # The remaining CR-driven gates share one bootstrap; each builds its own namespace, control
     # plane and peer, so the budget is the sum of four fixtures, not of four clusters.
     test_pattern='^Test(EgressReach|RestartNoFlap|MagicDNSRename|IngressIdentityPersists)$'
     test_timeout=26m
