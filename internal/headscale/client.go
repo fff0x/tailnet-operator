@@ -206,11 +206,14 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 }
 
 // User is a Headscale user as listed by the API. Only identity fields are decoded; the operator
-// never copies Name, DisplayName or Email into a CR status (they are personal data).
+// never copies Name, DisplayName, Email or ProviderID into a CR status (they are personal data).
+// ProviderID is set for OIDC users: the issuer and the sub claim joined by "/".
 type User struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Email       string `json:"email"`
+	ProviderID  string `json:"providerId"`
 }
 
 // ListUsers returns all users. Headscale rejects every policy write while two users share a
