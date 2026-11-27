@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1207,9 +1208,21 @@ const consoleValues = `console:
 `
 
 func TestConsoleOffByDefault(t *testing.T) {
-	for _, obj := range render(t, "") {
-		if strings.HasSuffix(obj.Metadata.Name, "-console") || obj.Metadata.Labels["app.kubernetes.io/name"] == "tailnet-console" {
+	m := render(t, "")
+	for _, obj := range m {
+		if strings.Contains(obj.Metadata.Name, "-console") || strings.HasPrefix(obj.Metadata.Labels["app.kubernetes.io/name"], "tailnet-console") {
 			t.Errorf("default chart renders console object %s/%s", obj.Kind, obj.Metadata.Name)
+		}
+	}
+	_, c := operator(t, m)
+	for _, e := range c.Env {
+		if e.Name == "CONSOLE_API_SUBJECT" {
+			t.Error("default operator enables the console API")
+		}
+	}
+	for _, p := range c.Ports {
+		if p.ContainerPort == 8082 {
+			t.Error("default operator exposes the console API port")
 		}
 	}
 }
@@ -1227,7 +1240,7 @@ func TestConsoleObjects(t *testing.T) {
 
 	role := decode[rbacv1.ClusterRole](t, m.named(t, "ClusterRole", "tailnet-operator-console"))
 	equal(t, "console rules", role.Rules, []rbacv1.PolicyRule{{APIGroups: []string{"tsunaro.io"},
-		Resources: []string{"tailnets", "tailnetingresses", "tailnetsites"}, Verbs: []string{"get", "list", "watch"}}})
+		Resources: []string{"tailnets", "tailnetingresses", "tailnetsites", "tailnetgrants"}, Verbs: []string{"get", "list", "watch"}}})
 	binding := decode[rbacv1.ClusterRoleBinding](t, m.named(t, "ClusterRoleBinding", "tailnet-operator-console"))
 	equal(t, "console binding subjects", binding.Subjects, []rbacv1.Subject{{Kind: "ServiceAccount", Name: "tailnet-operator-console", Namespace: releaseNamespace}})
 	equal(t, "console binding role", binding.RoleRef.Name, "tailnet-operator-console")
@@ -1267,6 +1280,87 @@ func TestConsoleObjects(t *testing.T) {
 	if !labels.SelectorFromSet(svc.Spec.Selector).Matches(labels.Set(pod.Labels)) ||
 		labels.SelectorFromSet(svc.Spec.Selector).Matches(labels.Set(opDep.Spec.Template.Labels)) {
 		t.Error("console Service selects the wrong pods")
+	}
+
+	// Console API: the projected token, the operator's listener and its TokenReview right.
+	equal(t, "console token volume", pod.Spec.Volumes, []corev1.Volume{{Name: "console-api-token", VolumeSource: corev1.VolumeSource{
+		Projected: &corev1.ProjectedVolumeSource{Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+			Audience: "tailnet-operator", ExpirationSeconds: new(int64(600)), Path: "token"}}}}}}})
+	equal(t, "console token mount", c.VolumeMounts, []corev1.VolumeMount{{Name: "console-api-token", MountPath: "/var/run/secrets/tsunaro.io/console-api", ReadOnly: true}})
+	equal(t, "console token file", envVar(t, c, "CONSOLE_API_TOKEN_FILE").Value, "/var/run/secrets/tsunaro.io/console-api/token")
+	equal(t, "console operator URL", envVar(t, c, "CONSOLE_OPERATOR_URL").Value, "http://tailnet-operator-console-api."+releaseNamespace+".svc:8082")
+	_, opc := operator(t, m)
+	equal(t, "console API subject", envVar(t, opc, "CONSOLE_API_SUBJECT").Value, "system:serviceaccount:"+releaseNamespace+":tailnet-operator-console")
+	if !slices.Contains(opc.Ports, corev1.ContainerPort{Name: "console-api", ContainerPort: 8082}) {
+		t.Errorf("operator ports %v lack console-api", opc.Ports)
+	}
+	api := decode[corev1.Service](t, m.named(t, "Service", "tailnet-operator-console-api"))
+	if !labels.SelectorFromSet(api.Spec.Selector).Matches(labels.Set(opDep.Spec.Template.Labels)) ||
+		labels.SelectorFromSet(api.Spec.Selector).Matches(labels.Set(pod.Labels)) {
+		t.Error("console API Service selects the wrong pods")
+	}
+	equal(t, "console API port", api.Spec.Ports, []corev1.ServicePort{{Name: "console-api", Port: 8082, TargetPort: intstr.FromString("console-api")}})
+	if api.Labels["app.kubernetes.io/name"] == "tailnet-operator" {
+		t.Error("the ServiceMonitor would select the console API Service")
+	}
+	apiRole := decode[rbacv1.ClusterRole](t, m.named(t, "ClusterRole", "tailnet-operator-console-api"))
+	equal(t, "console API rules", apiRole.Rules, []rbacv1.PolicyRule{{APIGroups: []string{"authentication.k8s.io"},
+		Resources: []string{"tokenreviews"}, Verbs: []string{"create"}}})
+	apiBinding := decode[rbacv1.ClusterRoleBinding](t, m.named(t, "ClusterRoleBinding", "tailnet-operator-console-api"))
+	equal(t, "console API binding", apiBinding.Subjects, []rbacv1.Subject{{Kind: "ServiceAccount", Name: opDep.Spec.Template.Spec.ServiceAccountName, Namespace: releaseNamespace}})
+	equal(t, "console API binding role", apiBinding.RoleRef.Name, "tailnet-operator-console-api")
+}
+
+func TestConsoleNetworkPolicy(t *testing.T) {
+	const isolation = "networkPolicy:\n  enabled: true\n  kubeAPICIDRs: [10.96.0.1/32]\n  headscaleCIDRs: [192.0.2.1/32]\n"
+	values := consoleValues + "  networkPolicy: {idpCIDRs: [203.0.113.10/32]}\n" + isolation
+	m := render(t, values)
+	opDep, _ := operator(t, m)
+	console := decode[appsv1.Deployment](t, m.named(t, "Deployment", "tailnet-operator-console")).Spec.Template.Labels
+	np := decode[networkingv1.NetworkPolicy](t, m.named(t, "NetworkPolicy", "tailnet-operator-console"))
+	if !matches(t, np.Spec.PodSelector, console) || matches(t, np.Spec.PodSelector, opDep.Spec.Template.Labels) {
+		t.Error("console NetworkPolicy selects the wrong pods")
+	}
+	tcp := corev1.ProtocolTCP
+	port := func(p int) networkingv1.NetworkPolicyPort {
+		v := intstr.FromInt32(int32(p))
+		return networkingv1.NetworkPolicyPort{Protocol: &tcp, Port: &v}
+	}
+	equal(t, "console ingress", np.Spec.Ingress, []networkingv1.NetworkPolicyIngressRule{{Ports: []networkingv1.NetworkPolicyPort{port(8080)},
+		From: []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "tailnet-ingress"}}}}}})
+	if len(np.Spec.Egress) != 4 {
+		t.Fatalf("console egress = %+v", np.Spec.Egress)
+	}
+	if op := np.Spec.Egress[2]; len(op.To) != 1 || !matches(t, *op.To[0].PodSelector, opDep.Spec.Template.Labels) || !reflect.DeepEqual(op.Ports, []networkingv1.NetworkPolicyPort{port(8082)}) {
+		t.Errorf("console egress to the operator = %+v", op)
+	}
+	equal(t, "console egress to the IdP", np.Spec.Egress[3], networkingv1.NetworkPolicyEgressRule{Ports: []networkingv1.NetworkPolicyPort{port(443)},
+		To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "203.0.113.10/32"}}}})
+	opNP := decode[networkingv1.NetworkPolicy](t, m.named(t, "NetworkPolicy", "tailnet-operator"))
+	if len(opNP.Spec.Ingress) != 1 || !reflect.DeepEqual(opNP.Spec.Ingress[0].Ports, []networkingv1.NetworkPolicyPort{port(8082)}) ||
+		!matches(t, *opNP.Spec.Ingress[0].From[0].PodSelector, console) {
+		t.Errorf("operator ingress from the console = %+v", opNP.Spec.Ingress)
+	}
+
+	m = render(t, values+"  provider: cilium\n")
+	cnp := decode[ciliumPolicy](t, m.named(t, "CiliumNetworkPolicy", "tailnet-operator-console"))
+	if !matches(t, cnp.Spec.EndpointSelector, console) || len(cnp.Spec.Ingress) != 0 || len(cnp.Spec.Egress) != 4 {
+		t.Fatalf("console CiliumNetworkPolicy = %+v", cnp.Spec)
+	}
+	e := cnp.Spec.Egress
+	if !slices.Equal(e[0].ToEntities, []string{"kube-apiserver"}) || !matches(t, e[2].ToEndpoints[0], opDep.Spec.Template.Labels) ||
+		e[2].ToPorts[0].Ports[0].Port != "8082" || !slices.Equal(e[3].ToCIDR, []string{"203.0.113.10/32"}) || e[3].ToPorts[0].Ports[0].Port != "443" {
+		t.Errorf("console cilium egress = %+v", e)
+	}
+	for _, obj := range m {
+		if obj.Kind == "NetworkPolicy" {
+			t.Error("provider cilium must not render a NetworkPolicy")
+		}
+	}
+
+	if _, err := helmTemplate(t, consoleValues+isolation); err == nil ||
+		!strings.Contains(err.Error(), "console.networkPolicy.idpCIDRs") {
+		t.Errorf("missing idpCIDRs: %v", err)
 	}
 }
 

@@ -1,0 +1,103 @@
+{{- if and .Values.console.enabled .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $c := .Values.console.networkPolicy }}
+{{- $name := printf "%s-console" (include "tailnet-operator.name" .) }}
+{{- $ns := include "tailnet-operator.namespace" . }}
+{{- if eq $np.provider "kubernetes" }}
+{{- if not $np.kubeAPICIDRs }}
+{{- fail "networkPolicy.kubeAPICIDRs is required when networkPolicy.enabled=true" }}
+{{- end }}
+# The console receives HTTP from its TailnetIngress agent and dials only DNS, the API server (its
+# watch), the operator's console API and the identity provider.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "tailnet-operator.consoleSelector" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  {{- with $c.ingressPeers }}
+  ingress:
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 8080}
+  {{- else }}
+  ingress: []
+  {{- end }}
+  egress:
+    {{- with $np.dnsPeers }}
+    - to:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    {{- end }}
+    - to:
+        {{- range $np.kubeAPICIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports:
+        {{- range $np.kubeAPIPorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "tailnet-operator.selector" . | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: 8082}
+    - to:
+        {{- range $c.idpCIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports:
+        {{- range $c.idpPorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+{{- else }}
+# Egress-only, like the operator's CiliumNetworkPolicy: ingress stays open.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "tailnet-operator.consoleSelector" . | nindent 6 }}
+  egress:
+    - toEntities:
+        - kube-apiserver
+    {{- with $np.dnsPeers }}
+    - toEndpoints:
+        {{- include "tailnet-operator.ciliumEndpoints" . | trim | nindent 8 }}
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+    {{- end }}
+    - toEndpoints:
+        - matchLabels:
+            {{- include "tailnet-operator.selector" . | nindent 12 }}
+      toPorts:
+        - ports:
+            - {port: "8082", protocol: TCP}
+    - toCIDR:
+        {{- range $c.idpCIDRs }}
+        - {{ . | quote }}
+        {{- end }}
+      toPorts:
+        - ports:
+            {{- range $c.idpPorts }}
+            - {port: {{ . | quote }}, protocol: TCP}
+            {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,48 @@
+{{- if .Values.console.enabled }}
+{{- $name := printf "%s-console-api" (include "tailnet-operator.name" .) }}
+{{- $ns := include "tailnet-operator.namespace" . }}
+# The operator's console API: Headscale users, tagged nodes and the live policy per Tailnet, for
+# the console's ServiceAccount only. Every operator replica serves it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
+  # Not the operator's name label: the ServiceMonitor selects Services by it.
+  labels:
+    app.kubernetes.io/name: tailnet-console-api
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+spec:
+  selector:
+    {{- include "tailnet-operator.selector" . | nindent 4 }}
+  ports:
+    - {name: console-api, port: 8082, targetPort: console-api}
+---
+# The console API checks each caller's token with a TokenReview.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name | quote }}
+  labels:
+    {{- include "tailnet-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name | quote }}
+  labels:
+    {{- include "tailnet-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "tailnet-operator.name" . | quote }}
+    namespace: {{ $ns | quote }}
+{{- end }}

@@ -122,7 +122,10 @@ See [compatibility](../../docs/reference/compatibility.md#http-extension-compati
 | agentImage.digest | string | `""` | Agent digest. An entirely empty agentImage inherits the complete operator image, including its digest. |
 | agentImage.repository | string | `""` | Agent repository; empty inherits image.repository. |
 | agentImage.tag | string | `""` | Agent tag. With an explicit repository, empty uses Chart.appVersion; otherwise inherits image.tag. |
-| console.enabled | bool | `false` | Render the read-only web console `<name>-console` (Deployment, Service on port 8080, ServiceAccount, ClusterRole with get/list/watch on Tailnets, TailnetIngresses and TailnetSites). Expose it with a TailnetIngress in mode `http`; see `deploy/examples/console-ingress.yaml`. |
+| console.enabled | bool | `false` | Render the read-only web console `<name>-console` (Deployment, Service on port 8080, ServiceAccount, ClusterRole with get/list/watch on Tailnets, TailnetIngresses, TailnetSites and TailnetGrants) and the operator's console API `<name>-console-api` on port 8082 (Service, ClusterRole to create TokenReviews). Expose the console with a TailnetIngress in mode `http`; see `deploy/examples/console-ingress.yaml`. |
+| console.networkPolicy.idpCIDRs | list | `[]` | Identity provider CIDRs the console may dial (not hostnames). Required when `networkPolicy.enabled` and `console.enabled`. |
+| console.networkPolicy.idpPorts | list | `[443]` | Identity provider TCP ports. |
+| console.networkPolicy.ingressPeers | list | `[{"podSelector":{"matchLabels":{"app.kubernetes.io/name":"tailnet-ingress"}}}]` | Peers that may reach the console on TCP/8080 (provider kubernetes): the agent of the console's TailnetIngress. Without a namespaceSelector a peer is in the release namespace. |
 | console.oidc.adminGroup | string | `""` | Group whose members are admins. Required when enabled. |
 | console.oidc.clientID | string | `""` | OIDC client ID. Required when enabled. |
 | console.oidc.clientSecretRef.key | string | `"clientSecret"` | Key of the client secret in that Secret. |

@@ -51,7 +51,7 @@
         "configMaps": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"}}
       }}
     }},
-    "console": {"type": "object", "additionalProperties": false, "required": ["enabled", "url", "oidc", "resources"], "properties": {
+    "console": {"type": "object", "additionalProperties": false, "required": ["enabled", "url", "oidc", "resources", "networkPolicy"], "properties": {
       "enabled": {"type": "boolean"},
       "url": {"type": "string", "pattern": "^$|^https://[^\\s/?#]+/?$"},
       "oidc": {"type": "object", "additionalProperties": false, "required": ["issuer", "clientID", "clientSecretRef", "scopes", "adminGroup", "userGroup"], "properties": {
@@ -65,7 +65,12 @@
         "adminGroup": {"type": "string"},
         "userGroup": {"type": "string"}
       }},
-      "resources": {"type": "object", "additionalProperties": false, "properties": {"requests": {"$ref": "#/definitions/resourceList"}, "limits": {"$ref": "#/definitions/resourceList"}}}
+      "resources": {"type": "object", "additionalProperties": false, "properties": {"requests": {"$ref": "#/definitions/resourceList"}, "limits": {"$ref": "#/definitions/resourceList"}}},
+      "networkPolicy": {"type": "object", "additionalProperties": false, "required": ["idpCIDRs", "idpPorts", "ingressPeers"], "properties": {
+        "idpCIDRs": {"$ref": "#/definitions/cidrs"},
+        "idpPorts": {"$ref": "#/definitions/ports"},
+        "ingressPeers": {"$ref": "#/definitions/peers"}
+      }}
     }},
     "env": {"type": "object", "additionalProperties": false, "required": ["extra"], "properties": {"extra": {"type": "array", "items": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "minLength": 1}}}}}},
     "monitoring": {"type": "object", "additionalProperties": false, "required": ["serviceMonitor", "podMonitor", "rules", "dashboard"], "properties": {

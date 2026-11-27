@@ -73,7 +73,7 @@ policy:
     # -- Fragment ConfigMaps (operator namespace) the reader may read; usually the spoke Tailnet's `<tailnet>-policy-fragment`.
     configMaps: []
 console:
-  # -- Render the read-only web console `<name>-console` (Deployment, Service on port 8080, ServiceAccount, ClusterRole with get/list/watch on Tailnets, TailnetIngresses and TailnetSites). Expose it with a TailnetIngress in mode `http`; see `deploy/examples/console-ingress.yaml`.
+  # -- Render the read-only web console `<name>-console` (Deployment, Service on port 8080, ServiceAccount, ClusterRole with get/list/watch on Tailnets, TailnetIngresses, TailnetSites and TailnetGrants) and the operator's console API `<name>-console-api` on port 8082 (Service, ClusterRole to create TokenReviews). Expose the console with a TailnetIngress in mode `http`; see `deploy/examples/console-ingress.yaml`.
   enabled: false
   # -- Public https URL of the console, without a path. Register `<url>/auth/callback` as the redirect URI at the identity provider. Required when enabled.
   url: ""
@@ -100,6 +100,16 @@ console:
       memory: 64Mi
     limits:
       memory: 128Mi
+  networkPolicy:
+    # -- Identity provider CIDRs the console may dial (not hostnames). Required when `networkPolicy.enabled` and `console.enabled`.
+    idpCIDRs: []
+    # -- Identity provider TCP ports.
+    idpPorts: [443]
+    # -- Peers that may reach the console on TCP/8080 (provider kubernetes): the agent of the console's TailnetIngress. Without a namespaceSelector a peer is in the release namespace.
+    ingressPeers:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: tailnet-ingress
 monitoring:
   serviceMonitor:
     # -- Requires Prometheus Operator CRDs. Disabled for a fresh Kubernetes installation.

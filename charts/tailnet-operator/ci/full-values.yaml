@@ -75,3 +75,5 @@ console:
       key: clientSecret
     adminGroup: tailnet-operator
     userGroup: tailnet-intern
+  networkPolicy:
+    idpCIDRs: [203.0.113.10/32]

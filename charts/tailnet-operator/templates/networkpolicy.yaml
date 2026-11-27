@@ -15,12 +15,22 @@ spec:
     matchLabels:
       {{- include "tailnet-operator.selector" . | nindent 6 }}
   policyTypes: [Ingress, Egress]
-  {{- if .Values.networkPolicy.metricsPeers }}
+  {{- if or .Values.networkPolicy.metricsPeers .Values.console.enabled }}
   ingress:
+    {{- with .Values.networkPolicy.metricsPeers }}
     - from:
-        {{- toYaml .Values.networkPolicy.metricsPeers | nindent 8 }}
+        {{- toYaml . | nindent 8 }}
       ports:
         - {protocol: TCP, port: 8080}
+    {{- end }}
+    {{- if .Values.console.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "tailnet-operator.consoleSelector" . | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: 8082}
+    {{- end }}
   {{- else }}
   ingress: []
   {{- end }}

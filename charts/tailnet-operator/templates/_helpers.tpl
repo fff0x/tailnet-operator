@@ -60,6 +60,14 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 {{- end -}}
 {{- if not (hasPrefix "https://" $c.url) -}}{{- fail "console.url must start with https://" -}}{{- end -}}
 {{- if not (hasPrefix "https://" $c.oidc.issuer) -}}{{- fail "console.oidc.issuer must start with https://" -}}{{- end -}}
+{{- if and .Values.networkPolicy.enabled (not $c.networkPolicy.idpCIDRs) -}}{{- fail "console.networkPolicy.idpCIDRs is required when networkPolicy.enabled=true and console.enabled=true" -}}{{- end -}}
+{{- end -}}
+{{- define "tailnet-operator.consoleSelector" -}}
+app.kubernetes.io/name: tailnet-console
+app.kubernetes.io/instance: {{ .Release.Name | quote }}
+{{- end -}}
+{{- define "tailnet-operator.consoleSubject" -}}
+{{- printf "system:serviceaccount:%s:%s-console" (include "tailnet-operator.namespace" .) (include "tailnet-operator.name" .) -}}
 {{- end -}}
 {{- /*
 ciliumEndpoints translates NetworkPolicyPeer entries into Cilium endpoint selectors so the

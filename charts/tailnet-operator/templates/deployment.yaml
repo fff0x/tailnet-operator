@@ -73,12 +73,19 @@ spec:
               value: {{ .Values.agent.resources | default dict | toJson | quote }}
             - name: AGENT_SCRAPE_PEERS
               value: {{ .Values.monitoring.podMonitor.scrapeFrom | default list | toJson | quote }}
+            {{- if .Values.console.enabled }}
+            - name: CONSOLE_API_SUBJECT
+              value: {{ include "tailnet-operator.consoleSubject" . | quote }}
+            {{- end }}
             {{- with .Values.env.extra }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           ports:
             - {name: metrics, containerPort: 8080}
             - {name: health, containerPort: 8081}
+            {{- if .Values.console.enabled }}
+            - {name: console-api, containerPort: 8082}
+            {{- end }}
           livenessProbe:
             httpGet: {path: /healthz, port: health}
             initialDelaySeconds: 15

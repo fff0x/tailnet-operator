@@ -12,7 +12,7 @@ metadata:
   labels:
     {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
 ---
-# Read access to three kinds and nothing else: no Secrets, no ConfigMaps, no writes.
+# Read access to four kinds and nothing else: no Secrets, no ConfigMaps, no writes.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -21,7 +21,7 @@ metadata:
     {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
 rules:
   - apiGroups: [tsunaro.io]
-    resources: [tailnets, tailnetingresses, tailnetsites]
+    resources: [tailnets, tailnetingresses, tailnetsites, tailnetgrants]
     verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -48,8 +48,7 @@ metadata:
     {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
 spec:
   selector:
-    app.kubernetes.io/name: tailnet-console
-    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    {{- include "tailnet-operator.consoleSelector" . | nindent 4 }}
   ports:
     - {name: http, port: 8080, targetPort: http}
 ---
@@ -67,8 +66,7 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: tailnet-console
-      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+      {{- include "tailnet-operator.consoleSelector" . | nindent 6 }}
   template:
     metadata:
       labels:
@@ -112,8 +110,16 @@ spec:
               value: {{ $c.oidc.adminGroup | quote }}
             - name: CONSOLE_USER_GROUP
               value: {{ $c.oidc.userGroup | quote }}
+            - name: CONSOLE_OPERATOR_URL
+              value: {{ printf "http://%s-console-api.%s.svc:8082" (include "tailnet-operator.name" .) $ns | quote }}
+            - name: CONSOLE_API_TOKEN_FILE
+              value: /var/run/secrets/tsunaro.io/console-api/token
           ports:
             - {name: http, containerPort: 8080}
+          volumeMounts:
+            - name: console-api-token
+              mountPath: /var/run/secrets/tsunaro.io/console-api
+              readOnly: true
           livenessProbe:
             httpGet: {path: /healthz, port: http}
             initialDelaySeconds: 15
@@ -123,4 +129,13 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml $c.resources | nindent 12 }}
+      volumes:
+        # Audience tailnet-operator: useless against the API server, rotated by the kubelet.
+        - name: console-api-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: tailnet-operator
+                  expirationSeconds: 600
+                  path: token
 {{- end }}
