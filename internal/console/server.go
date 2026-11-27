@@ -1,5 +1,6 @@
-// Package console serves the read-only web console: OIDC sign-in, roles from the groups claim and
-// an overview of tailnets, spokes, ingresses and sites read from the Kubernetes API.
+// Package console serves the read-only web console: OIDC sign-in, roles from the groups claim, an
+// overview of tailnets, spokes, ingresses and sites read from the Kubernetes API, and the signed-in
+// person's access from the live policy the operator's console API returns.
 package console
 
 import (
@@ -25,6 +26,7 @@ const contentSecurityPolicy = "default-src 'none'; style-src 'self'; img-src 'se
 type Server struct {
 	auth   *authenticator
 	reader client.Reader
+	dir    *directory
 	log    logr.Logger
 	pages  map[string]*template.Template
 }
@@ -51,7 +53,7 @@ func New(cfg Config, reader client.Reader, log logr.Logger) (*Server, error) {
 		return nil, err
 	}
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"overview", "message"} {
+	for _, name := range []string{"overview", "access", "message"} {
 		t, err := template.ParseFS(assets, "assets/layout.html", "assets/"+name+".html")
 		if err != nil {
 			return nil, err
@@ -60,7 +62,7 @@ func New(cfg Config, reader client.Reader, log logr.Logger) (*Server, error) {
 	}
 	return &Server{
 		auth:   &authenticator{cfg: cfg, seal: seal, now: time.Now, client: &http.Client{Timeout: 10 * time.Second}},
-		reader: reader, log: log, pages: pages,
+		reader: reader, dir: newDirectory(cfg.OperatorURL, cfg.TokenFile), log: log, pages: pages,
 	}, nil
 }
 
@@ -75,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/callback", s.callback)
 	mux.HandleFunc("POST /auth/logout", s.logout)
 	mux.HandleFunc("GET /{$}", s.signedIn(s.overviewPage))
+	mux.HandleFunc("GET /access", s.signedIn(s.accessPage))
 	return headers(http.NewCrossOriginProtection().Handler(mux))
 }
 

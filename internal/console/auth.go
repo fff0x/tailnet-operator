@@ -34,13 +34,17 @@ type Config struct {
 	AdminGroup   string
 	// Empty: every signed-in person is a user.
 	UserGroup string
+	// OperatorURL is the base URL of the operator's console API; TokenFile holds the projected
+	// ServiceAccount token presented to it.
+	OperatorURL string
+	TokenFile   string
 }
 
 // Validate never echoes the secret.
 func (c Config) Validate() error {
 	var missing []string
 	for name, v := range map[string]string{"URL": c.URL, "issuer": c.Issuer, "client ID": c.ClientID,
-		"client secret": c.ClientSecret, "admin group": c.AdminGroup} {
+		"client secret": c.ClientSecret, "admin group": c.AdminGroup, "operator URL": c.OperatorURL, "token file": c.TokenFile} {
 		if strings.TrimSpace(v) == "" {
 			missing = append(missing, name)
 		}
@@ -58,6 +62,10 @@ func (c Config) Validate() error {
 		if name == "URL" && u.Path != "" && u.Path != "/" {
 			return errors.New("console URL must not have a path")
 		}
+	}
+	if u, err := url.Parse(c.OperatorURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return errors.New("console operator URL must be an http(s) URL without path, query or credentials")
 	}
 	if !slices.Contains(c.Scopes, oidc.ScopeOpenID) {
 		return errors.New("console scopes must contain openid")

@@ -1,6 +1,7 @@
 // Command tailnet-console is the read-only web console. It signs people in with OIDC, takes their
 // role from the groups claim and shows the Tailnets, spokes, TailnetIngresses and TailnetSites it
-// reads through a watch cache. It writes nothing.
+// reads through a watch cache, and the person's access from the operator's console API. It writes
+// nothing.
 package main
 
 import (
@@ -36,6 +37,7 @@ func configFromEnv(getenv func(string) string) console.Config {
 		URL: getenv("CONSOLE_URL"), Issuer: getenv("OIDC_ISSUER"), ClientID: getenv("OIDC_CLIENT_ID"),
 		ClientSecret: getenv("OIDC_CLIENT_SECRET"), Scopes: strings.Fields(strings.ReplaceAll(getenv("OIDC_SCOPES"), ",", " ")),
 		AdminGroup: getenv("CONSOLE_ADMIN_GROUP"), UserGroup: getenv("CONSOLE_USER_GROUP"),
+		OperatorURL: getenv("CONSOLE_OPERATOR_URL"), TokenFile: getenv("CONSOLE_API_TOKEN_FILE"),
 	}
 }
 
@@ -48,7 +50,7 @@ func run(ctx context.Context, l logr.Logger) error {
 	if err != nil {
 		return err
 	}
-	for _, obj := range []client.Object{&tnv1.Tailnet{}, &tnv1.TailnetIngress{}, &tnv1.TailnetSite{}} {
+	for _, obj := range []client.Object{&tnv1.Tailnet{}, &tnv1.TailnetIngress{}, &tnv1.TailnetSite{}, &tnv1.TailnetGrant{}} {
 		if _, err := c.GetInformer(ctx, obj); err != nil {
 			return err
 		}

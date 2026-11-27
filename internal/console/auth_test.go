@@ -125,7 +125,8 @@ func newTestConsole(t *testing.T, mutate func(*Config), objs ...client.Object) *
 	t.Helper()
 	idp := newFakeIdP(t)
 	cfg := Config{URL: "https://console.example", Issuer: idp.srv.URL, ClientID: "console", ClientSecret: "secret",
-		Scopes: []string{"openid", "profile", "groups"}, AdminGroup: "admins", UserGroup: "users"}
+		Scopes: []string{"openid", "profile", "groups"}, AdminGroup: "admins", UserGroup: "users",
+		OperatorURL: "http://127.0.0.1:1", TokenFile: "/nonexistent"}
 	if mutate != nil {
 		mutate(&cfg)
 	}
@@ -380,7 +381,7 @@ func TestLogsCarryNoIdentity(t *testing.T) {
 
 func TestConfigValidate(t *testing.T) {
 	good := Config{URL: "https://console.example", Issuer: "https://id.example", ClientID: "c", ClientSecret: "s3cr3t",
-		Scopes: []string{"openid"}, AdminGroup: "admins"}
+		Scopes: []string{"openid"}, AdminGroup: "admins", OperatorURL: "http://tsunaro-console-api.operator.svc:8082", TokenFile: "/token"}
 	if err := good.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -394,6 +395,11 @@ func TestConfigValidate(t *testing.T) {
 		"no secret":       func(c *Config) { c.ClientSecret = " " },
 		"no admin group":  func(c *Config) { c.AdminGroup = "" },
 		"no openid scope": func(c *Config) { c.Scopes = []string{"profile"} },
+		"no operator URL": func(c *Config) { c.OperatorURL = "" },
+		"operator path":   func(c *Config) { c.OperatorURL = "http://op:8082/v1" },
+		"operator scheme": func(c *Config) { c.OperatorURL = "ftp://op:8082" },
+		"operator creds":  func(c *Config) { c.OperatorURL = "http://u:p@op:8082" },
+		"no token file":   func(c *Config) { c.TokenFile = "" },
 	} {
 		c := good
 		mutate(&c)

@@ -1,0 +1,28 @@
+{{define "rows"}}
+  <div class="scroll"><table>
+    <thead><tr><th>Destination</th><th>Ports</th><th>Matched by</th><th>Origin</th><th>Expires</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td>{{range $i, $t := .Targets}}{{if $i}}<br>{{end}}{{if $t.Masked}}<span class="muted">{{$t.Value}}</span>{{else}}<code>{{$t.Value}}</code>{{end}}{{with $t.Name}}<span class="target__name">{{.}}</span>{{end}}{{end}}</td>
+      <td>{{template "list" .Ports}}</td><td>{{template "list" .Via}}</td><td>{{.Origin}}</td><td>{{or .Expires "—"}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+{{end}}
+{{define "content"}}
+<h1>My access</h1>
+<p class="lede">What the live policy of each tailnet allows your devices to reach. The console reads it from the operator, at most 15 seconds old.</p>
+{{range .Body}}
+<section class="panel">
+  <h2><code>{{.Tailnet}}</code></h2>
+  {{if .Problem}}<p class="notice notice--bad">The operator cannot provide this tailnet's users or policy right now.</p>
+  {{else if .Unknown}}<p class="notice">This tailnet has no user for your sign-in yet. Sign in to the tailnet once with the same identity provider.</p>
+  {{else}}
+  <h3>Personal</h3>
+  {{with .Personal}}{{template "rows" .}}{{else}}<p class="muted">No rule names you or one of your groups.</p>{{end}}
+  <h3>For everyone</h3>
+  {{with .Everyone}}{{template "rows" .}}{{else}}<p class="muted">No rule applies to every member.</p>{{end}}
+  {{end}}
+</section>
+{{else}}
+<p class="muted">No Tailnet.</p>
+{{end}}
+{{end}}
