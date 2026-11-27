@@ -1,5 +1,5 @@
 ---
-# Publishes the read-only console (chart value console.enabled) on the tailnet. The agent
+# Publishes the console (chart value console.enabled) on the tailnet. The agent
 # terminates TLS and forwards plain HTTP to the console Service in the operator namespace.
 # Set console.url to https://<status.dnsName> and register <console.url>/auth/callback at the
 # identity provider. allowFrom decides who may reach the sign-in page at all; the console's

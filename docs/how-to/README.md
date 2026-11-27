@@ -22,6 +22,6 @@ operator is installed; if it is not, start with [Getting started](../tutorials/g
 | [Run the gateway (subnet router + split-DNS)](gateway.md) | Prerequisites and order, complete example with LB pool, iBGP, split-DNS and site |
 | [Connect a second cluster](second-cluster.md) | Hub and spokes on one Headscale: per-cluster names, exported policy fragments, grants between clusters, one DNS zone per cluster, what lives in which repository |
 | [Bridge: let a legacy network reach the tailnet](legacy-bridge.md) | Hosts without a tailnet client reach a tailnet service through the site cluster: `TailnetEgress.spec.expose`, two-sided consent, bounded source filter; the proxy-box fallback and why a NAT subnet router is wrong |
-| [Run the read-only console](console.md) | OIDC sign-in with admin and user groups, publish it with a TailnetIngress, what it shows and stores |
+| [Run the console](console.md) | OIDC sign-in with admin and user groups, publish it with a TailnetIngress, let admins manage TailnetGrants and decide access requests behind an audit log, what it shows and stores |
 | [Upgrade and roll back](upgrade-rollback.md) | Chart and CRD upgrade order, what to verify afterwards, how to roll back |
 | [Troubleshoot](troubleshooting.md) | Symptom → cause → fix table and the diagnosis cheat sheet |

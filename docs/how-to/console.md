@@ -1,7 +1,7 @@
 ---
-title: "Run the read-only console"
+title: "Run the console"
 weight: 105
-description: "Enable the web console with OIDC sign-in, publish it with a TailnetIngress, and know what it shows and stores."
+description: "Enable the web console with OIDC sign-in, publish it with a TailnetIngress, let admins manage TailnetGrants and decide access requests behind an audit log, and know what it shows and stores."
 ---
 
 *The team wants to see which ingresses exist, who may reach them and whether the policy applied,
@@ -11,8 +11,10 @@ The console is a third program in the operator image (`/tailnet-console`). It si
 OIDC, takes their role from the `groups` claim and has two pages. **Overview** shows one map per
 Tailnet and four tables: Tailnets, spokes, TailnetIngresses and TailnetSites; it updates itself
 every 10 seconds. **My access** shows what the live policy lets the signed-in person reach. The
-console reads the kinds through a watch cache, gets Headscale users, tagged nodes and the live
-policy from the operator, and writes nothing. The chart renders it only with
+console reads the kinds through a watch cache and gets Headscale users, tagged nodes and the live
+policy from the operator. It writes nothing unless `console.accessManagement.enabled` is set; then
+admins also create, extend and revoke TailnetGrants, people request access that admins approve,
+and every change goes to an audit log first (see [Access management](#access-management)). The chart renders the console only with
 `console.enabled: true`.
 
 ## 1. Register a client at the identity provider
@@ -84,12 +86,13 @@ reaches the sign-in page; the groups decide what a signed-in person may see.
 
 | Role | Who | Sees |
 | --- | --- | --- |
-| admin | Member of `adminGroup` | Overview, My access |
-| user | Member of `userGroup`, or every signed-in person when `userGroup` is empty | Overview, My access |
+| admin | Member of `adminGroup` | Overview, My access; with access management also Requests (all of them), Grants and Audit log |
+| user | Member of `userGroup`, or every signed-in person when `userGroup` is empty | Overview, My access; with access management also Requests (their own) |
 | none | Everybody else | "No access" (HTTP 403), no session |
 
-In this release both roles see the same pages. User references in `allowFrom` (entries with `@`)
-appear only as a count, such as `2 user(s)`.
+On the overview, user references in `allowFrom` (entries with `@`) appear only as a count, such as
+`2 user(s)`, for both roles. A user who opens a grant or audit page gets HTTP 403; without access
+management these pages do not exist (404) and no role sees a link to them.
 
 ## Map
 
@@ -167,6 +170,166 @@ A grant or ingress with exactly the rule's sources is preferred to one that only
 A base-policy rule that equals a grant's rule therefore shows the grant and its expiry, although
 the rule stays after the grant expires. SSH rules, `via` and app capabilities are not shown.
 
+## Access management
+
+```yaml
+console:
+  accessManagement:
+    enabled: true
+    fourEyes: false          # true: a second admin approves every new grant and extension
+    audit:
+      size: 1Gi              # never rotated; one change is about 1 KiB
+      storageClassName: ""   # empty: the cluster's default
+      existingClaim: ""      # for example a restored volume
+```
+
+The chart then adds, in the release namespace:
+
+- `create`, `update` and `patch` on `tailnetgrants`, `get`, `list`, `watch` and `create` on
+  `tailnetaccessrequests`, and `update` and `patch` on their status to the ClusterRole
+  `<name>-console`, but no `delete`;
+- the PersistentVolumeClaim `<name>-console-audit` (`ReadWriteOnce`), mounted at
+  `/var/lib/tsunaro-console`, and `fsGroup: 65532` for the pod;
+- the ConfigMap `<name>-console-audit`, rendered without data, and a Role with `get`, `update` and
+  `patch` on exactly that ConfigMap;
+- the console's metrics on port 8081 (`metrics`) of the Service `<name>-console`, and with
+  `monitoring.serviceMonitor.enabled` a ServiceMonitor `<name>-console` (see [Metrics](#metrics)).
+
+Access requests are objects of the cluster-scoped kind `TailnetAccessRequest` (`tnar`). Helm does
+not upgrade CRDs: apply the new CRD before the upgrade that enables access management, see
+[Upgrade](upgrade-rollback.md).
+
+The volume and the ConfigMap carry `helm.sh/resource-policy: keep`: `helm uninstall` leaves them.
+The ConfigMap also carries `helm.toolkit.fluxcd.io/driftDetection: disabled`, so a Flux
+HelmRelease does not reset the data the console writes. The console still has one replica; the
+volume needs no `ReadWriteMany`.
+
+### Grants
+
+**Grants** lists every TailnetGrant in the cluster with target, ports, recipients, expiry and
+`Ready`. Recipients show with the Headscale user's name; only admins see this page. The console
+changes only the grants it created, which carry the label
+`app.kubernetes.io/managed-by: tailnet-console`; for all others the page says "Git or kubectl".
+
+**New grant** has two steps and works without JavaScript:
+
+1. Choose a target. The list holds, for every Tailnet that writes its policy (mode `DryRun` or
+   `Apply` with a base ConfigMap), its TailnetIngresses with a `status.tag`, its spoke tags as the
+   [map](#map) assigns them, and its TailnetSites.
+2. Ports are prefilled with the target's current ports (an ingress's `exposes`, the TCP ports of
+   the live rules for a spoke tag) and stored as a fixed list; a later change of the target does
+   not change the grant. For a site, give addresses or masked prefixes inside the site's
+   prefixes; an address becomes a `/32` or `/128`. Recipients are Headscale users with a provider
+   identifier, stored as `<providerId>@`, and the groups of the live policy. A user who never
+   signed in to the tailnet with the identity provider cannot be chosen. The duration is 1 hour,
+   8 hours, 24 hours, 7 days, 30 days or permanent, counted from now.
+
+The server checks every field again against the same lists. The grant is named `console-` plus ten
+random characters. **Extend** sets a new `expiresAt` from now with the same durations; on an
+expired grant the button says **Renew**. **Revoke** sets `expiresAt` to now: the operator removes
+the rule at its next reconcile, and the object stays. To change ports or recipients, revoke the
+grant and create a new one. The operator's checks still apply: a grant whose target goes away
+reports `TargetUnknown`, see [Grant temporary access](grants.md).
+
+With `fourEyes`, **Create grant** and **Extend** make a request instead (the button says
+**Request grant**), which another admin approves on **Requests**; **Revoke** still acts at once. A
+notice on the page says so.
+
+### Requests
+
+**Requests** shows a user their own requests and the console grants that name them alone, and an
+admin every request. A request asks for a new grant or for a new expiry of a console grant.
+
+1. **New request** has the steps of **New grant**, with one difference: the only recipient is the
+   person who asks, as `<providerId>@`. The list holds only Tailnets whose Headscale knows that
+   person by the provider identifier (see [My access](#my-access)); whoever never signed in to the
+   tailnet with the identity provider is offered nothing.
+2. **Ask to extend** is offered for console grants whose `sources` are exactly the person's own
+   reference. Admins extend on **Grants**.
+3. A request needs approvals by admins other than the requester:
+
+   | Requested by | `fourEyes: false` | `fourEyes: true` |
+   | --- | --- | --- |
+   | user | 1 admin | 2 different admins |
+   | admin (only with `fourEyes`, from **Grants**) | 1 other admin | 1 other admin |
+
+   The setting counts when an admin decides, not when the request was made. Nobody decides their
+   own request, and nobody approves twice. With only one admin, nothing that needs another admin
+   can be approved.
+4. **Reject**: any admin except the requester; one rejection ends the request. **Withdraw**: the
+   requester, while the request is pending.
+5. The last approval checks the request again: the target, ports and recipients must still be
+   offered, and an extended grant must still exist, be a console grant and, for a user, name only
+   that user. Otherwise the console answers "Request no longer valid" (409) and changes nothing;
+   reject the request then.
+6. The duration counts from the last approval. A new grant is named `console-` plus the ten
+   characters of the request's name `request-<ten>`, and carries the annotation
+   `tsunaro.io/access-request: <request>`. An extended grant gets
+   `tsunaro.io/extended-by: <request>`.
+7. When the last approval wrote the grant but not the request's status, the request stays pending
+   with "grant written; approve to close". It counts as decided: **Reject** and **Withdraw** answer
+   "Request not changed" (409), and **Approve** by any admin other than the requester only closes
+   it (`request.close`), without a new check and without changing the grant. To take the access
+   back, revoke the grant. When a later extension has replaced `tsunaro.io/extended-by`, the older
+   request is an ordinary pending request again.
+
+The request's status names nobody: `phase` (`Pending`, `Approved`, `Rejected`, `Withdrawn`; empty
+means pending), `decidedAt` and `grantName`. Who approved, rejected or withdrew is only in the
+[audit log](#audit-log): the console counts a request's approvals from its `request.approve`
+entries, one per person. When the console cannot read the log, it shows and decides no request
+("Requests unavailable", 503). Admins see the approvers and the deciding person by name; the
+requester sees how many approved and when the request was decided. Its `spec` never changes.
+The console never deletes a request; `kubectl get tnar` lists them.
+
+### Audit log
+
+Every change is first written to `/var/lib/tsunaro-console/audit.jsonl`, one JSON line per entry:
+
+```json
+{"v":1,"seq":12,"time":"2026-11-27T13:00:00Z","action":"grant.create","actor":{"iss":"https://id.example.com","sub":"3f2a","name":"Alice Example"},"grant":"console-k3x9q0b2mz","tailnet":"corp","details":{"expiresAt":"2026-11-27T21:00:00Z","ports":[443],"sources":["https://id.example.com/3f2a@"],"tag":"tag:wiki"},"prev":"9c1e…"}
+```
+
+1. `prev` is the SHA-256 of the previous line as written; the first entry has an empty `prev`.
+2. After every entry the console writes the head (number and hash) to the ConfigMap
+   `<name>-console-audit` and logs it as `audit head` with `seq` and `hash`. Neither names a
+   person.
+3. The change runs only after the entry is synced to disk and the ConfigMap is written. When
+   either fails, the console answers "Change refused" (503) and changes nothing.
+4. When the API server then rejects the write, an entry `grant.failed` with the HTTP status
+   follows, and the page says "Change failed" (502).
+5. The console checks the chain at start and every time the audit page opens. A break is a line
+   that is not readable, a `prev` that does not match the line before, a wrong number, a missing
+   or changed ConfigMap, or a log that ends before or after the ConfigMap's head.
+6. Every newly found break gets its own entry `chain.broken`, and the log continues after it. The
+   page lists every break ever found; the pod log says `audit chain broken` with the entry number.
+7. Nothing is deleted or rotated.
+
+Actions are `grant.create`, `grant.extend`, `grant.revoke`, `grant.failed`, `request.create`,
+`request.approve`, `request.reject`, `request.withdraw`, `request.close` and `chain.broken`. The
+last approval of a request is recorded as `grant.create` or `grant.extend`, with the request, the
+requester and every approver in `details`; its actor is the last approver. Entries of a request
+carry its name in `details.request`; a following `grant.failed` names only the grant and the
+failed action. The console also checks the chain every
+10 minutes in the background for the metric below.
+**Audit log** shows the newest 200 entries, newest first, with a link to older ones.
+
+The chain shows changes made on the volume alone. Whoever can write both the volume and the
+ConfigMap, such as a cluster admin, can rewrite the log unnoticed by the console; the head in the
+pod log, if your log store keeps it, is the third copy to compare. Changes made with `kubectl` or
+Git and the operator's own expiries are not in this log.
+
+### Metrics
+
+With access management the console serves `GET /metrics` on port 8081:
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `tailnet_console_access_requests_pending` | `tailnet` | Requests waiting for a decision; no series for a tailnet without one |
+| `tailnet_console_audit_chain_breaks` | — | Breaks the last check found; a recorded break stays |
+
+No label names a person. The bundled alerts `TailnetConsoleAccessRequestPending` and
+`TailnetConsoleAuditChainBroken` use them, see [Alerts](../reference/alerts.md).
+
 ## Console API
 
 The console has no Headscale key. It asks the operator, which reads Headscale with the Tailnet's
@@ -198,13 +361,14 @@ With `networkPolicy.enabled`, the chart renders `<name>-console` for the selecte
   `app.kubernetes.io/name: tailnet-ingress` in the release namespace, the agent of the console's
   ingress); egress to `networkPolicy.dnsPeers`, `networkPolicy.kubeAPICIDRs` on `kubeAPIPorts`,
   the operator pods on TCP/8082, and `console.networkPolicy.idpCIDRs` on `idpPorts` (default 443).
-  The operator's own NetworkPolicy admits the console on TCP/8082.
+  The operator's own NetworkPolicy admits the console on TCP/8082. With access management, the
+  console also admits `networkPolicy.metricsPeers` on TCP/8081.
 - `cilium`: ingress on TCP/8080 from `ingressPeers`, translated to `fromEndpoints` (an `ipBlock`
   peer fails the rendering), and from the node (`host`) for the kubelet's probes; egress to
   `kube-apiserver`, DNS, the operator pods on TCP/8082 and `toCIDR` for the identity provider. The
   operator's CiliumNetworkPolicy then gets an ingress section too: the console on TCP/8082, and
-  everybody on metrics (8080) and health (8081). `networkPolicy.metricsPeers` is not applied
-  there.
+  everybody on metrics (8080) and health (8081). With access management the console admits
+  everybody on its metrics (TCP/8081). `networkPolicy.metricsPeers` is not applied there.
 
 When the console's `TailnetIngress` lives in another namespace, add a `namespaceSelector` to
 `ingressPeers`.
@@ -232,4 +396,17 @@ subject, a name or a mail address.
 | The page stops updating and asks to sign in again | The session expired (one hour) or the console restarted | Sign in again |
 | The line under the heading says the console is unreachable | The fetch failed: the console pod, its ingress or the network is down | The page keeps the last state and retries every 10 seconds |
 | A spoke entry sits under the wrong spoke, or under none | It belongs to the first spoke, by name, whose `tagPatterns` match it | Make the patterns of the spokes disjoint |
+| "Change refused" (503) | The console cannot write `audit.jsonl` or the ConfigMap `<name>-console-audit`; the console log line `audit write failed` has the error | Check that the volume is bound and writable (`fsGroup`), and that the ConfigMap and the Role `<name>-console-audit` exist |
+| "Change failed" (502) | The API server rejected the grant or request; the page shows the status, the audit log has `grant.failed` | 403: the ClusterRole lacks the write verbs (`accessManagement.enabled`); 404 on a request: the TailnetAccessRequest CRD is missing, apply it ([Upgrade](upgrade-rollback.md)); 409: a grant of that name exists without the request's annotation; 422: the object does not pass admission, compare with [Grant temporary access](grants.md) |
+| "Changed meanwhile" (409) | Somebody changed the request or grant at the same time | Reload the page and decide again |
+| "Request no longer valid" (409) | Since the request, the target, its ports or the recipient left the lists, or the grant to extend is gone or names somebody else | Reject the request; the requester may ask again |
+| "Request not changed" (409) | The request is decided already, it is your own, you approved it already, or its grant is written already and only **Approve** closes it | With `fourEyes`, another admin must approve; revoke a written grant to take the access back |
+| "Requests unavailable" (503), or the console log says `request list failed` | The console cannot list TailnetAccessRequests: the CRD or the ClusterRole rule is missing | Apply the CRD; check `accessManagement.enabled` |
+| "Requests unavailable" (503), and the console log says `audit check failed` | The console cannot read its audit log, which keeps the approvals | Check the audit volume and the ConfigMap `<name>-console-audit` |
+| **New request** offers no tailnet | Headscale knows no user with your provider identifier in a tailnet that writes its policy | Sign in to the tailnet once with the same identity provider |
+| "Not your grant" (403) | The grant names more than you, or not you | Ask an admin |
+| "Not a console grant" (403) | The grant has no label `app.kubernetes.io/managed-by: tailnet-console` | Change it where it is defined, in Git or with `kubectl` |
+| The audit page says the chain is broken | A line was changed, removed or cut, or the ConfigMap was reset or deleted, for example by a restore of only one of the two | Compare the listed entry numbers with a backup and the `audit head` lines of the pod log; the break stays listed |
+| A recipient is missing from the list | The Headscale user has no provider identifier: it never signed in with the identity provider | Let the person sign in to the tailnet once; or choose a group of the live policy |
+| A target is missing from the list | The Tailnet does not write its policy, the ingress has no `status.tag` yet, or the spoke tag has no node and no live rule | Set the policy mode to `DryRun` or `Apply`; wait for the ingress to be Ready |
 | "My access" says the tailnet has no user for you | No Headscale user has the provider identifier that Headscale builds from the console's issuer and your `sub` | Sign in to the tailnet once with the same identity provider; check that Headscale's OIDC issuer equals `console.oidc.issuer` |

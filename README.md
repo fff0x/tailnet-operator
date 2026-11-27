@@ -50,6 +50,8 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
   egress target, plus a CoreDNS that serves the hosts file as the authoritative zone. Identity is
   pinned in a state Secret and immutable receipts; **fresh-only** — it creates a new node and never
   adopts, restarts or replaces one. Suspended by default.
+- **`TailnetAccessRequest`** (cluster-scoped) — a request for a `TailnetGrant` or its extension,
+  written and decided in the [console](docs/how-to/console.md); the operator ignores it.
 - **The tag is the authorization.** Each CR is its own node with its own tag; the policy's grants for
   that tag decide what it may reach (egress) or who may reach it (ingress). Without
   `Tailnet.spec.policy` the operator only *reads* the policy and reports what is missing; with it, the
@@ -124,7 +126,7 @@ Headscale API over TLS and give the chart the issuer CA
 
 ## CRD reference
 
-Every `spec` and `status` field of the six kinds, with types, defaults and constraints:
+Every `spec` and `status` field of the seven kinds, with types, defaults and constraints:
 [CRD reference](docs/reference/crds.md) (generated from the CRDs). Worked examples for every kind:
 [how-to guides](docs/how-to/README.md). Condition types and reasons per kind, as shown by
 `kubectl get` and `describe`: [Conditions and reasons](docs/reference/reasons.md).
@@ -144,8 +146,9 @@ Metrics (operator TCP 8080, agents TCP 9080) and the bundled alerts with their r
 
 Six reconcilers (Tailnet, Egress, Ingress, Gateway, DNS, Policy) turn CRs into desired state
 applied with server-side apply; one agent pod per CR is a userspace tsnet node, the same image
-carrying `/tailnet-operator` and `/tailnet-agent`. The optional read-only
-[console](docs/how-to/console.md) (`/tailnet-console`) is in that image too. The full walk-through — key rotation, route
+carrying `/tailnet-operator` and `/tailnet-agent`. The optional
+[console](docs/how-to/console.md) (`/tailnet-console`), read-only unless its admins manage
+TailnetGrants and access requests behind an audit log, is in that image too. The full walk-through — key rotation, route
 diagnosis, policy rendering and replay, the data plane — is
 [Model and how it works](docs/explanation/model.md#how-it-works).
 
@@ -169,9 +172,9 @@ chart; see [CONTRIBUTING](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad
 
 | Path | What |
 | --- | --- |
-| `api/v1alpha1` | `Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGrant`, `TailnetGateway` CRD types |
+| `api/v1alpha1` | `Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGrant`, `TailnetAccessRequest`, `TailnetGateway` CRD types |
 | `cmd/operator`, `cmd/agent` | control plane; `tailnet-agent`: tsnet node, TCP/HTTP forwarders, health and probe endpoints |
-| `cmd/console`, `internal/console` | `tailnet-console`: read-only web console with OIDC sign-in |
+| `cmd/console`, `internal/console` | `tailnet-console`: web console with OIDC sign-in; optional grant management with a hash-chained audit log |
 | `internal/controller` | reconcilers (tailnet, egress, ingress, gateway, dns, policy) and resource builders |
 | `internal/gateway` | gateway renderer, route planner, DNS zone, receipts and the fresh writer |
 | `internal/{headscale,policy,certificates}` | Headscale REST client; base + CR → rendered policy; TLS serving and certificate validation |

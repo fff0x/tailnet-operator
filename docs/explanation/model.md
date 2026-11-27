@@ -1,7 +1,7 @@
 ---
 title: "Model and how it works"
 weight: 10
-description: "The six kinds, why the tag is the authorization, and what each reconciler turns a CR into."
+description: "The seven kinds, why the tag is the authorization, and what each reconciler turns a CR into."
 ---
 
 Diagrams of the resulting shape, one per scenario, and the full list of objects each CR creates:
@@ -35,6 +35,10 @@ Diagrams of the resulting shape, one per scenario, and the full list of objects 
   ingress tag, also of a spoke cluster, or hosts inside a `TailnetSite`. Declared in the
   policy-owning cluster. The operator renders one grant and removes it at `expiresAt` by its own
   clock. The kind is administrative: a grant bypasses `allowFrom`.
+- **`TailnetAccessRequest`** (cluster-scoped) — a person's request for a `TailnetGrant` or for a new
+  expiry of one, written and decided only in the [console](../how-to/console.md#requests). The
+  operator does not read it and no reconciler acts on it: an approved request becomes a
+  `TailnetGrant`. Its status names nobody; the approvals are in the console's audit log.
 - **`TailnetGateway`** (cluster-scoped) — the subnet router and split-DNS resolver as a CR: one
   kernel-mode Tailscale Pod advertising the site LAN, the tailnet LoadBalancer range and every
   egress target, plus a CoreDNS that serves the hosts file as the authoritative zone. Identity is

@@ -1,10 +1,10 @@
 ---
 title: "Metrics"
 weight: 60
-description: "Every Prometheus metric the operator (TCP 8080) and the agents (TCP 9080) expose, with labels and meaning."
+description: "Every Prometheus metric the operator (TCP 8080), the agents (TCP 9080) and the console (TCP 8081) expose, with labels and meaning."
 ---
 
-<!-- Curated from internal/metrics/metrics.go and cmd/agent/metrics.go. Keep in step when a collector changes. -->
+<!-- Curated from internal/metrics/metrics.go, cmd/agent/metrics.go and internal/console/metrics.go. Keep in step when a collector changes. -->
 
 The operator serves `/metrics` on TCP 8080 (chart `ServiceMonitor`), each agent and gateway pod on
 TCP 9080 (chart `PodMonitor`). Collectors observe persisted status only — never messages,
@@ -41,6 +41,16 @@ credentials, peer addresses or dynamic Headscale paths. How to read them in prac
 
 The controller-runtime families (`controller_runtime_reconcile_errors_total`, …) and the Go runtime
 families are exported as well; the bundled alerts use `controller_runtime_reconcile_errors_total` and `up`.
+
+## Console
+
+Only with `console.accessManagement.enabled`: the console serves `/metrics` on TCP 8081 (chart
+`ServiceMonitor` `<name>-console`). No label names a person.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `tailnet_console_access_requests_pending` | gauge | `tailnet` | TailnetAccessRequests waiting for a decision, read at every scrape; no series for a tailnet without one. |
+| `tailnet_console_audit_chain_breaks` | gauge | — | Breaks of the audit log's hash chain found by the last check (at start, every 10 minutes and on every audit page view). A recorded break stays counted. |
 
 ## Agents (egress, ingress) and gateways
 

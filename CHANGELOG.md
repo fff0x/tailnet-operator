@@ -6,7 +6,7 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Added
 
-- **Read-only web console (`console.enabled`).** A third program in the operator image,
+- **Web console (`console.enabled`).** A third program in the operator image,
   `/tailnet-console`, shows Tailnets, spokes, TailnetIngresses and TailnetSites in four tables. It
   signs people in with OIDC (authorization code with PKCE S256, `state` and `nonce`) and takes the
   role from the `groups` claim: members of `console.oidc.adminGroup` are admins, members of
@@ -39,6 +39,40 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
     is then required. Under `cilium` the console admits only `ingressPeers` and the node, and the
     operator's policy gains an ingress section: the console on 8082, everybody on metrics and
     health.
+  - **Grant management (`console.accessManagement.enabled`, off by default).** Admins list all
+    TailnetGrants and create, extend and revoke their own: one target (an ingress tag, a spoke
+    tag or addresses inside a TailnetSite of a policy-owning Tailnet), ports prefilled from the
+    target, recipients from the Headscale users with a provider identifier and the live policy's
+    groups, and a fixed duration from 1 hour to 30 days or permanent. Revoking sets `expiresAt` to
+    now; the console never deletes a grant and changes only those labelled
+    `app.kubernetes.io/managed-by: tailnet-console`. Users get 403; without the switch the pages
+    do not exist. The chart adds `create`, `update` and `patch` on TailnetGrants, a
+    PersistentVolumeClaim and a ConfigMap `<name>-console-audit` (both kept on uninstall), and a
+    Role on exactly that ConfigMap.
+  - **Audit log.** Every change is appended and synced to `audit.jsonl` on that volume before it
+    is made, one JSON line with actor, grant, details and the SHA-256 of the previous line. The
+    head goes to the ConfigMap and to the pod log (without identity); without both writes the
+    change is refused (503), and a write the API server rejects is followed by `grant.failed`. The
+    console checks the chain at start and on every view of the audit page, records each new break
+    once and continues; nothing is rotated.
+  - **Access requests.** New cluster-scoped kind `TailnetAccessRequest` (`tnar`), read only by the
+    console; its `spec` is immutable. With access management every signed-in person requests a
+    grant for themselves, on a tailnet whose Headscale knows them, or the extension of a console
+    grant that names them alone; admins approve or reject on **Requests**. Nobody decides their own
+    request; one rejection ends it, the requester may withdraw it. The last approval checks the
+    request against the current targets, ports and recipients, records `grant.create` or
+    `grant.extend` with requester and approvers, and the duration counts from then. The request's
+    status names nobody: approvals are counted from the audit log, and only admins see who
+    decided. A request whose grant was written but whose status was not counts as decided; only
+    **Approve** closes it (`request.close`). Apply the CRD before upgrading (`task crd-upgrade`).
+  - **Four-eyes approval (`console.accessManagement.fourEyes`, off by default).** An admin's new
+    grant or extension becomes a request that another admin approves, and a user's request needs
+    two admins; revoking acts at once.
+  - **Console metrics and alerts.** With access management the console serves
+    `tailnet_console_access_requests_pending{tailnet}` and `tailnet_console_audit_chain_breaks` on
+    port 8081 (ServiceMonitor `<name>-console`, network policies for the port), checks its audit
+    chain every 10 minutes, and the bundled rules add `TailnetConsoleAccessRequestPending` (info)
+    and `TailnetConsoleAuditChainBroken` (warning).
   - The Headscale client decodes `displayName` and `providerId` of users.
 - **`TailnetGrant`: time-bound TCP access for people and policy groups.** A cluster-scoped kind in
   the policy-owning cluster (`policy.mode: Apply`). It grants user references or base-policy groups

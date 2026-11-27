@@ -95,6 +95,9 @@ grants nothing and is not reported.
 - An expired object stays, with `Ready=False/Expired`. The operator does not delete it.
 - To extend a grant, set a new `expiresAt`. To make it permanent, remove the field.
 - To revoke a grant early, delete the object or set `expiresAt` to a time in the past.
+- With `console.accessManagement`, console admins create, extend and revoke grants in the web
+  console, and every change is in its audit log ([Console](console.md#access-management)). The
+  console changes only grants with `app.kubernetes.io/managed-by: tailnet-console`.
 - An `expiresAt` in the past is accepted. The grant is then expired from the start.
 - If the policy write fails at `expiresAt`, the access stays until a write succeeds. The grant
   reports `ExpiryPending`, and `TailnetResourceNotReady` fires after 10 minutes.

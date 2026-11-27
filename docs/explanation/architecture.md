@@ -140,13 +140,16 @@ the Headscale cannot write; in `mode: Export` it renders only its own entries in
 ConfigMap, which the single Apply writer merges after review — see
 [Second cluster](../how-to/policy.md#second-cluster-export-on-the-spoke-merge-on-the-hub).
 
-## Console: a read-only web view
+## Console: a web view, with optional grant management
 
 ```mermaid
 flowchart LR
   peer[Tailnet peer, browser] -->|HTTPS| ing[TailnetIngress console<br/>agent terminates TLS]
   ing -->|HTTP :8080| con[tailnet-console<br/>Deployment, chart value]
   con -->|get / list / watch| api[Kubernetes API<br/>Tailnets, TailnetIngresses,<br/>TailnetSites, TailnetGrants]
+  con -.->|accessManagement: create / patch TailnetGrants<br/>and TailnetAccessRequests,<br/>write the audit head ConfigMap| api
+  prom[Prometheus] -.->|accessManagement: HTTP :8081 /metrics| con
+  con -.->|accessManagement: append + fsync| vol[(PVC audit.jsonl)]
   con -->|HTTP :8082, projected token| op[tailnet-operator<br/>console API]
   op -->|TokenReview| api
   op -->|working key| hs[Headscale API<br/>users, nodes, policy]
@@ -155,7 +158,13 @@ flowchart LR
 ```
 
 The chart renders the console with `console.enabled`; it is not created by a CR. It reads four
-kinds through its own ClusterRole and writes nothing, neither to Kubernetes nor to Headscale. It
+kinds through its own ClusterRole and by default writes nothing, neither to Kubernetes nor to
+Headscale. With `console.accessManagement` it creates and patches TailnetGrants, which the operator
+renders like any other grant: the console never talks to Headscale. Access requests are
+TailnetAccessRequests, which only the console reads; the operator ignores them, and an approved
+request becomes a TailnetGrant. Each change is appended to a hash-chained log on its own volume
+first, and the chain's head is written to a ConfigMap; reads and writes of grants, requests and of
+that ConfigMap go straight to the API server, not through the cache. It
 has no Headscale key: users, tagged nodes and the live policy come from the operator's console
 API, which every operator replica serves and which admits only the console's ServiceAccount. The
 server renders the overview's map as SVG; the browser fetches the page again every 10 seconds, so
