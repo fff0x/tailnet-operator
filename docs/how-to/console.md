@@ -8,10 +8,11 @@ description: "Enable the web console with OIDC sign-in, publish it with a Tailne
 without `kubectl` access to the hub.*
 
 The console is a third program in the operator image (`/tailnet-console`). It signs people in with
-OIDC, takes their role from the `groups` claim and has two pages. **Overview** shows four tables:
-Tailnets, spokes, TailnetIngresses and TailnetSites. **My access** shows what the live policy lets
-the signed-in person reach. The console reads the kinds through a watch cache, gets Headscale users
-and the live policy from the operator, and writes nothing. The chart renders it only with
+OIDC, takes their role from the `groups` claim and has two pages. **Overview** shows one map per
+Tailnet and four tables: Tailnets, spokes, TailnetIngresses and TailnetSites; it updates itself
+every 10 seconds. **My access** shows what the live policy lets the signed-in person reach. The
+console reads the kinds through a watch cache, gets Headscale users, tagged nodes and the live
+policy from the operator, and writes nothing. The chart renders it only with
 `console.enabled: true`.
 
 ## 1. Register a client at the identity provider
@@ -90,6 +91,45 @@ reaches the sign-in page; the groups decide what a signed-in person may see.
 In this release both roles see the same pages. User references in `allowFrom` (entries with `@`)
 appear only as a count, such as `2 user(s)`.
 
+## Map
+
+The overview draws one SVG map per Tailnet, rendered by the server. The hub is on the left, one
+box per `spec.policy.spokes[]` entry on the right, sorted by name, with a line from the hub to each
+spoke.
+
+1. The hub box shows the Tailnet's server, Headscale version, policy mode and `PolicyApplied`, then
+   its TailnetIngresses and TailnetSites.
+2. A spoke box shows `SpokeReachable`, `SpokeFragmentValid`, `SpokeFragmentApproved`, whether a
+   change is pending, and the spoke's tags. A spoke the hub cannot reach is drawn dashed.
+3. A spoke tag is the tag of a tagged node or a `tag:` destination of a live rule. It belongs to
+   the first spoke, by name, whose `tagPatterns` match it (default `tag:*-<spoke>-*`); a tag no
+   spoke matches is not drawn. The tags of the hub's own ingresses never count. The details of a
+   tag list the ports of all live rules with that tag as destination.
+4. A square shows `Ready` (green true, red false, grey unknown). An ingress also has a circle for
+   its node: filled when a node with its tag is online, a red ring when nodes exist but none is
+   online, a grey ring when the console API knows no node with the tag. A spoke tag has only the
+   square, which shows that node state (green online, red offline, grey unknown).
+5. A list shows at most 12 entries, sorted by name. Above that, a last field says `+N more` and,
+   when some hidden entries are not ready, `, k not ready`. The tables below list everything.
+
+Hover, focus or tap an entry for its details (ports, hosts, condition, node state). The map shows
+no user references, node names, rule sources or owners. When the console API does not answer for a
+Tailnet within 3 seconds, the map says so: node state is unknown and the spoke boxes show no tags.
+While a Tailnet is in `DryRun`, the operator does not write the spoke fragments to the live policy:
+a spoke tag whose rules are not live appears only through its nodes, without ports.
+
+## Live updates
+
+The overview loads `/static/console.js`, the console's only script. Every 10 seconds it fetches the
+page again and replaces the map and the tables when they changed; it waits, and says so, while an
+entry inside them has the focus, and pauses while the browser tab is hidden. The line under the heading shows
+the time of the last update, or that the console is unreachable and the page shows the last state.
+When the session has expired, the script stops, and a notice with a sign-in link replaces the map
+and the tables. Without JavaScript the page works as before and shows the state of its load.
+
+The Content Security Policy allows scripts and fetches from the console's own origin only
+(`script-src 'self'; connect-src 'self'`), and no inline script or style.
+
 ## My access
 
 The page has one section per Tailnet, with two lists. It evaluates the live policy that Headscale
@@ -146,9 +186,9 @@ server's own audience is rejected. Answers: 401 without a valid token, 403 for a
 ServiceAccount, 404 for an unknown Tailnet or path, 405 for a write, 503 without a working key, 502
 when Headscale fails. Error answers have no body, and logs name only the reason.
 
-The console keeps each Tailnet's answers for 15 seconds in memory, so a change appears on the page
-up to 15 seconds late. The API speaks plain HTTP inside the cluster. Only the network policy of
-provider `kubernetes` restricts who reaches it (see below).
+The console keeps each Tailnet's answers, and its errors, for 15 seconds in memory and asks the API
+once per Tailnet at a time, so a change appears on the page up to 15 seconds late. The API speaks
+plain HTTP inside the cluster; with `networkPolicy.enabled` only the console reaches it (see below).
 
 ## Network policy
 
@@ -159,10 +199,12 @@ With `networkPolicy.enabled`, the chart renders `<name>-console` for the selecte
   ingress); egress to `networkPolicy.dnsPeers`, `networkPolicy.kubeAPICIDRs` on `kubeAPIPorts`,
   the operator pods on TCP/8082, and `console.networkPolicy.idpCIDRs` on `idpPorts` (default 443).
   The operator's own NetworkPolicy admits the console on TCP/8082.
-- `cilium`: egress only, to `kube-apiserver`, DNS, the operator pods on TCP/8082 and `toCIDR`
-  for the identity provider. Ingress stays open: every pod in the cluster reaches the console on
-  TCP/8080 and the operator's console API on TCP/8082. The sign-in and the `TokenReview` are then
-  the only guards.
+- `cilium`: ingress on TCP/8080 from `ingressPeers`, translated to `fromEndpoints` (an `ipBlock`
+  peer fails the rendering), and from the node (`host`) for the kubelet's probes; egress to
+  `kube-apiserver`, DNS, the operator pods on TCP/8082 and `toCIDR` for the identity provider. The
+  operator's CiliumNetworkPolicy then gets an ingress section too: the console on TCP/8082, and
+  everybody on metrics (8080) and health (8081). `networkPolicy.metricsPeers` is not applied
+  there.
 
 When the console's `TailnetIngress` lives in another namespace, add a `namespaceSelector` to
 `ingressPeers`.
@@ -186,4 +228,8 @@ subject, a name or a mail address.
 | "No access" (403) | The account is in neither group, or the IdP sends no `groups` | Add the account to a group; make the IdP release `groups` in the ID token or UserInfo |
 | The console pod restarts and never becomes ready | It cannot list or watch the four kinds: the ClusterRoleBinding `<name>-console` is missing, or the cluster lacks one of the CRDs. The console serves HTTP only after its cache has synced, so the liveness probe fails | Check the binding; apply the current CRDs ([Upgrade](upgrade-rollback.md)) |
 | "My access" says the operator cannot provide a tailnet | The console API answered with an error or was not reachable. The console log line `access read failed` names the status: 401 (token audience or projection), 403 (`CONSOLE_API_SUBJECT` does not name the console), 503 (no working key, see `ApiKeyValid`), 502 (Headscale) | Compare the operator's `CONSOLE_API_SUBJECT` with the console's ServiceAccount; check the network policies for TCP/8082 |
+| The map says the console API did not answer; nodes show a grey ring | Same causes as the row above; the overview does not log them | Open "My access" for the status in the log line `access read failed`; fix as above |
+| The page stops updating and asks to sign in again | The session expired (one hour) or the console restarted | Sign in again |
+| The line under the heading says the console is unreachable | The fetch failed: the console pod, its ingress or the network is down | The page keeps the last state and retries every 10 seconds |
+| A spoke entry sits under the wrong spoke, or under none | It belongs to the first spoke, by name, whose `tagPatterns` match it | Make the patterns of the spokes disjoint |
 | "My access" says the tailnet has no user for you | No Headscale user has the provider identifier that Headscale builds from the console's issuer and your `sub` | Sign in to the tailnet once with the same identity provider; check that Headscale's OIDC issuer equals `console.oidc.issuer` |

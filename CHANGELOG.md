@@ -27,9 +27,18 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
     reads Headscale with the working key and admits only the console's ServiceAccount, checked by a
     `TokenReview` for the audience `tailnet-operator` (ClusterRole `<name>-console-api`). Nodes are
     tagged nodes only.
+  - **Map.** The overview draws one server-rendered SVG map per Tailnet: the hub with its
+    ingresses and sites, one box per spoke with its conditions and the tags it owns, each entry
+    with `Ready` and node state. A list shows up to 12 entries and then `+N more`; the map carries
+    no user references, node names or rule sources.
+  - **Live updates.** The overview fetches itself every 10 seconds with the console's only script,
+    `/static/console.js`, and shows a sign-in notice when the session has expired. The Content
+    Security Policy now allows `script-src 'self'` and `connect-src 'self'`.
   - **Console network policy.** With `networkPolicy.enabled` the chart isolates the console pod
     for both providers and admits it on the operator's port 8082; `console.networkPolicy.idpCIDRs`
-    is then required.
+    is then required. Under `cilium` the console admits only `ingressPeers` and the node, and the
+    operator's policy gains an ingress section: the console on 8082, everybody on metrics and
+    health.
   - The Headscale client decodes `displayName` and `providerId` of users.
 - **`TailnetGrant`: time-bound TCP access for people and policy groups.** A cluster-scoped kind in
   the policy-owning cluster (`policy.mode: Apply`). It grants user references or base-policy groups

@@ -156,9 +156,11 @@ flowchart LR
 
 The chart renders the console with `console.enabled`; it is not created by a CR. It reads four
 kinds through its own ClusterRole and writes nothing, neither to Kubernetes nor to Headscale. It
-has no Headscale key: users and the live policy come from the operator's console API, which every
-operator replica serves and which admits only the console's ServiceAccount. The admin publishes the
-console with a `TailnetIngress` in `mode: http` ([Console](../how-to/console.md)).
+has no Headscale key: users, tagged nodes and the live policy come from the operator's console
+API, which every operator replica serves and which admits only the console's ServiceAccount. The
+server renders the overview's map as SVG; the browser fetches the page again every 10 seconds, so
+no update channel exists beyond plain GETs. The admin publishes the console with a
+`TailnetIngress` in `mode: http` ([Console](../how-to/console.md)).
 
 ## What the operator creates
 
