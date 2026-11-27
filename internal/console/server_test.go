@@ -56,11 +56,12 @@ func TestScriptOnlyOnOverview(t *testing.T) {
 	}
 }
 
-var managePaths = []string{"GET /grants", "GET /grants/new", "GET /audit", "POST /grants", "POST /grants/console-x/extend", "POST /grants/console-x/revoke",
+var managePaths = []string{"GET /grants", "GET /grants/new", "GET /audit", "POST /grants", "POST /grants/console-x/extend",
 	"POST /requests/request-x/approve", "POST /requests/request-x/reject"}
 
 // requestPaths are open to every signed-in person with access management.
-var requestPaths = []string{"GET /requests", "GET /requests/new", "POST /requests", "POST /grants/console-x/request", "POST /requests/request-x/withdraw"}
+var requestPaths = []string{"GET /requests", "GET /requests/new", "POST /requests", "POST /grants/console-x/request", "POST /requests/request-x/withdraw",
+	"POST /grants/console-x/revoke"}
 
 func (c *testConsole) call(t *testing.T, route string, cookies []*http.Cookie) *http.Response {
 	t.Helper()

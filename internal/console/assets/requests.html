@@ -7,7 +7,7 @@
 {{if .Body.Admin}}
 <p class="lede">Every access request. An admin approves or rejects a request of somebody else; one rejection ends it. The last approval makes or extends the grant, its duration counted from then. Every decision is in the <a href="/audit">audit log</a> before it is made.</p>
 {{else}}
-<p class="lede">Ask for access for yourself, or to extend a grant that names you alone. An admin decides; you may withdraw a request until then.</p>
+<p class="lede">Ask for access for yourself, or to extend a grant that names you alone. An admin decides; you may withdraw a request until then. You may revoke such a grant at once.</p>
 {{end}}
 {{if .Body.FourEyes}}<p class="notice">Four-eyes approval is on: a user's request needs two admins, an admin's request one other admin. With only one admin, nothing can be approved.</p>{{end}}
 {{if not .Body.Admin}}
@@ -15,7 +15,7 @@
   <h2>Your grants</h2>
 {{with .Body.Grants}}
   <div class="scroll"><table>
-    <thead><tr><th>Grant</th><th>Tailnet</th><th>Target</th><th>Ports</th><th>Expires</th><th>Extend</th></tr></thead>
+    <thead><tr><th>Grant</th><th>Tailnet</th><th>Target</th><th>Ports</th><th>Expires</th><th>Change</th></tr></thead>
     <tbody>{{range .}}<tr>
       <td><code>{{.Name}}</code>{{with .Description}}<span class="target__name">{{.}}</span>{{end}}</td>
       <td><code>{{.Tailnet}}</code></td>
@@ -26,7 +26,8 @@
         <label class="visually-hidden" for="d-{{.Name}}">Duration for {{.Name}}</label>
         <select id="d-{{.Name}}" name="duration">{{range $.Body.Durations}}<option value="{{.Value}}"{{if eq .Value "8h"}} selected{{end}}>{{.Label}}</option>{{end}}</select>
         <button type="submit" class="button">Ask to {{if .Expired}}renew{{else}}extend{{end}}</button>
-      </form></td>
+      </form>
+      {{if not .Expired}}<form class="inline" method="post" action="/grants/{{.Name}}/revoke"><button type="submit" class="button button--danger">Revoke</button></form>{{end}}</td>
     </tr>{{end}}</tbody>
   </table></div>
 {{else}}

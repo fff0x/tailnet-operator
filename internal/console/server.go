@@ -122,7 +122,7 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /grants/new", s.adminOnly(s.grantNewPage))
 		mux.HandleFunc("POST /grants", s.adminOnly(s.grantCreate))
 		mux.HandleFunc("POST /grants/{name}/extend", s.adminOnly(s.setExpiry(false)))
-		mux.HandleFunc("POST /grants/{name}/revoke", s.adminOnly(s.setExpiry(true)))
+		mux.HandleFunc("POST /grants/{name}/revoke", s.signedIn(s.setExpiry(true)))
 		mux.HandleFunc("GET /audit", s.adminOnly(s.auditPage))
 		mux.HandleFunc("GET /requests", s.signedIn(s.requestsPage))
 		mux.HandleFunc("GET /requests/new", s.signedIn(s.requestNewPage))

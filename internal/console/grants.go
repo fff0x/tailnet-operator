@@ -529,7 +529,8 @@ func (s *Server) managedGrant(w http.ResponseWriter, r *http.Request) *tnv1.Tail
 }
 
 // setExpiry extends (rule 8, a duration from now) or revokes (expiresAt now) a console grant.
-// With four-eyes approval an extension becomes a request; a revocation acts at once.
+// With four-eyes approval an extension becomes a request; a revocation acts at once. A user
+// revokes only a console grant that names them alone (rule 36).
 func (s *Server) setExpiry(revoke bool) func(http.ResponseWriter, *http.Request, *session) {
 	return func(w http.ResponseWriter, r *http.Request, sess *session) {
 		r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
@@ -541,7 +542,20 @@ func (s *Server) setExpiry(revoke bool) func(http.ResponseWriter, *http.Request,
 		if g == nil {
 			return
 		}
+		back := "/grants"
+		if sess.Role != roleAdmin {
+			if !revoke || !extendable(g, g.Spec.TailnetRef.Name, identityOf(sess), true) {
+				s.message(w, r, http.StatusForbidden, "Not your grant", "You may revoke only a console grant that names you alone.")
+				return
+			}
+			back = "/requests"
+		}
 		now := s.now().UTC().Truncate(time.Second)
+		if revoke && g.Spec.ExpiresAt != nil && !g.Spec.ExpiresAt.After(now) {
+			// A later expiresAt would start the retention anew (rule 30).
+			s.message(w, r, http.StatusConflict, "Already expired", "The grant expired already; there is nothing to revoke.")
+			return
+		}
 		next, action := &metav1.Time{Time: now}, "grant.revoke"
 		if !revoke {
 			d, ok := durationOf(r.PostForm.Get("duration"))
@@ -563,7 +577,7 @@ func (s *Server) setExpiry(revoke bool) func(http.ResponseWriter, *http.Request,
 		orig := g.DeepCopy()
 		g.Spec.ExpiresAt = next
 		if s.change(w, r, e, func() error { return s.writer.Patch(r.Context(), g, client.MergeFrom(orig)) }) {
-			http.Redirect(w, r, "/grants", http.StatusSeeOther)
+			http.Redirect(w, r, back, http.StatusSeeOther)
 		}
 	}
 }

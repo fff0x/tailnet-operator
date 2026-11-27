@@ -457,3 +457,58 @@ func TestCleanupOff(t *testing.T) {
 		t.Fatalf("deleted without retention: %d left", n)
 	}
 }
+
+// Rule 36: a user revokes a console grant that names them alone, at once even with four-eyes.
+func TestUserRevoke(t *testing.T) {
+	c := newRequestConsole(t, true)
+	ctx := context.Background()
+	uma := c.id("uma") + "@"
+	mk := func(name string, managed bool, sources ...string) {
+		g := &tnv1.TailnetGrant{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: tnv1.TailnetGrantSpec{TailnetRef: tnv1.TailnetRef{Name: "lab"},
+			Sources: sources, Target: tnv1.GrantTarget{Tag: "tag:wiki"}, Ports: []int32{443}, ExpiresAt: &metav1.Time{Time: grantNow.Add(8 * time.Hour)}}}
+		if managed {
+			g.Labels = map[string]string{managedByLabel: managedBy}
+		}
+		if err := c.writer.Create(ctx, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("console-mine", true, uma)
+	mk("console-shared", true, uma, "group:staff")
+	mk("console-ada", true, c.id("ada")+"@")
+	mk("git-mine", false, uma)
+	me := c.as(t, "uma", false)
+	page, _ := io.ReadAll(c.do(t, http.MethodGet, "/requests", me).Body)
+	if !strings.Contains(string(page), `action="/grants/console-mine/revoke"`) || strings.Contains(string(page), `action="/grants/console-shared/revoke"`) {
+		t.Errorf("revoke buttons wrong:\n%s", page)
+	}
+	for name, status := range map[string]int{"console-shared": http.StatusForbidden, "console-ada": http.StatusForbidden, "git-mine": http.StatusForbidden} {
+		c.expect(t, "revoke "+name, c.post(t, "/grants/"+name+"/revoke", me, nil), status)
+		if g := c.grant(t, name); !g.Spec.ExpiresAt.Time.Equal(grantNow.Add(8 * time.Hour)) {
+			t.Errorf("%s changed", name)
+		}
+	}
+	c.expect(t, "extend", c.post(t, "/grants/console-mine/extend", me, url.Values{"duration": {"30d"}}), http.StatusForbidden)
+	resp := c.post(t, "/grants/console-mine/revoke", me, nil)
+	c.expect(t, "revoke own", resp, http.StatusSeeOther)
+	if loc := resp.Header.Get("Location"); loc != "/requests" {
+		t.Errorf("redirect to %q", loc)
+	}
+	if g := c.grant(t, "console-mine"); !g.Spec.ExpiresAt.Time.Equal(grantNow) {
+		t.Fatalf("revoked to %v", g.Spec.ExpiresAt)
+	}
+	es := c.audit.state(ctx).Entries
+	if last := es[len(es)-1]; last.Action != "grant.revoke" || last.Grant != "console-mine" || last.Actor == nil || last.Actor.Subject != "uma" {
+		t.Fatalf("audit %+v", last)
+	}
+	if len(c.requests(t)) != 0 {
+		t.Error("a revocation made a request")
+	}
+	// An expired grant is not revoked again, by nobody: that would move expiresAt and the retention.
+	for _, who := range [][]*http.Cookie{me, c.as(t, "ada", true)} {
+		c.expect(t, "revoke expired", c.post(t, "/grants/console-mine/revoke", who, nil), http.StatusConflict)
+	}
+	if n := len(c.audit.state(ctx).Entries); n != len(es) {
+		t.Errorf("refused revocations recorded: %d entries, want %d", n, len(es))
+	}
+}
