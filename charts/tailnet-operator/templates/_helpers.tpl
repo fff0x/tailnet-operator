@@ -46,6 +46,21 @@ app.kubernetes.io/name: {{ .Chart.Name | quote }}
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- define "tailnet-operator.consoleLabels" -}}
+app.kubernetes.io/name: tailnet-console
+app.kubernetes.io/instance: {{ .Release.Name | quote }}
+app.kubernetes.io/component: console
+app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | quote }}
+{{- end -}}
+{{- define "tailnet-operator.validateConsole" -}}
+{{- $c := .Values.console -}}
+{{- range $v := list (list "console.url" $c.url) (list "console.oidc.issuer" $c.oidc.issuer) (list "console.oidc.clientID" $c.oidc.clientID) (list "console.oidc.clientSecretRef.name" $c.oidc.clientSecretRef.name) (list "console.oidc.adminGroup" $c.oidc.adminGroup) -}}
+{{- if not (index $v 1) -}}{{- fail (printf "%s is required when console.enabled=true" (index $v 0)) -}}{{- end -}}
+{{- end -}}
+{{- if not (hasPrefix "https://" $c.url) -}}{{- fail "console.url must start with https://" -}}{{- end -}}
+{{- if not (hasPrefix "https://" $c.oidc.issuer) -}}{{- fail "console.oidc.issuer must start with https://" -}}{{- end -}}
+{{- end -}}
 {{- /*
 ciliumEndpoints translates NetworkPolicyPeer entries into Cilium endpoint selectors so the
 kubernetes and cilium providers share the same peer values. Namespace labels become

@@ -64,3 +64,14 @@ networkPolicy:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: monitoring
+console:
+  enabled: true
+  url: https://console.tail.example
+  oidc:
+    issuer: https://id.example
+    clientID: tsunaro-console
+    clientSecretRef:
+      name: console-oidc
+      key: clientSecret
+    adminGroup: tailnet-operator
+    userGroup: tailnet-intern

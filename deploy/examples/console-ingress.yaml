@@ -1,0 +1,24 @@
+---
+# Publishes the read-only console (chart value console.enabled) on the tailnet. The agent
+# terminates TLS and forwards plain HTTP to the console Service in the operator namespace.
+# Set console.url to https://<status.dnsName> and register <console.url>/auth/callback at the
+# identity provider. allowFrom decides who may reach the sign-in page at all; the console's
+# admin and user groups decide what a signed-in person sees.
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetIngress
+metadata:
+  name: console
+  namespace: tailnet-system
+spec:
+  tailnetRef:
+    name: corp
+  allowFrom: [group:tailnet-operator, group:tailnet-intern]
+  tls:
+    issuerRef: { name: tailnet-ca, kind: ClusterIssuer }   # cert-manager; or secretName: console-cert
+  exposes:
+    - name: console
+      mode: http
+      port: 443
+      backend:
+        service: tailnet-operator-console   # <chart name>-console
+        port: 8080

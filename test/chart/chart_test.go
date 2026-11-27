@@ -180,7 +180,13 @@ func decode[T any](t *testing.T, obj manifest) T {
 
 func operator(t *testing.T, m manifests) (appsv1.Deployment, corev1.Container) {
 	t.Helper()
-	dep := decode[appsv1.Deployment](t, m.one(t, "Deployment"))
+	var operators manifests
+	for _, obj := range m {
+		if obj.Kind == "Deployment" && obj.Metadata.Labels["app.kubernetes.io/name"] == "tailnet-operator" {
+			operators = append(operators, obj)
+		}
+	}
+	dep := decode[appsv1.Deployment](t, operators.one(t, "Deployment"))
 	if len(dep.Spec.Template.Spec.Containers) != 1 {
 		t.Fatalf("want one operator container, got %d", len(dep.Spec.Template.Spec.Containers))
 	}
@@ -1188,4 +1194,127 @@ func TestNetworkPolicy(t *testing.T) {
 			t.Errorf("spoke dial egress incomplete: peer=%v cidr=%v", peer, cidr)
 		}
 	})
+}
+
+const consoleValues = `console:
+  enabled: true
+  url: https://console.tail.example
+  oidc:
+    issuer: https://id.example
+    clientID: tsunaro-console
+    clientSecretRef: {name: console-oidc}
+    adminGroup: admins
+`
+
+func TestConsoleOffByDefault(t *testing.T) {
+	for _, obj := range render(t, "") {
+		if strings.HasSuffix(obj.Metadata.Name, "-console") || obj.Metadata.Labels["app.kubernetes.io/name"] == "tailnet-console" {
+			t.Errorf("default chart renders console object %s/%s", obj.Kind, obj.Metadata.Name)
+		}
+	}
+}
+
+func TestConsoleObjects(t *testing.T) {
+	m := render(t, consoleValues)
+	var got []string
+	for _, obj := range m {
+		if obj.Metadata.Labels["app.kubernetes.io/name"] == "tailnet-console" {
+			got = append(got, obj.Kind+"/"+obj.Metadata.Name)
+		}
+	}
+	equal(t, "console objects", got, []string{"ServiceAccount/tailnet-operator-console", "ClusterRole/tailnet-operator-console",
+		"ClusterRoleBinding/tailnet-operator-console", "Service/tailnet-operator-console", "Deployment/tailnet-operator-console"})
+
+	role := decode[rbacv1.ClusterRole](t, m.named(t, "ClusterRole", "tailnet-operator-console"))
+	equal(t, "console rules", role.Rules, []rbacv1.PolicyRule{{APIGroups: []string{"tsunaro.io"},
+		Resources: []string{"tailnets", "tailnetingresses", "tailnetsites"}, Verbs: []string{"get", "list", "watch"}}})
+	binding := decode[rbacv1.ClusterRoleBinding](t, m.named(t, "ClusterRoleBinding", "tailnet-operator-console"))
+	equal(t, "console binding subjects", binding.Subjects, []rbacv1.Subject{{Kind: "ServiceAccount", Name: "tailnet-operator-console", Namespace: releaseNamespace}})
+	equal(t, "console binding role", binding.RoleRef.Name, "tailnet-operator-console")
+
+	dep := decode[appsv1.Deployment](t, m.named(t, "Deployment", "tailnet-operator-console"))
+	opDep, _ := operator(t, m)
+	pod := dep.Spec.Template
+	if matches(t, *opDep.Spec.Selector, pod.Labels) {
+		t.Error("operator selector matches the console pod")
+	}
+	if matches(t, *dep.Spec.Selector, opDep.Spec.Template.Labels) {
+		t.Error("console selector matches the operator pod")
+	}
+	equal(t, "console replicas", *dep.Spec.Replicas, int32(1))
+	equal(t, "console strategy", dep.Spec.Strategy.Type, appsv1.RecreateDeploymentStrategyType)
+	equal(t, "console service account", pod.Spec.ServiceAccountName, "tailnet-operator-console")
+	c := pod.Spec.Containers[0]
+	equal(t, "console command", c.Command, []string{"/tailnet-console"})
+	equal(t, "console image", c.Image, opDep.Spec.Template.Spec.Containers[0].Image)
+	equal(t, "console secret", envVar(t, c, "OIDC_CLIENT_SECRET").ValueFrom, &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "console-oidc"}, Key: "clientSecret"}})
+	equal(t, "console scopes", envVar(t, c, "OIDC_SCOPES").Value, "openid profile email groups")
+	equal(t, "console URL", envVar(t, c, "CONSOLE_URL").Value, "https://console.tail.example")
+	equal(t, "console user group", envVar(t, c, "CONSOLE_USER_GROUP").Value, "")
+	equal(t, "console CA bundle", envVar(t, c, "SSL_CERT_FILE").Value, "/ca-certificates.crt")
+	equal(t, "console GOMEMLIMIT", envVar(t, c, "GOMEMLIMIT").ValueFrom, &corev1.EnvVarSource{ResourceFieldRef: &corev1.ResourceFieldSelector{ContainerName: "console", Resource: "limits.memory"}})
+	if c.SecurityContext == nil || c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem ||
+		pod.Spec.SecurityContext == nil || pod.Spec.SecurityContext.RunAsNonRoot == nil || !*pod.Spec.SecurityContext.RunAsNonRoot {
+		t.Error("console is not hardened like the operator")
+	}
+	for _, e := range c.Env {
+		if e.Value != "" && strings.Contains(strings.ToLower(e.Name), "secret") {
+			t.Errorf("%s carries a literal value", e.Name)
+		}
+	}
+	svc := decode[corev1.Service](t, m.named(t, "Service", "tailnet-operator-console"))
+	if !labels.SelectorFromSet(svc.Spec.Selector).Matches(labels.Set(pod.Labels)) ||
+		labels.SelectorFromSet(svc.Spec.Selector).Matches(labels.Set(opDep.Spec.Template.Labels)) {
+		t.Error("console Service selects the wrong pods")
+	}
+}
+
+func TestConsoleInvalidValues(t *testing.T) {
+	for name, tc := range map[string]struct{ set, diagnostic string }{
+		"no URL":           {"url: ''", "console.url"},
+		"http URL":         {"url: http://console.example", "url"},
+		"URL with path":    {"url: https://console.example/console", "url"},
+		"no issuer":        {"oidc: {issuer: ''}", "console.oidc.issuer"},
+		"http issuer":      {"oidc: {issuer: http://id.example}", "issuer"},
+		"no client ID":     {"oidc: {clientID: ''}", "console.oidc.clientID"},
+		"no secret name":   {"oidc: {clientSecretRef: {name: ''}}", "console.oidc.clientSecretRef.name"},
+		"no admin group":   {"oidc: {adminGroup: ''}", "console.oidc.adminGroup"},
+		"no openid scope":  {"oidc: {scopes: [profile]}", "scopes"},
+		"unknown field":    {"replicas: 2", "replicas"},
+		"bad secret name":  {"oidc: {clientSecretRef: {name: Bad_Name}}", "name"},
+		"scope with space": {"oidc: {scopes: [openid, 'a b']}", "scopes"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var base map[string]any
+			var patch map[string]any
+			if err := yaml.Unmarshal([]byte(consoleValues), &base); err != nil {
+				t.Fatal(err)
+			}
+			if err := yaml.Unmarshal([]byte(tc.set), &patch); err != nil {
+				t.Fatal(err)
+			}
+			mergeValues(base["console"].(map[string]any), patch)
+			values, _ := yaml.Marshal(base)
+			_, err := helmTemplate(t, string(values))
+			if err == nil {
+				t.Fatalf("helm template accepted:\n%s", values)
+			}
+			if !strings.Contains(err.Error(), tc.diagnostic) {
+				t.Errorf("failure should identify %q: %v", tc.diagnostic, err)
+			}
+		})
+	}
+}
+
+func mergeValues(dst, src map[string]any) {
+	for k, v := range src {
+		if sub, ok := v.(map[string]any); ok {
+			if d, ok := dst[k].(map[string]any); ok {
+				mergeValues(d, sub)
+				continue
+			}
+		}
+		dst[k] = v
+	}
 }

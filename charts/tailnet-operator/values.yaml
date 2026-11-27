@@ -72,6 +72,34 @@ policy:
     enabled: false
     # -- Fragment ConfigMaps (operator namespace) the reader may read; usually the spoke Tailnet's `<tailnet>-policy-fragment`.
     configMaps: []
+console:
+  # -- Render the read-only web console `<name>-console` (Deployment, Service on port 8080, ServiceAccount, ClusterRole with get/list/watch on Tailnets, TailnetIngresses and TailnetSites). Expose it with a TailnetIngress in mode `http`; see `deploy/examples/console-ingress.yaml`.
+  enabled: false
+  # -- Public https URL of the console, without a path. Register `<url>/auth/callback` as the redirect URI at the identity provider. Required when enabled.
+  url: ""
+  oidc:
+    # -- OIDC issuer URL (https). Required when enabled.
+    issuer: ""
+    # -- OIDC client ID. Required when enabled.
+    clientID: ""
+    clientSecretRef:
+      # -- Secret in the release namespace holding the client secret. Required when enabled.
+      name: ""
+      # -- Key of the client secret in that Secret.
+      key: clientSecret
+    # -- Requested scopes; must contain `openid`. The role comes from the `groups` claim (ID token, else UserInfo).
+    scopes: [openid, profile, email, groups]
+    # -- Group whose members are admins. Required when enabled.
+    adminGroup: ""
+    # -- Group whose members are users. Empty: every signed-in person is a user.
+    userGroup: ""
+  # -- Console resource requests and limits. GOMEMLIMIT follows limits.memory.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
 monitoring:
   serviceMonitor:
     # -- Requires Prometheus Operator CRDs. Disabled for a fresh Kubernetes installation.

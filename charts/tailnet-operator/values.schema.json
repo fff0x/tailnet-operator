@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["image", "agentImage", "agent", "replicas", "leaderElection", "env", "headscale", "policy", "monitoring", "networkPolicy", "podSecurityContext", "securityContext", "resources", "namespace", "fullnameOverride", "imagePullSecrets"],
+  "required": ["image", "agentImage", "agent", "replicas", "leaderElection", "env", "headscale", "policy", "console", "monitoring", "networkPolicy", "podSecurityContext", "securityContext", "resources", "namespace", "fullnameOverride", "imagePullSecrets"],
   "properties": {
     "fullnameOverride": {"type": "string", "maxLength": 53, "pattern": "^$|^[a-z]([-a-z0-9]*[a-z0-9])?$"},
     "namespace": {"type": "string", "maxLength": 63, "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
@@ -50,6 +50,22 @@
         "enabled": {"type": "boolean"},
         "configMaps": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"}}
       }}
+    }},
+    "console": {"type": "object", "additionalProperties": false, "required": ["enabled", "url", "oidc", "resources"], "properties": {
+      "enabled": {"type": "boolean"},
+      "url": {"type": "string", "pattern": "^$|^https://[^\\s/?#]+/?$"},
+      "oidc": {"type": "object", "additionalProperties": false, "required": ["issuer", "clientID", "clientSecretRef", "scopes", "adminGroup", "userGroup"], "properties": {
+        "issuer": {"type": "string", "pattern": "^$|^https://[^\\s?#]+$"},
+        "clientID": {"type": "string"},
+        "clientSecretRef": {"type": "object", "additionalProperties": false, "required": ["name", "key"], "properties": {
+          "name": {"type": "string", "maxLength": 253, "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"},
+          "key": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[-._a-zA-Z0-9]+$"}
+        }},
+        "scopes": {"type": "array", "contains": {"const": "openid"}, "items": {"type": "string", "pattern": "^[!#-\\[\\]-~]+$"}},
+        "adminGroup": {"type": "string"},
+        "userGroup": {"type": "string"}
+      }},
+      "resources": {"type": "object", "additionalProperties": false, "properties": {"requests": {"$ref": "#/definitions/resourceList"}, "limits": {"$ref": "#/definitions/resourceList"}}}
     }},
     "env": {"type": "object", "additionalProperties": false, "required": ["extra"], "properties": {"extra": {"type": "array", "items": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "minLength": 1}}}}}},
     "monitoring": {"type": "object", "additionalProperties": false, "required": ["serviceMonitor", "podMonitor", "rules", "dashboard"], "properties": {

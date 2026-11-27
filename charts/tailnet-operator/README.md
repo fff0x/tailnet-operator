@@ -122,6 +122,16 @@ See [compatibility](../../docs/reference/compatibility.md#http-extension-compati
 | agentImage.digest | string | `""` | Agent digest. An entirely empty agentImage inherits the complete operator image, including its digest. |
 | agentImage.repository | string | `""` | Agent repository; empty inherits image.repository. |
 | agentImage.tag | string | `""` | Agent tag. With an explicit repository, empty uses Chart.appVersion; otherwise inherits image.tag. |
+| console.enabled | bool | `false` | Render the read-only web console `<name>-console` (Deployment, Service on port 8080, ServiceAccount, ClusterRole with get/list/watch on Tailnets, TailnetIngresses and TailnetSites). Expose it with a TailnetIngress in mode `http`; see `deploy/examples/console-ingress.yaml`. |
+| console.oidc.adminGroup | string | `""` | Group whose members are admins. Required when enabled. |
+| console.oidc.clientID | string | `""` | OIDC client ID. Required when enabled. |
+| console.oidc.clientSecretRef.key | string | `"clientSecret"` | Key of the client secret in that Secret. |
+| console.oidc.clientSecretRef.name | string | `""` | Secret in the release namespace holding the client secret. Required when enabled. |
+| console.oidc.issuer | string | `""` | OIDC issuer URL (https). Required when enabled. |
+| console.oidc.scopes | list | `["openid","profile","email","groups"]` | Requested scopes; must contain `openid`. The role comes from the `groups` claim (ID token, else UserInfo). |
+| console.oidc.userGroup | string | `""` | Group whose members are users. Empty: every signed-in person is a user. |
+| console.resources | object | `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"64Mi"}}` | Console resource requests and limits. GOMEMLIMIT follows limits.memory. |
+| console.url | string | `""` | Public https URL of the console, without a path. Register `<url>/auth/callback` as the redirect URI at the identity provider. Required when enabled. |
 | env.extra | list | `[]` | Additional EnvVar entries. POD_NAMESPACE, OPERATOR_IMAGE, AGENT_IMAGE_PULL_SECRETS, AGENT_RESOURCES, SSL_CERT_FILE and SSL_CERT_DIR are reserved. |
 | fullnameOverride | string | `""` | Override the resource name with a letter-first DNS label (at most 53 characters). Install only one operator per cluster. |
 | headscale.caConfigMapRef.key | string | `"ca.crt"` | Key of the PEM bundle in that ConfigMap. |

@@ -106,7 +106,7 @@ func TestAdmission(t *testing.T) {
 	t.Run("example/tailnet-hub-spokes", func(t *testing.T) {
 		accept(t, load(t, filepath.Join(root, "deploy", "examples", "tailnet-hub-spokes.yaml")))
 	})
-	for _, example := range []string{"tailnetegress-bridge", "tailnetingress-bridge"} {
+	for _, example := range []string{"tailnetegress-bridge", "tailnetingress-bridge", "console-ingress"} {
 		t.Run("example/"+example, func(t *testing.T) {
 			accept(t, load(t, filepath.Join(root, "deploy", "examples", example+".yaml")))
 		})

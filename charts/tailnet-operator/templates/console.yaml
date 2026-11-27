@@ -1,0 +1,126 @@
+{{- if .Values.console.enabled }}
+{{- include "tailnet-operator.validateConsole" . }}
+{{- $name := printf "%s-console" (include "tailnet-operator.name" .) }}
+{{- $ns := include "tailnet-operator.namespace" . }}
+{{- $c := .Values.console }}
+# Read-only web console. Its own labels keep it out of the operator's selectors, PDB and monitors.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+---
+# Read access to three kinds and nothing else: no Secrets, no ConfigMaps, no writes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [tsunaro.io]
+    resources: [tailnets, tailnetingresses, tailnetsites]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name | quote }}
+    namespace: {{ $ns | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: tailnet-console
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # The session key lives in memory: a second replica could not open the first one's cookies.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tailnet-console
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "tailnet-operator.consoleLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name | quote }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: console
+          image: {{ include "tailnet-operator.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/tailnet-console"]
+          env:
+            # The scratch bundle carries the CA roots here, for the identity provider.
+            - name: SSL_CERT_FILE
+              value: /ca-certificates.crt
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: console
+                  resource: limits.memory
+            - name: CONSOLE_URL
+              value: {{ $c.url | quote }}
+            - name: OIDC_ISSUER
+              value: {{ $c.oidc.issuer | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ $c.oidc.clientID | quote }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $c.oidc.clientSecretRef.name | quote }}
+                  key: {{ $c.oidc.clientSecretRef.key | quote }}
+            - name: OIDC_SCOPES
+              value: {{ join " " $c.oidc.scopes | quote }}
+            - name: CONSOLE_ADMIN_GROUP
+              value: {{ $c.oidc.adminGroup | quote }}
+            - name: CONSOLE_USER_GROUP
+              value: {{ $c.oidc.userGroup | quote }}
+          ports:
+            - {name: http, containerPort: 8080}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 15
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+{{- end }}
