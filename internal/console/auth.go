@@ -306,7 +306,7 @@ func (s *Server) signedIn(page func(http.ResponseWriter, *http.Request, *session
 	}
 }
 
-// adminOnly serves the page to admins and answers everybody else with 403 (rule 1).
+// adminOnly serves the page to admins and answers everybody else with 403.
 func (s *Server) adminOnly(page func(http.ResponseWriter, *http.Request, *session)) http.HandlerFunc {
 	return s.signedIn(func(w http.ResponseWriter, r *http.Request, sess *session) {
 		if sess.Role != roleAdmin {

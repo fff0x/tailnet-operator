@@ -16,8 +16,7 @@ import (
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
-// Access requests (plan 3b): a person asks for a grant or an extension, admins decide. The rule
-// numbers refer to plans/KONSOLE.md, "Regeln 3b".
+// Access requests: a person asks for a grant or an extension, admins decide.
 const (
 	requestAnnotation    = "tsunaro.io/access-request"
 	extendedByAnnotation = "tsunaro.io/extended-by"
@@ -25,7 +24,7 @@ const (
 	phaseApproved        = "Approved"
 	phaseRejected        = "Rejected"
 	phaseWithdrawn       = "Withdrawn"
-	phaseExpired         = "Expired" // nobody decided within the retention (rule 31)
+	phaseExpired         = "Expired" // nobody decided within the retention
 	requestedAsUser      = "User"
 	requestedAsAdmin     = "Admin"
 )
@@ -43,7 +42,7 @@ func requestedAs(sess *session) string {
 }
 
 // userOptions keeps the Tailnets whose Headscale knows ref, each with ref as its only
-// recipient (rule 2).
+// recipient: a user asks for themselves alone.
 func userOptions(opts []grantTailnet, ref string) []grantTailnet {
 	var out []grantTailnet
 	for _, gt := range opts {
@@ -55,7 +54,8 @@ func userOptions(opts []grantTailnet, ref string) []grantTailnet {
 	return out
 }
 
-// approvalsNeeded follows rule 4; fourEyes is the setting when the decision is made.
+// approvalsNeeded is 2 for a user's request under four-eyes approval, else 1; fourEyes is the
+// setting when the decision is made.
 func approvalsNeeded(spec tnv1.TailnetAccessRequestSpec, fourEyes bool) int {
 	if spec.RequestedAs == requestedAsUser && fourEyes {
 		return 2
@@ -64,7 +64,7 @@ func approvalsNeeded(spec tnv1.TailnetAccessRequestSpec, fourEyes bool) int {
 }
 
 // refusal tells why who, with role, may not take decision on req that approvers approved
-// already (rules 5 and 6); "" allows it.
+// already; "" allows it.
 func refusal(req *tnv1.TailnetAccessRequest, decision, who, role string, approvers []string) string {
 	if phaseOf(req) != phasePending {
 		return "The request is already decided."
@@ -108,7 +108,7 @@ func (h requestHistory) approvers() []string {
 	return out
 }
 
-// histories reads every request's approvals from the audit entries (rules 15 and 16): its
+// histories reads every request's approvals from the audit entries, their only record: its
 // request.approve entries, one per person, the last approval and the last entry that ended it.
 // Granted and Decided are for display only; nothing counts them.
 func histories(entries []auditEntry) map[string]requestHistory {
@@ -137,7 +137,8 @@ func histories(entries []auditEntry) map[string]requestHistory {
 	return out
 }
 
-// applied tells whether g, the request's grant, carries its change already (rules 18 to 20).
+// applied tells whether g, the request's grant, carries its change already: a console grant
+// that names the request in its annotation.
 func applied(req *tnv1.TailnetAccessRequest, g *tnv1.TailnetGrant) bool {
 	if g == nil || g.Name != grantOf(req) || g.Labels[managedByLabel] != managedBy {
 		return false
@@ -150,7 +151,7 @@ func applied(req *tnv1.TailnetAccessRequest, g *tnv1.TailnetGrant) bool {
 }
 
 // grantSpecFor checks a Create request against the current options and returns the grant it
-// makes, expiring the request's duration after now (rules 7 and 8).
+// makes, expiring the request's duration after now.
 func grantSpecFor(spec tnv1.TailnetAccessRequestSpec, opts []grantTailnet, now time.Time) (tnv1.TailnetGrantSpec, bool) {
 	if spec.Target == nil {
 		return tnv1.TailnetGrantSpec{}, false
@@ -182,8 +183,8 @@ func grantSpecFor(spec tnv1.TailnetAccessRequestSpec, opts []grantTailnet, now t
 	return tnv1.TailnetGrantSpec{}, false
 }
 
-// extendable tells whether a request may extend g (rules 3 and 8): a console grant of the
-// request's Tailnet that, for a user, names the user alone.
+// extendable tells whether a request may extend g: a console grant of the request's Tailnet
+// that, for a user, names the user alone.
 func extendable(g *tnv1.TailnetGrant, tailnet, requester string, user bool) bool {
 	return g.Labels[managedByLabel] == managedBy && g.Spec.TailnetRef.Name == tailnet &&
 		(!user || slices.Equal(g.Spec.Sources, []string{requester + "@"}))
@@ -226,8 +227,8 @@ func grantOf(req *tnv1.TailnetAccessRequest) string {
 	return "console-" + strings.TrimPrefix(req.Name, "request-")
 }
 
-// submitRequest records and creates a request (rule 9). A Create names its future grant with the
-// same suffix.
+// submitRequest records a request in the audit log, then creates it. A Create names its future
+// grant with the same suffix.
 func (s *Server) submitRequest(w http.ResponseWriter, r *http.Request, sess *session, spec tnv1.TailnetAccessRequestSpec) {
 	if spec.Requester == "" {
 		s.message(w, r, http.StatusForbidden, "No identity", "The sign-in gave no issuer and subject, so the console cannot name you in a request.")
@@ -298,8 +299,8 @@ func durationLabel(v string) string {
 	return v
 }
 
-// requestsPage shows a user their requests and grants, an admin every request (rule 11). Only
-// admins see who approved and decided (rule 17).
+// requestsPage shows a user their requests and grants, an admin every request. Only admins see
+// who approved and decided.
 func (s *Server) requestsPage(w http.ResponseWriter, r *http.Request, sess *session) {
 	ctx := r.Context()
 	var list tnv1.TailnetAccessRequestList
@@ -428,7 +429,7 @@ func (s *Server) requestNewPage(w http.ResponseWriter, r *http.Request, sess *se
 	s.render(w, http.StatusOK, "grant_new", page{Title: "New request", Session: sess, Body: body})
 }
 
-// requestCreate takes a request for the signed-in person alone (rule 2).
+// requestCreate takes a request for the signed-in person alone.
 func (s *Server) requestCreate(w http.ResponseWriter, r *http.Request, sess *session) {
 	f, ok := s.readGrantForm(w, r)
 	if !ok {
@@ -453,7 +454,7 @@ func (s *Server) requestCreate(w http.ResponseWriter, r *http.Request, sess *ses
 	s.submitRequest(w, r, sess, createRequest(spec, f.Duration, me, requestedAs(sess)))
 }
 
-// requestExtend asks to extend a console grant that names the user alone (rule 3).
+// requestExtend asks to extend a console grant that names the user alone.
 func (s *Server) requestExtend(w http.ResponseWriter, r *http.Request, sess *session) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 	if r.ParseForm() != nil {
@@ -483,7 +484,7 @@ func extendRequest(g *tnv1.TailnetGrant, duration, requester, as string) tnv1.Ta
 }
 
 // readHistories reads the requests' approvals from the audit log; without it nothing is shown or
-// decided (rule 16).
+// decided.
 func (s *Server) readHistories(w http.ResponseWriter, r *http.Request) (map[string]requestHistory, bool) {
 	// ponytail: every request page and decision reads and hashes the whole log, linear in its
 	// size; an index of the request entries would bound it once logs grow past a few hundred MB.
@@ -498,9 +499,8 @@ func (s *Server) readHistories(w http.ResponseWriter, r *http.Request) (map[stri
 	return histories(st.Entries), true
 }
 
-// decide approves, rejects or withdraws a request (rules 4 to 9 and 15 to 21). One decision runs
-// at a time; the status update carries the resourceVersion it read, so another replica's
-// decision conflicts.
+// decide approves, rejects or withdraws a request. One decision runs at a time; the status
+// update carries the resourceVersion it read, so another replica's decision conflicts.
 func (s *Server) decide(decision string) func(http.ResponseWriter, *http.Request, *session) {
 	return func(w http.ResponseWriter, r *http.Request, sess *session) {
 		me := identityOf(sess)
@@ -540,7 +540,7 @@ func (s *Server) decide(decision string) func(http.ResponseWriter, *http.Request
 		update := func() error { return s.writer.Status().Update(ctx, &req) }
 		approvers := hist[req.Name].approvers()
 		if applied(&req, g) {
-			// Rule 19: the grant was written, the request not closed. Only approving closes it.
+			// The grant was written, the request not closed. Only approving closes it.
 			if decision != "approve" {
 				s.message(w, r, http.StatusConflict, "Request not changed",
 					"Its grant is written already. Approve to close the request; revoke the grant to take the access back.")
@@ -562,7 +562,7 @@ func (s *Server) decide(decision string) func(http.ResponseWriter, *http.Request
 				s.approve(w, r, sess, &req, append(approvers, me), now)
 				return
 			}
-			// A partial approval lives in the audit log alone (rule 16).
+			// A partial approval lives in the audit log alone.
 			e.Action, update = "request.approve", func() error { return nil }
 			e.Details["approvals"], e.Details["needed"] = len(approvers)+1, needed
 		case decision == "reject":
@@ -578,7 +578,7 @@ func (s *Server) decide(decision string) func(http.ResponseWriter, *http.Request
 
 // approve makes the last approval: it checks the request against the current state, records the
 // grant change with requester and approvers, makes it with the request's annotation and closes
-// the request (rules 7 to 9 and 18).
+// the request.
 func (s *Server) approve(w http.ResponseWriter, r *http.Request, sess *session, req *tnv1.TailnetAccessRequest, approvers []string, now time.Time) {
 	ctx := r.Context()
 	user := req.Spec.RequestedAs == requestedAsUser

@@ -156,8 +156,7 @@ func (l *auditLog) check(ctx context.Context) (auditState, error) {
 	return auditState{Entries: entries, Breaks: breaks}, nil
 }
 
-// ensure verifies the log once and records every break not yet recorded (rules 14 and 15). Call
-// with mu held.
+// ensure verifies the log once and records every break not yet recorded. Call with mu held.
 func (l *auditLog) ensure(ctx context.Context) (auditState, error) {
 	st, err := l.check(ctx)
 	if err != nil {

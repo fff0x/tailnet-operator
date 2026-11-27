@@ -72,7 +72,7 @@ func (c *testConsole) call(t *testing.T, route string, cookies []*http.Cookie) *
 	return c.do(t, method, path, cookies)
 }
 
-// Rule 1: without the switch the routes and links do not exist; with it, only admins reach them.
+// Without the switch the routes and links do not exist; with it, only admins reach them.
 func TestAccessManagementRoutes(t *testing.T) {
 	off := newTestConsole(t, nil, sampleObjects()...)
 	admin := off.admin(t)
@@ -200,7 +200,7 @@ func TestRequestPagesEscapeAndLog(t *testing.T) {
 	}{
 		{ada, "/requests", "requests.html", []string{"&lt;img src=x", "Uma Example", "1 of 2 approvals", "approved by Ada Example", "by Bea Example",
 			`<span class="count" title="1 undecided">1</span>`, "needs two admins", "tag:db-zeta-1", "Approve", "Reject"}, nil},
-		// Rule 17: the requester sees how many approved and when it was decided, not who.
+		// The requester sees how many approved and when it was decided, not who.
 		{uma, "/requests", "requests-user.html", []string{"Your grants", "Ask to extend", "Withdraw", "Your requests", "7 days", "1 of 2 approvals",
 			"2026-11-27 13:00 UTC"}, []string{"Ada Example", "Bea Example", c.id("ada"), c.id("bea"), "approved by"}},
 		{uma, "/requests/new?target=lab/spoke/tag:db-zeta-1", "request-new.html", []string{"Recipient: Uma Example (you)", "Request grant", `action="/requests"`}, nil},

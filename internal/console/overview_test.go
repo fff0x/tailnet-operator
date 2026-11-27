@@ -123,7 +123,8 @@ func TestOverviewPageMasksAndEscapes(t *testing.T) {
 			t.Errorf("page contains %q", leak)
 		}
 	}
-	// The map: one per Tailnet inside the live part, with the poll interval; rule 8 for its text.
+	// The map: one per Tailnet inside the live part, with the poll interval; its text names no
+	// person, node, source or owner.
 	start, end := strings.Index(html, `<figure class="map">`), strings.Index(html, "</figure>")
 	if start < 0 || end < start || !strings.Contains(html, `data-live data-poll="10000"`) {
 		t.Fatalf("no map or live part:\n%s", html)

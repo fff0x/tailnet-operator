@@ -20,7 +20,7 @@ const (
 	actionExpired  = "grant.expired"
 )
 
-// grantState is what the audit log knows of a grant (rule 22).
+// grantState is what the audit log knows of a grant.
 type grantState struct {
 	Tailnet     string   `json:"tailnet,omitempty"`
 	Sources     []string `json:"sources,omitempty"`
@@ -72,8 +72,8 @@ func stateFrom(e auditEntry) grantState {
 	return st
 }
 
-// knownGrants replays the log (rule 24): the state of every grant it knows, and the expiresAt
-// values whose expiry it recorded (rule 26).
+// knownGrants replays the log: the state of every grant it knows, and the expiresAt values whose
+// expiry it recorded.
 func knownGrants(entries []auditEntry) (map[string]grantState, map[string]map[string]bool) {
 	known := map[string]grantState{}
 	expired := map[string]map[string]bool{}
@@ -139,7 +139,7 @@ func reportedExpired(g *tnv1.TailnetGrant) bool {
 }
 
 // Observe compares the grants with the audit log every interval and, with a retention, deletes
-// what is done once an hour (rules 22 to 35). Without access management it does nothing.
+// what is done once an hour. Without access management it does nothing.
 func (s *Server) Observe(ctx context.Context, every time.Duration) {
 	if s.audit == nil {
 		return
@@ -159,7 +159,7 @@ func (s *Server) Observe(ctx context.Context, every time.Duration) {
 }
 
 // round is one run of Observe. It holds both locks, so no decision and no change runs between an
-// audit entry and its write (rule 27); cleaned is when the last cleanup ran.
+// audit entry and its write; cleaned is when the last cleanup ran.
 func (s *Server) round(ctx context.Context, cleaned *time.Time) {
 	s.decisions.Lock()
 	defer s.decisions.Unlock()
@@ -237,7 +237,7 @@ func (s *Server) observe(ctx context.Context) bool {
 }
 
 // cleanup deletes expired console grants and decided requests after the retention and expires
-// pending requests (rules 30 to 35). The first failure ends the run. Call with s.decisions and
+// pending requests. The first failure ends the run. Call with s.decisions and
 // s.changes held.
 func (s *Server) cleanup(ctx context.Context) {
 	now := s.now().UTC().Truncate(time.Second)

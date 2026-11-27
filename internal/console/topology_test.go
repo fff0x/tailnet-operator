@@ -51,11 +51,11 @@ func TestMapRules(t *testing.T) {
 	if m.Problem || m.Name != "lab" {
 		t.Fatalf("map = %+v", m)
 	}
-	// Rule 1: hub left, spokes right by name.
+	// Hub left, spokes right by name.
 	if len(m.Spokes) != 2 || m.Spokes[0].Title != "Spoke · alpha" || m.Spokes[1].Title != "Spoke · zeta" || m.Hub.X >= m.Spokes[0].X {
 		t.Fatalf("spokes %+v", m.Spokes)
 	}
-	// Rule 2: Tailnet rows, ingress with Ready and node state, site with Ready only.
+	// Tailnet rows, ingress with Ready and node state, site with Ready only.
 	if m.Hub.Sub != "https://hs.example" || m.Hub.Rows[0].Value.Text != "0.29.6" || m.Hub.Rows[1].Value.Text != "Apply" ||
 		m.Hub.Rows[2].Value != (state{"Applied", "ok"}) {
 		t.Errorf("hub rows %+v", m.Hub.Rows)
@@ -66,7 +66,7 @@ func TestMapRules(t *testing.T) {
 	if c := cells(m.Hub.Lists[1])["office"]; c.Ready != (state{"NoGateway", "bad"}) || c.Nodes != "" || !strings.Contains(c.Tip, "10.20.0.0/16") {
 		t.Errorf("site cell %+v", c)
 	}
-	// Rule 3: conditions and pending; an unreachable spoke is dashed.
+	// Conditions and pending; an unreachable spoke is dashed.
 	alpha, zeta := m.Spokes[0], m.Spokes[1]
 	if !alpha.Dashed || alpha.Rows[0].Value.Class != "bad" || alpha.Rows[2].Value.Class != "unknown" || alpha.Rows[3].Value.Text != "no" {
 		t.Errorf("alpha rows %+v", alpha.Rows)
@@ -74,7 +74,7 @@ func TestMapRules(t *testing.T) {
 	if zeta.Dashed || zeta.Rows[2].Value != (state{"Approved", "ok"}) || zeta.Rows[3].Value.Text != "yes" || len(m.Links) != 2 || !m.Links[0].Dashed {
 		t.Errorf("zeta rows %+v, links %+v", zeta.Rows, m.Links)
 	}
-	// Rules 4–6: tags from nodes and rules, first matching spoke, hub ingress tags never; ports; node state.
+	// Tags from nodes and live rules, first matching spoke, hub ingress tags never; ports; node state.
 	z := cells(zeta.Lists[0])
 	if len(z) != 3 || z["tag:web-zeta-1"].Label != "" || z["tag:shared-zeta-1"].Label != "" || z["tag:ci"].Label != "" {
 		t.Errorf("zeta tags %v", z)
@@ -89,7 +89,7 @@ func TestMapRules(t *testing.T) {
 	if a := cells(alpha.Lists[0]); len(a) != 2 || a["tag:shared-zeta-1"].Ready.Class != "unknown" || a["tag:shared-a"].Ready.Class != "bad" {
 		t.Errorf("alpha tags %v", a)
 	}
-	// Rule 8: no user reference, source or owner in any text of the map.
+	// No user reference, source or owner in any text of the map.
 	text := fmt.Sprintf("%+v", m)
 	for _, leak := range []string{"alice", "group:ops", "network team"} {
 		if strings.Contains(text, leak) {
@@ -98,7 +98,7 @@ func TestMapRules(t *testing.T) {
 	}
 }
 
-// Rule 7: up to 12 entries one by one; above, the first 12 by name and "+N more", counting the
+// Up to 12 entries one by one; above, the first 12 by name and "+N more", counting the
 // hidden entries that are not ready.
 func TestMapCap(t *testing.T) {
 	sites := func(n int, bad ...int) []tnv1.TailnetSite {

@@ -95,7 +95,8 @@ func (c *testConsole) expect(t *testing.T, what string, resp *http.Response, sta
 
 var wikiForm = url.Values{"target": {"lab/ingress/apps/wiki"}, "ports": {"443"}, "duration": {"8h"}, "description": {"on call"}}
 
-// Rules 4 to 6 and 3 as pure functions.
+// The approvals a request needs, who may decide it, its history from the audit log and what a
+// user may ask for, as pure functions.
 func TestRequestRules(t *testing.T) {
 	user := tnv1.TailnetAccessRequestSpec{RequestedAs: requestedAsUser, Requester: "u"}
 	admin := tnv1.TailnetAccessRequestSpec{RequestedAs: requestedAsAdmin, Requester: "a"}
@@ -129,7 +130,7 @@ func TestRequestRules(t *testing.T) {
 			t.Errorf("%s by %s (%s) on %s: allowed %v", tc.decision, tc.who, tc.role, phaseOf(tc.req), got)
 		}
 	}
-	// Rule 16: approvals and decisions come from the audit log, per request and person.
+	// Approvals and decisions come from the audit log, per request and person.
 	entry := func(action, req, sub string, min int) auditEntry {
 		return auditEntry{Action: action, Actor: &auditActor{Issuer: "https://id", Subject: sub, Name: strings.ToUpper(sub)}, Time: grantNow.Add(time.Duration(min) * time.Minute), Details: map[string]any{"request": req}}
 	}
@@ -149,12 +150,12 @@ func TestRequestRules(t *testing.T) {
 	if got := h["r2"]; !slices.Equal(got.approvers(), []string{"https://id/c"}) || got.Granted != nil || got.Decided == nil || got.Decided.ID != "https://id/d" {
 		t.Errorf("history r2 %+v", got)
 	}
-	// Rule 17: closing does not hide the last approver, and does not count as an approval.
+	// Closing does not hide the last approver, and does not count as an approval.
 	if got := h["r3"]; !slices.Equal(got.approvers(), []string{"https://id/a"}) || got.Granted == nil || got.Granted.ID != "https://id/b" ||
 		got.Decided == nil || got.Decided.ID != "https://id/a" || got.Decided.At != grantNow.Add(11*time.Minute) {
 		t.Errorf("history r3 %+v", got)
 	}
-	// Rules 18 to 20: a grant carries the change of the request it names.
+	// A grant carries the change of the request it names.
 	create := &tnv1.TailnetAccessRequest{ObjectMeta: metav1.ObjectMeta{Name: "request-abc"}, Spec: tnv1.TailnetAccessRequestSpec{Action: "Create"}}
 	extend := &tnv1.TailnetAccessRequest{ObjectMeta: metav1.ObjectMeta{Name: "request-def"}, Spec: tnv1.TailnetAccessRequestSpec{Action: "Extend", GrantName: "console-abc"}}
 	grant := func(name string, ann ...string) *tnv1.TailnetGrant {
@@ -201,11 +202,11 @@ func TestRequestRules(t *testing.T) {
 	}
 }
 
-// Rules 2, 3, 6, 7, 9 and 11 with four-eyes approval off: one admin decides a user's request.
+// A user's request with four-eyes approval off: one admin decides it.
 func TestUserRequestLifecycle(t *testing.T) {
 	c := newRequestConsole(t, false)
 	uma, ada, bea := c.as(t, "uma", false), c.as(t, "ada", true), c.as(t, "bea", true)
-	// Rule 2: the recipient is the requester whatever the form says.
+	// The recipient is the requester whatever the form says.
 	forged := url.Values{}
 	for k, v := range wikiForm {
 		forged[k] = v
@@ -224,7 +225,7 @@ func TestUserRequestLifecycle(t *testing.T) {
 	}
 	// A user does not decide; nobody decides their own request.
 	c.expect(t, "user approves", c.post(t, "/requests/"+req.Name+"/approve", uma, nil), http.StatusForbidden)
-	// Rule 7: the duration counts from the approval.
+	// The duration counts from the approval.
 	approvedAt := grantNow.Add(time.Hour)
 	c.now = func() time.Time { return approvedAt }
 	c.audit.now = c.now
@@ -242,7 +243,7 @@ func TestUserRequestLifecycle(t *testing.T) {
 	c.namesNobody(t, req, "ada")
 	c.expect(t, "approve again", c.post(t, "/requests/"+req.Name+"/approve", bea, nil), http.StatusConflict)
 
-	// Rule 3: uma asks to extend her own grant; one rejection ends it.
+	// uma asks to extend her own grant; one rejection ends it.
 	c.expect(t, "extend request", c.post(t, "/grants/"+grantName+"/request", uma, url.Values{"duration": {"7d"}}), http.StatusSeeOther)
 	ext := c.latest(t, req.Name)
 	if ext.Spec.Action != "Extend" || ext.Spec.GrantName != grantName || ext.Spec.Target != nil {
@@ -255,7 +256,7 @@ func TestUserRequestLifecycle(t *testing.T) {
 		c.namesNobody(t, r, "bea")
 	}
 	c.expect(t, "approve rejected", c.post(t, "/requests/"+ext.Name+"/approve", ada, nil), http.StatusConflict)
-	// Rule 6: uma withdraws, which nobody else may.
+	// uma withdraws, which nobody else may.
 	c.expect(t, "extend request", c.post(t, "/grants/"+grantName+"/request", uma, url.Values{"duration": {"7d"}}), http.StatusSeeOther)
 	wd := c.latest(t, req.Name, ext.Name)
 	ulf := c.as(t, "ulf", false)
@@ -272,12 +273,12 @@ func TestUserRequestLifecycle(t *testing.T) {
 		g.Annotations[requestAnnotation] != req.Name {
 		t.Fatalf("extended %+v", g.ObjectMeta.Annotations)
 	}
-	// Rule 3: not a grant from Git, not a grant naming somebody else.
+	// No extension of a grant from Git or of a grant naming somebody else.
 	c.expect(t, "extend from-git", c.post(t, "/grants/from-git/request", uma, url.Values{"duration": {"7d"}}), http.StatusForbidden)
 	c.expect(t, "extend foreign", c.post(t, "/grants/"+grantName+"/request", ulf, url.Values{"duration": {"7d"}}), http.StatusForbidden)
-	// Rule 2: a person the tailnet's Headscale does not know is offered nothing.
+	// A person the tailnet's Headscale does not know is offered nothing.
 	c.expect(t, "unknown user", c.post(t, "/requests", ulf, wikiForm), http.StatusBadRequest)
-	// Rule 11: a user sees only their own requests.
+	// A user sees only their own requests.
 	body := func(cookies []*http.Cookie) string {
 		resp := c.do(t, http.MethodGet, "/requests", cookies)
 		b, _ := io.ReadAll(resp.Body)
@@ -308,7 +309,7 @@ func TestUserRequestLifecycle(t *testing.T) {
 	}
 }
 
-// namesNobody fails when the stored request carries the identifier of one of subs (rule 15).
+// namesNobody fails when the stored request carries the identifier of one of subs.
 func (c *testConsole) namesNobody(t *testing.T, req tnv1.TailnetAccessRequest, subs ...string) {
 	t.Helper()
 	raw, _ := json.Marshal(req)
@@ -329,14 +330,14 @@ func anyStrings(v any) []string {
 	return out
 }
 
-// Rules 4, 5 and 12 with four-eyes approval on.
+// Four-eyes approval on: two different admins approve a user's request, and the pages say so.
 func TestFourEyes(t *testing.T) {
 	c := newRequestConsole(t, true)
 	uma, ada, bea := c.as(t, "uma", false), c.as(t, "ada", true), c.as(t, "bea", true)
 	c.expect(t, "request", c.post(t, "/requests", uma, wikiForm), http.StatusSeeOther)
 	req := c.latest(t)
 	c.expect(t, "first approval", c.post(t, "/requests/"+req.Name+"/approve", ada, nil), http.StatusSeeOther)
-	// Rule 16: a partial approval is in the audit log alone.
+	// A partial approval is in the audit log alone.
 	if r := c.request(t, req.Name); r.Status != (tnv1.TailnetAccessRequestStatus{}) || r.ResourceVersion != req.ResourceVersion || len(c.consoleGrants(t)) != 0 {
 		t.Fatalf("after one approval: %+v", r.Status)
 	}
@@ -373,7 +374,7 @@ func TestFourEyes(t *testing.T) {
 	if g := c.grant(t, grantName); !g.Spec.ExpiresAt.Time.Equal(grantNow) {
 		t.Fatalf("revoked to %v", g.Spec.ExpiresAt)
 	}
-	// Rule 4: the setting at decision time counts.
+	// The setting at decision time counts.
 	c.fourEyes = false
 	c.expect(t, "request", c.post(t, "/requests", uma, wikiForm), http.StatusSeeOther)
 	late := c.latest(t, req.Name, own.Name, ext.Name)
@@ -382,7 +383,7 @@ func TestFourEyes(t *testing.T) {
 	if r := c.request(t, late.Name); phaseOf(&r) != phasePending {
 		t.Fatalf("switched on later: %+v", r.Status)
 	}
-	// Rule 12: the notice on the request and grant pages, and who must approve a request.
+	// The notice on the request and grant pages, and who must approve a request.
 	get := func(path string, who []*http.Cookie) string {
 		b, _ := io.ReadAll(c.do(t, http.MethodGet, path, who).Body)
 		return string(b)
@@ -415,7 +416,7 @@ func TestFourEyes(t *testing.T) {
 	}
 }
 
-// Rules 8 and 10: the last approval checks the current state, and a retry finds its own grant.
+// The last approval checks the current state, and a retry finds its own grant.
 func TestApprovalRecheck(t *testing.T) {
 	c := newRequestConsole(t, false)
 	uma, ada := c.as(t, "uma", false), c.as(t, "ada", true)
@@ -432,7 +433,7 @@ func TestApprovalRecheck(t *testing.T) {
 	if r := c.request(t, req.Name); r.Status.Phase != "" || len(c.consoleGrants(t)) != 0 {
 		t.Fatalf("changed although stale: %+v", r.Status)
 	}
-	// Rule 19: a site request whose grant was written, the request not closed (half a success).
+	// A site request whose grant was written, the request not closed (half a success).
 	site := url.Values{"target": {"lab/site/office"}, "prefixes": {"10.20.30.5"}, "ports": {"3389"}, "duration": {"1h"}}
 	c.expect(t, "site request", c.post(t, "/requests", uma, site), http.StatusSeeOther)
 	sr := c.latest(t, req.Name)
@@ -457,7 +458,7 @@ func TestApprovalRecheck(t *testing.T) {
 	if r := c.request(t, sr.Name); r.Status.Phase != phaseApproved || r.Status.GrantName != name || c.grant(t, name).ResourceVersion != before {
 		t.Fatalf("close %+v", r.Status)
 	}
-	// Rule 19 for an extension; rule 20: a later extension makes it an open request again.
+	// The same for an extension; a later extension makes it an open request again.
 	extendOf := func(seen ...string) tnv1.TailnetAccessRequest {
 		c.expect(t, "extend request", c.post(t, "/grants/"+name+"/request", uma, url.Values{"duration": {"7d"}}), http.StatusSeeOther)
 		return c.latest(t, seen...)
@@ -497,8 +498,8 @@ func TestApprovalRecheck(t *testing.T) {
 	c.expect(t, "grant gone", c.post(t, "/requests/"+ext.Name+"/approve", ada, nil), http.StatusConflict)
 }
 
-// Rules 17 and 19 with a real half success: the last approval writes the grant, its status write
-// fails once. The request then only closes, and admins still see every approver.
+// A real half success: the last approval writes the grant, its status write fails once. The
+// request then only closes, and admins still see every approver.
 func TestHalfSuccess(t *testing.T) {
 	c := newRequestConsole(t, true)
 	fail := true
@@ -546,7 +547,7 @@ func TestHalfSuccess(t *testing.T) {
 	}
 }
 
-// Rule 21: a sign-in without issuer and subject decides nothing.
+// A sign-in without issuer and subject decides nothing.
 func TestDecisionWithoutIdentity(t *testing.T) {
 	c := newRequestConsole(t, false)
 	c.expect(t, "request", c.post(t, "/requests", c.as(t, "uma", false), wikiForm), http.StatusSeeOther)
@@ -559,7 +560,7 @@ func TestDecisionWithoutIdentity(t *testing.T) {
 	}
 }
 
-// Rule 13: the metrics name Tailnets, never persons, and the break count follows the check.
+// The metrics name Tailnets, never persons, and the break count follows the check.
 func TestConsoleMetrics(t *testing.T) {
 	if newTestConsole(t, nil).MetricsHandler() != nil {
 		t.Fatal("metrics without access management")

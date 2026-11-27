@@ -81,7 +81,7 @@ func writeLines(t *testing.T, dir string, ls [][]byte) {
 	}
 }
 
-// Rules 10 and 11: numbered JSON lines chained by the hash of the previous line; the anchor and
+// Numbered JSON lines chained by the hash of the previous line; the anchor and
 // the pod log carry the head, never an identity.
 func TestAuditChain(t *testing.T) {
 	dir, a := t.TempDir(), &memAnchor{}
@@ -115,7 +115,7 @@ func TestAuditChain(t *testing.T) {
 	}
 }
 
-// Rules 14 and 15: every kind of break is found, recorded exactly once, and the log goes on.
+// Every kind of break is found, recorded exactly once, and the log goes on.
 func TestAuditBreaks(t *testing.T) {
 	for name, tc := range map[string]struct {
 		tamper func(t *testing.T, dir string, a *memAnchor)
@@ -185,7 +185,7 @@ func TestAuditBreaks(t *testing.T) {
 	}
 }
 
-// Rule 12: without a writable log or anchor, append fails, so the change it guards is not made.
+// Without a writable log or anchor, append fails, so the change it guards is not made.
 func TestAuditUnavailable(t *testing.T) {
 	l, _ := newTestAudit(t, filepath.Join(t.TempDir(), "missing"), &memAnchor{})
 	if err := l.append(context.Background(), auditEntry{Action: "grant.create"}); err == nil {

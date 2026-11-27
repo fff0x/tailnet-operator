@@ -20,14 +20,14 @@ import (
 	tnv1 "tsunaro.io/tailnet-operator/api/v1alpha1"
 )
 
-// managedBy marks the grants the console created; it changes no other grant (rule 7).
+// managedBy marks the grants the console created; it changes no other grant.
 const (
 	managedByLabel = "app.kubernetes.io/managed-by"
 	managedBy      = "tailnet-console"
 	maxListItems   = 16 // sources, ports and prefixes, as the CRD allows
 )
 
-// grantDurations are the only lifetimes the console offers (rule 6); 0 is permanent.
+// grantDurations are the only lifetimes the console offers; 0 is permanent.
 var grantDurations = []struct {
 	Value, Label string
 	D            time.Duration
@@ -36,12 +36,13 @@ var grantDurations = []struct {
 	{"7d", "7 days", 7 * 24 * time.Hour}, {"30d", "30 days", 30 * 24 * time.Hour}, {"permanent", "Permanent", 0},
 }
 
-// grantTarget is one destination a grant may name (rule 3). Key is the form value.
+// grantTarget is one destination a grant may name: an ingress, a spoke tag or addresses inside a
+// site. Key is the form value.
 type grantTarget struct {
 	Key, Tailnet, Label string
 	Tag                 string   // ingress or spoke tag; empty for a site
 	Site                []string // the site's prefixes, within which the grant's prefixes must lie
-	Ports               []int32  // the target's current ports, the form's default (rule 4)
+	Ports               []int32  // the target's current ports, the form's default
 }
 
 type grantRecipient struct{ Value, Label string }
@@ -55,7 +56,7 @@ type grantTailnet struct {
 }
 
 // grantOptions lists every Tailnet that owns its policy with its targets and recipients. The form
-// and the check of a submitted form use the same list (rule 9).
+// and the check of a submitted form use the same list, so the server accepts only what it offers.
 func (s *Server) grantOptions(ctx context.Context) ([]grantTailnet, error) {
 	var tns tnv1.TailnetList
 	var ins tnv1.TailnetIngressList
@@ -177,7 +178,8 @@ func durationOf(v string) (time.Duration, bool) {
 	return 0, false
 }
 
-// buildGrantSpec checks a form against rules 2 to 6 and returns the spec it may write (rule 9).
+// buildGrantSpec checks every field of a form against the options and returns the spec it may
+// write.
 func buildGrantSpec(f grantForm, opts []grantTailnet, now time.Time) (tnv1.TailnetGrantSpec, []string) {
 	var spec tnv1.TailnetGrantSpec
 	var errs []string
@@ -249,7 +251,7 @@ func parsePorts(v string) ([]int32, string) {
 	return out, ""
 }
 
-// parsePrefixes accepts addresses (one host) and masked prefixes inside the site (rule 3).
+// parsePrefixes accepts addresses (one host) and masked prefixes inside the site.
 func parsePrefixes(v string, site []string) ([]tnv1.GatewayPrefix, string) {
 	var scope []netip.Prefix
 	for _, s := range site {
@@ -314,9 +316,9 @@ func statusCode(err error) int32 {
 	return 0
 }
 
-// commit records the change, then makes it; a failed change is followed by grant.failed (rules 12
-// and 13). written is false when the audit log refused the entry and nothing was changed. Call
-// with s.changes held, so no observation runs between the entry and the change (rule 27).
+// commit records the change, then makes it; a failed change is followed by grant.failed. written
+// is false when the audit log refused the entry and nothing was changed. Call with s.changes
+// held, so no observation runs between the entry and the change.
 func (s *Server) commit(ctx context.Context, e auditEntry, apply func() error) (written bool, err error) {
 	if err := s.audit.append(ctx, e); err != nil {
 		s.log.Error(err, "audit write failed; change refused", "action", e.Action)
@@ -509,7 +511,7 @@ func (s *Server) grantCreate(w http.ResponseWriter, r *http.Request, sess *sessi
 	}
 }
 
-// managedGrant loads a grant the console may change (rule 7), or answers the request.
+// managedGrant loads a grant the console may change, one it created, or answers the request.
 func (s *Server) managedGrant(w http.ResponseWriter, r *http.Request) *tnv1.TailnetGrant {
 	var g tnv1.TailnetGrant
 	if err := s.writer.Get(r.Context(), client.ObjectKey{Name: r.PathValue("name")}, &g); err != nil {
@@ -528,9 +530,9 @@ func (s *Server) managedGrant(w http.ResponseWriter, r *http.Request) *tnv1.Tail
 	return &g
 }
 
-// setExpiry extends (rule 8, a duration from now) or revokes (expiresAt now) a console grant.
-// With four-eyes approval an extension becomes a request; a revocation acts at once. A user
-// revokes only a console grant that names them alone (rule 36).
+// setExpiry extends (a duration from now) or revokes (expiresAt now) a console grant. With
+// four-eyes approval an extension becomes a request; a revocation acts at once. A user revokes
+// only a console grant that names them alone.
 func (s *Server) setExpiry(revoke bool) func(http.ResponseWriter, *http.Request, *session) {
 	return func(w http.ResponseWriter, r *http.Request, sess *session) {
 		r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
@@ -552,7 +554,7 @@ func (s *Server) setExpiry(revoke bool) func(http.ResponseWriter, *http.Request,
 		}
 		now := s.now().UTC().Truncate(time.Second)
 		if revoke && g.Spec.ExpiresAt != nil && !g.Spec.ExpiresAt.After(now) {
-			// A later expiresAt would start the retention anew (rule 30).
+			// A later expiresAt would start the retention anew.
 			s.message(w, r, http.StatusConflict, "Already expired", "The grant expired already; there is nothing to revoke.")
 			return
 		}
@@ -587,7 +589,7 @@ type auditRow struct {
 	Seq                 uint64
 	Time, Action, Actor string
 	Subject             string
-	Origin              string // who acted when the entry names nobody (rule 29)
+	Origin              string // who acted when the entry names nobody
 	Tailnet, Grant      string
 	Details             []string
 	Broken              bool
@@ -649,8 +651,8 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess *session
 	s.render(w, http.StatusOK, "audit", page{Title: "Audit log", Session: sess, Body: body})
 }
 
-// CheckAudit verifies the audit log at start and records its breaks (rule 14). Without access
-// management it does nothing.
+// CheckAudit verifies the audit log at start and records its breaks. Without access management
+// it does nothing.
 func (s *Server) CheckAudit(ctx context.Context) {
 	if s.audit == nil {
 		return

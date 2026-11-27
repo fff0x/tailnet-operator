@@ -23,7 +23,7 @@ func gentry(action, grant string, details map[string]any) auditEntry {
 	return auditEntry{Action: action, Grant: grant, Tailnet: "lab", Details: details}
 }
 
-// Rule 24: the state the log gives, including the undo of a failed own change.
+// The state the log gives, including the undo of a failed own change.
 func TestKnownState(t *testing.T) {
 	create := map[string]any{"sources": []any{"group:b", "group:a"}, "ports": []any{443.0}, "tag": "tag:wiki", "expiresAt": "2026-11-27T21:00:00Z"}
 	observed := map[string]any{"change": "created", "sources": []any{"group:x"}, "ports": []any{22.0}, "tag": "tag:db", "expiresAt": "permanent", "managed": false}
@@ -93,7 +93,9 @@ func expireStatus(g *tnv1.TailnetGrant, reason string, gen int64) {
 		LastTransitionTime: metav1.Time{Time: grantNow}}}
 }
 
-// Rules 22, 23, 25, 26, 28 and 29.
+// Observe records each difference between the grants and the log once, a grant the log does not
+// know as created, and an expiry once per expiresAt. Without the grant list or the log it records
+// nothing, and recipients stay out of the pod log.
 func TestObserve(t *testing.T) {
 	c := newGrantConsole(t)
 	ctx := context.Background()
@@ -149,7 +151,7 @@ func TestObserve(t *testing.T) {
 		t.Errorf("label change not recorded: %+v", last)
 	}
 
-	// Rule 26: one grant.expired per expiresAt, only for the current generation.
+	// One grant.expired per expiresAt, only for the current generation.
 	own.Spec.ExpiresAt = &metav1.Time{Time: grantNow.Add(-time.Hour)}
 	expireStatus(&own, "Expired", own.Generation+1)
 	if err := c.writer.Update(ctx, &own); err != nil {
@@ -180,7 +182,7 @@ func TestObserve(t *testing.T) {
 		t.Fatalf("second expiry %+v", e[n:])
 	}
 
-	// Rule 28: without the grant list or the log, nothing is recorded; the next run catches up.
+	// Without the grant list or the log, nothing is recorded; the next run catches up.
 	plain := c.writer
 	c.writer = interceptor.NewClient(plain.(client.WithWatch), interceptor.Funcs{
 		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
@@ -209,7 +211,7 @@ func TestObserve(t *testing.T) {
 	if e := c.observed(t); e[len(e)-1].Grant != "by-kubectl" || e[len(e)-1].Details["change"] != "created" {
 		t.Fatalf("not caught up: %+v", e[len(e)-1])
 	}
-	// Rule 29: recipients stay in the log; the page names who acted.
+	// Recipients stay in the log; the page names who acted.
 	if strings.Contains(c.logs.String(), "id.example/alice") || strings.Contains(c.logs.String(), "group:staff") {
 		t.Errorf("recipient in the pod log:\n%s", c.logs.String())
 	}
@@ -230,8 +232,8 @@ func (h halfCreate) Create(ctx context.Context, obj client.Object, opts ...clien
 	return errors.New("answer lost")
 }
 
-// Rules 24 and 27: a create whose answer was lost is observed once; a run waits for a change
-// that is between its entry and its write.
+// A create whose answer was lost is observed once; a run waits for a change that is between its
+// entry and its write.
 func TestObserveOwnChanges(t *testing.T) {
 	c := newGrantConsole(t)
 	admin := c.admin(t)
@@ -273,7 +275,8 @@ func TestObserveOwnChanges(t *testing.T) {
 	}
 }
 
-// Rules 30 to 34 against grants and requests on both sides of each rule.
+// Cleanup against grants and requests on both sides of each condition: what it deletes, what
+// expires and what it leaves.
 func TestCleanup(t *testing.T) {
 	c := newRequestConsole(t, true)
 	c.retention = 30
@@ -333,7 +336,7 @@ func TestCleanup(t *testing.T) {
 		t.Fatalf("the fake client changed the generation to %d", g.Generation)
 	}
 	c.expect(t, "partial approval", c.post(t, "/requests/request-partial/approve", c.as(t, "ada", true), nil), http.StatusSeeOther)
-	// Rule 33: each deletion follows its entry.
+	// Each deletion follows its entry.
 	plain := c.writer
 	c.writer = interceptor.NewClient(plain.(client.WithWatch), interceptor.Funcs{
 		Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
@@ -392,8 +395,8 @@ func TestCleanup(t *testing.T) {
 	}
 }
 
-// Rules 33 and 34: a grant changed after the list is not deleted, the failure ends the run, and
-// the next cleanup comes an hour later.
+// A grant changed after the list is not deleted, the failure ends the run, and the next cleanup
+// comes an hour later.
 func TestCleanupStops(t *testing.T) {
 	c := newGrantConsole(t)
 	c.retention = 30
@@ -441,7 +444,7 @@ func TestCleanupStops(t *testing.T) {
 	}
 }
 
-// Rule 35: without a retention nothing is deleted or expires.
+// Without a retention nothing is deleted or expires.
 func TestCleanupOff(t *testing.T) {
 	c := newGrantConsole(t)
 	ctx := context.Background()
@@ -458,7 +461,7 @@ func TestCleanupOff(t *testing.T) {
 	}
 }
 
-// Rule 36: a user revokes a console grant that names them alone, at once even with four-eyes.
+// A user revokes a console grant that names them alone, at once even with four-eyes.
 func TestUserRevoke(t *testing.T) {
 	c := newRequestConsole(t, true)
 	ctx := context.Background()

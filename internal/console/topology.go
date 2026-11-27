@@ -205,9 +205,9 @@ type spokeTag struct {
 	ports      []string // as the live rules write them, sorted
 }
 
-// spokeTags applies rules 4 and 5: candidate tags are those of tagged nodes and the tag
-// destinations of the live rules; each goes to the first spoke by name whose patterns match it,
-// except a tag of the hub's own ingresses. The result is sorted by tag.
+// spokeTags gives the spokes their tags and ports: candidate tags are those of tagged nodes and
+// the tag destinations of the live rules; each goes to the first spoke by name whose patterns
+// match it, except a tag of the hub's own ingresses. The result is sorted by tag.
 func spokeTags(tn *tnv1.Tailnet, hubTags map[string]bool, data tailnetData, rules []liveRule) []spokeTag {
 	refs := slices.Clone(tn.Spec.Policy.Spokes)
 	slices.SortFunc(refs, func(a, b tnv1.SpokeRef) int { return strings.Compare(a.Name, b.Name) })
@@ -265,7 +265,8 @@ func (b *mapBox) header(rows []mapRow) int {
 	return y
 }
 
-// list places a heading and the cells in two columns and returns the y below them (rule 7).
+// list places a heading and the cells in two columns and returns the y below them. Above mapCap
+// entries it shows the first by name and one cell that counts the rest.
 func (b *mapBox) list(y int, heading string, entries []entry, empty string) int {
 	slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.label, b.label) })
 	l := mapList{Y: y + 22, Heading: fmt.Sprintf("%s (%d)", heading, len(entries))}

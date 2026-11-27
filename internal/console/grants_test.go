@@ -95,7 +95,7 @@ func actions(st auditState) []string {
 	return out
 }
 
-// Rules 3 and 5: targets of policy-owning Tailnets only, the hub's own tags not as spoke tags,
+// Targets of policy-owning Tailnets only, the hub's own tags not as spoke tags,
 // recipients only with a provider identifier, and the live policy's groups.
 func TestGrantOptions(t *testing.T) {
 	c := newGrantConsole(t)
@@ -127,7 +127,7 @@ func TestGrantOptions(t *testing.T) {
 	}
 }
 
-// Rules 2 to 6 and 9: the server checks every field against the options.
+// The server checks every field against the options.
 func TestBuildGrantSpec(t *testing.T) {
 	c := newGrantConsole(t)
 	opts, err := c.grantOptions(context.Background())
@@ -183,7 +183,8 @@ func TestBuildGrantSpec(t *testing.T) {
 	}
 }
 
-// Rules 7, 8, 12 and 13 through the HTTP routes.
+// Create, extend and revoke through the HTTP routes: only console grants change, and each change
+// has its audit entry.
 func TestGrantLifecycle(t *testing.T) {
 	c := newGrantConsole(t)
 	admin := c.admin(t)
@@ -217,7 +218,7 @@ func TestGrantLifecycle(t *testing.T) {
 	if g := c.grant(t, name); !g.Spec.ExpiresAt.Time.Equal(grantNow) {
 		t.Fatalf("revoked to %v", g.Spec.ExpiresAt)
 	}
-	// Rule 7: a grant from Git stays as it is, and nothing is recorded for it.
+	// A grant from Git stays as it is, and nothing is recorded for it.
 	for _, path := range []string{"/grants/from-git/extend", "/grants/from-git/revoke"} {
 		if resp := c.post(t, path, admin, url.Values{"duration": {"1h"}}); resp.StatusCode != http.StatusForbidden {
 			t.Errorf("%s: %d", path, resp.StatusCode)
@@ -251,7 +252,7 @@ func TestGrantLifecycle(t *testing.T) {
 	}
 }
 
-// Rule 12: without the audit anchor the console refuses and creates nothing.
+// Without the audit anchor the console refuses and creates nothing.
 func TestGrantRefusedWithoutAudit(t *testing.T) {
 	c := newGrantConsole(t)
 	admin := c.admin(t)
@@ -281,8 +282,8 @@ func (conflictWriter) Create(context.Context, client.Object, ...client.CreateOpt
 	return apierrors.NewConflict(schema.GroupResource{Group: "tsunaro.io", Resource: "tailnetgrants"}, "x", nil)
 }
 
-// Rule 13: a refused write follows its entry with a "failed" entry carrying the status code; a
-// conflict answers 409 (rule 10 of plan 3b).
+// A refused write follows its entry with a "failed" entry carrying the status code; a conflict
+// answers 409.
 func TestGrantWriteFailure(t *testing.T) {
 	c := newGrantConsole(t)
 	admin := c.admin(t)

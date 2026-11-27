@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// The console's metrics carry no person: Tailnet names only (rule 13).
+// The console's metrics carry no person: Tailnet names only.
 var (
 	pendingDesc = prometheus.NewDesc("tailnet_console_access_requests_pending",
 		"Access requests waiting for a decision, by Tailnet.", []string{"tailnet"}, nil)
