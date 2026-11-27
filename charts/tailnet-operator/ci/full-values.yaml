@@ -69,6 +69,7 @@ console:
   accessManagement:
     enabled: true
     fourEyes: true
+    retentionDays: 14
     audit:
       size: 2Gi
       storageClassName: fast

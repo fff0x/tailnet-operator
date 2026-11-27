@@ -1335,7 +1335,7 @@ func TestConsoleAccessManagement(t *testing.T) {
 		t.Error("read-only console sets fsGroup")
 	}
 	for _, e := range off.Containers[0].Env {
-		if strings.HasPrefix(e.Name, "CONSOLE_AUDIT") || e.Name == "POD_NAMESPACE" || e.Name == "CONSOLE_FOUR_EYES" {
+		if strings.HasPrefix(e.Name, "CONSOLE_AUDIT") || e.Name == "POD_NAMESPACE" || e.Name == "CONSOLE_FOUR_EYES" || e.Name == "CONSOLE_RETENTION_DAYS" {
 			t.Errorf("read-only console has %s", e.Name)
 		}
 	}
@@ -1364,7 +1364,16 @@ func TestConsoleAccessManagement(t *testing.T) {
 		{APIGroups: []string{"tsunaro.io"}, Resources: []string{"tailnets", "tailnetingresses", "tailnetsites", "tailnetgrants"}, Verbs: []string{"get", "list", "watch"}},
 		{APIGroups: []string{"tsunaro.io"}, Resources: []string{"tailnetgrants"}, Verbs: []string{"create", "update", "patch"}},
 		{APIGroups: []string{"tsunaro.io"}, Resources: []string{"tailnetaccessrequests"}, Verbs: []string{"get", "list", "watch", "create"}},
-		{APIGroups: []string{"tsunaro.io"}, Resources: []string{"tailnetaccessrequests/status"}, Verbs: []string{"update", "patch"}}})
+		{APIGroups: []string{"tsunaro.io"}, Resources: []string{"tailnetaccessrequests/status"}, Verbs: []string{"update", "patch"}},
+		{APIGroups: []string{"tsunaro.io"}, Resources: []string{"tailnetgrants", "tailnetaccessrequests"}, Verbs: []string{"delete"}}})
+	// Without a retention the console deletes nothing and gets no delete right.
+	noDelete := decode[rbacv1.ClusterRole](t, render(t, consoleValues+"  accessManagement: {enabled: true, retentionDays: 0}\n").named(t, "ClusterRole", "tailnet-operator-console"))
+	equal(t, "console rules without retention", noDelete.Rules, role.Rules[:4])
+	for _, bad := range []string{"-1", "3651", "1.5", `"30"`} {
+		if _, err := helmTemplate(t, consoleValues+"  accessManagement: {enabled: true, retentionDays: "+bad+"}\n"); err == nil {
+			t.Errorf("retentionDays %s accepted", bad)
+		}
+	}
 	anchorRole := decode[rbacv1.Role](t, m.named(t, "Role", audit))
 	equal(t, "anchor rules", anchorRole.Rules, []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"configmaps"},
 		ResourceNames: []string{audit}, Verbs: []string{"get", "update", "patch"}}})
@@ -1391,6 +1400,7 @@ func TestConsoleAccessManagement(t *testing.T) {
 	equal(t, "audit anchor", envVar(t, c, "CONSOLE_AUDIT_ANCHOR").Value, audit)
 	equal(t, "pod namespace", envVar(t, c, "POD_NAMESPACE").ValueFrom, &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}})
 	equal(t, "four-eyes off", envVar(t, c, "CONSOLE_FOUR_EYES").Value, "false")
+	equal(t, "retention", envVar(t, c, "CONSOLE_RETENTION_DAYS").Value, "30")
 	equal(t, "console ports", c.Ports, []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}, {Name: "metrics", ContainerPort: 8081}})
 	svc := decode[corev1.Service](t, m.named(t, "Service", "tailnet-operator-console"))
 	equal(t, "console service ports", len(svc.Spec.Ports), 2)

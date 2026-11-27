@@ -16,7 +16,8 @@ metadata:
     {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
 ---
 # Read access to four kinds and nothing else: no Secrets, no ConfigMaps. With accessManagement
-# the console also writes TailnetGrants and TailnetAccessRequests, but never deletes one.
+# the console also writes TailnetGrants and TailnetAccessRequests; it deletes them only with a
+# retention, after the operator confirmed the expiry or the request was decided.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -37,6 +38,11 @@ rules:
   - apiGroups: [tsunaro.io]
     resources: [tailnetaccessrequests/status]
     verbs: [update, patch]
+  {{- if gt (int $am.retentionDays) 0 }}
+  - apiGroups: [tsunaro.io]
+    resources: [tailnetgrants, tailnetaccessrequests]
+    verbs: [delete]
+  {{- end }}
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -212,6 +218,8 @@ spec:
                   fieldPath: metadata.namespace
             - name: CONSOLE_FOUR_EYES
               value: {{ $am.fourEyes | toString | quote }}
+            - name: CONSOLE_RETENTION_DAYS
+              value: {{ int $am.retentionDays | toString | quote }}
             {{- end }}
           ports:
             - {name: http, containerPort: 8080}

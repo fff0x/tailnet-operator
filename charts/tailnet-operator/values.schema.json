@@ -53,9 +53,10 @@
     }},
     "console": {"type": "object", "additionalProperties": false, "required": ["enabled", "accessManagement", "url", "oidc", "resources", "networkPolicy"], "properties": {
       "enabled": {"type": "boolean"},
-      "accessManagement": {"type": "object", "additionalProperties": false, "required": ["enabled", "fourEyes", "audit"], "properties": {
+      "accessManagement": {"type": "object", "additionalProperties": false, "required": ["enabled", "fourEyes", "retentionDays", "audit"], "properties": {
         "enabled": {"type": "boolean"},
         "fourEyes": {"type": "boolean"},
+        "retentionDays": {"type": "integer", "minimum": 0, "maximum": 3650},
         "audit": {"type": "object", "additionalProperties": false, "required": ["size", "storageClassName", "existingClaim"], "properties": {
           "size": {"type": "string", "pattern": "^[1-9][0-9]*(Mi|Gi|Ti)$"},
           "storageClassName": {"type": "string", "maxLength": 253, "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"},
