@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -182,6 +183,69 @@ func TestAdmission(t *testing.T) {
 		high.Object["spec"].(map[string]any)["ports"] = []any{int64(65536)}
 		if err := c.Create(ctx, high, client.DryRunAll); !apierrors.IsInvalid(err) {
 			t.Fatalf("port 65536 accepted: %v", err)
+		}
+	})
+
+	t.Run("access-request", func(t *testing.T) {
+		// Written only by the console: a Create carries sources, target and ports, an Extend only
+		// grantName; the spec never changes and the status names nobody.
+		request := func(name string, spec map[string]any) *unstructured.Unstructured {
+			base := map[string]any{"tailnetRef": map[string]any{"name": "corp"}, "requester": "https://id.example.com/59ac9125",
+				"requestedAs": "User", "duration": "8h"}
+			for k, v := range spec {
+				if v == nil {
+					delete(base, k)
+				} else {
+					base[k] = v
+				}
+			}
+			return &unstructured.Unstructured{Object: map[string]any{"apiVersion": "tsunaro.io/v1alpha1", "kind": "TailnetAccessRequest",
+				"metadata": map[string]any{"name": name}, "spec": base}}
+		}
+		create := map[string]any{"action": "Create", "sources": []any{"https://id.example.com/59ac9125@"},
+			"target": map[string]any{"tag": "tag:shop"}, "ports": []any{int64(5432)}, "description": "on call"}
+		extend := map[string]any{"action": "Extend", "grantName": "console-abc123defg", "duration": "permanent", "requestedAs": "Admin"}
+		accept(t, request("request-create", create))
+		accept(t, request("request-extend", extend))
+		with := func(base map[string]any, k string, v any) map[string]any {
+			out := maps.Clone(base)
+			out[k] = v
+			return out
+		}
+		for name, spec := range map[string]map[string]any{
+			"extend without grantName": with(extend, "grantName", nil),
+			"create with grantName":    with(create, "grantName", "console-x"),
+			"create without target":    with(create, "target", nil),
+			"create without ports":     with(create, "ports", nil),
+			"extend with sources":      with(extend, "sources", []any{"alice@"}),
+			"unknown action":           with(create, "action", "Revoke"),
+			"free duration":            with(create, "duration", "2h"),
+			"unknown role":             with(create, "requestedAs", "Owner"),
+			"no requester":             with(create, "requester", nil),
+			"tag source":               with(create, "sources", []any{"tag:ci"}),
+			"both targets":             with(create, "target", map[string]any{"tag": "tag:shop", "prefixes": []any{"10.0.0.1/32"}}),
+		} {
+			if err := c.Create(ctx, request("request-bad", spec), client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Errorf("%s accepted: %v", name, err)
+			}
+		}
+		live := request("request-live", create)
+		if err := c.Create(ctx, live); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Delete(context.Background(), live) })
+		changed := live.DeepCopy()
+		changed.Object["spec"].(map[string]any)["duration"] = "30d"
+		if err := c.Update(ctx, changed); !apierrors.IsInvalid(err) {
+			t.Fatalf("spec change accepted: %v", err)
+		}
+		live.Object["status"] = map[string]any{"phase": "Approved", "decidedAt": "2026-11-27T13:00:00Z", "grantName": "console-abc123defg"}
+		if err := c.Status().Update(ctx, live); err != nil {
+			t.Fatalf("status rejected: %v", err)
+		}
+		live.Object["status"] = map[string]any{"phase": "Done"}
+		if err := c.Status().Update(ctx, live); !apierrors.IsInvalid(err) {
+			t.Fatalf("unknown phase accepted: %v", err)
 		}
 	})
 
