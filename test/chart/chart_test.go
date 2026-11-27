@@ -1328,6 +1328,141 @@ func TestConsoleObjects(t *testing.T) {
 	equal(t, "console API binding role", apiBinding.RoleRef.Name, "tailnet-operator-console-api")
 }
 
+func TestConsoleAccessManagement(t *testing.T) {
+	// Off (the default): no write right, no audit objects, no audit env, no fsGroup.
+	off := decode[appsv1.Deployment](t, render(t, consoleValues).named(t, "Deployment", "tailnet-operator-console")).Spec.Template.Spec
+	if off.SecurityContext.FSGroup != nil {
+		t.Error("read-only console sets fsGroup")
+	}
+	for _, e := range off.Containers[0].Env {
+		if strings.HasPrefix(e.Name, "CONSOLE_AUDIT") || e.Name == "POD_NAMESPACE" || e.Name == "CONSOLE_FOUR_EYES" {
+			t.Errorf("read-only console has %s", e.Name)
+		}
+	}
+	if len(off.Containers[0].Ports) != 1 {
+		t.Errorf("read-only console ports %+v", off.Containers[0].Ports)
+	}
+	for _, obj := range render(t, consoleValues+"monitoring: {serviceMonitor: {enabled: true}}\n") {
+		if obj.Kind == "ServiceMonitor" && obj.Metadata.Name != "tailnet-operator" {
+			t.Errorf("read-only console renders %s", obj.Metadata.Name)
+		}
+	}
+
+	m := render(t, consoleValues+"  accessManagement: {enabled: true}\n")
+	var got []string
+	for _, obj := range m {
+		if obj.Metadata.Labels["app.kubernetes.io/name"] == "tailnet-console" {
+			got = append(got, obj.Kind+"/"+obj.Metadata.Name)
+		}
+	}
+	const audit = "tailnet-operator-console-audit"
+	equal(t, "console objects", got, []string{"ServiceAccount/tailnet-operator-console", "ConfigMap/" + audit, "PersistentVolumeClaim/" + audit,
+		"ClusterRole/tailnet-operator-console", "ClusterRoleBinding/tailnet-operator-console", "Role/" + audit,
+		"RoleBinding/" + audit, "Service/tailnet-operator-console", "Deployment/tailnet-operator-console"})
+	role := decode[rbacv1.ClusterRole](t, m.named(t, "ClusterRole", "tailnet-operator-console"))
+	equal(t, "console rules", role.Rules, []rbacv1.PolicyRule{
+		{APIGroups: []string{"tsunaro.io"}, Resources: []string{"tailnets", "tailnetingresses", "tailnetsites", "tailnetgrants"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{"tsunaro.io"}, Resources: []string{"tailnetgrants"}, Verbs: []string{"create", "update", "patch"}},
+		{APIGroups: []string{"tsunaro.io"}, Resources: []string{"tailnetaccessrequests"}, Verbs: []string{"get", "list", "watch", "create"}},
+		{APIGroups: []string{"tsunaro.io"}, Resources: []string{"tailnetaccessrequests/status"}, Verbs: []string{"update", "patch"}}})
+	anchorRole := decode[rbacv1.Role](t, m.named(t, "Role", audit))
+	equal(t, "anchor rules", anchorRole.Rules, []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"configmaps"},
+		ResourceNames: []string{audit}, Verbs: []string{"get", "update", "patch"}}})
+	equal(t, "anchor role namespace", anchorRole.Namespace, releaseNamespace)
+	binding := decode[rbacv1.RoleBinding](t, m.named(t, "RoleBinding", audit))
+	equal(t, "anchor binding", binding.Subjects, []rbacv1.Subject{{Kind: "ServiceAccount", Name: "tailnet-operator-console", Namespace: releaseNamespace}})
+	equal(t, "anchor binding role", binding.RoleRef, rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: audit})
+
+	pvc := decode[corev1.PersistentVolumeClaim](t, m.named(t, "PersistentVolumeClaim", audit))
+	equal(t, "audit volume keep", pvc.Annotations["helm.sh/resource-policy"], "keep")
+	equal(t, "audit volume modes", pvc.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce})
+	equal(t, "audit volume size", pvc.Spec.Resources.Requests.Storage().String(), "1Gi")
+	if pvc.Spec.StorageClassName != nil {
+		t.Errorf("audit volume storage class %q, want the default", *pvc.Spec.StorageClassName)
+	}
+	cm := decode[corev1.ConfigMap](t, m.named(t, "ConfigMap", audit))
+	if cm.Data != nil || cm.Annotations["helm.sh/resource-policy"] != "keep" || cm.Annotations["helm.toolkit.fluxcd.io/driftDetection"] != "disabled" {
+		t.Errorf("anchor ConfigMap %+v", cm)
+	}
+
+	pod := decode[appsv1.Deployment](t, m.named(t, "Deployment", "tailnet-operator-console")).Spec.Template.Spec
+	c := pod.Containers[0]
+	equal(t, "audit dir", envVar(t, c, "CONSOLE_AUDIT_DIR").Value, "/var/lib/tsunaro-console")
+	equal(t, "audit anchor", envVar(t, c, "CONSOLE_AUDIT_ANCHOR").Value, audit)
+	equal(t, "pod namespace", envVar(t, c, "POD_NAMESPACE").ValueFrom, &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}})
+	equal(t, "four-eyes off", envVar(t, c, "CONSOLE_FOUR_EYES").Value, "false")
+	equal(t, "console ports", c.Ports, []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}, {Name: "metrics", ContainerPort: 8081}})
+	svc := decode[corev1.Service](t, m.named(t, "Service", "tailnet-operator-console"))
+	equal(t, "console service ports", len(svc.Spec.Ports), 2)
+	if p := svc.Spec.Ports[1]; p.Name != "metrics" || p.Port != 8081 || p.TargetPort.String() != "metrics" {
+		t.Errorf("metrics service port %+v", p)
+	}
+	if !slices.ContainsFunc(c.VolumeMounts, func(v corev1.VolumeMount) bool {
+		return reflect.DeepEqual(v, corev1.VolumeMount{Name: "audit", MountPath: "/var/lib/tsunaro-console"})
+	}) {
+		t.Errorf("mounts %+v", c.VolumeMounts)
+	}
+	if !slices.ContainsFunc(pod.Volumes, func(v corev1.Volume) bool {
+		return v.Name == "audit" && v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == audit
+	}) {
+		t.Errorf("volumes %+v", pod.Volumes)
+	}
+	if sc := pod.SecurityContext; sc.FSGroup == nil || *sc.FSGroup != 65532 || sc.RunAsUser == nil || *sc.RunAsUser != 65532 ||
+		sc.FSGroupChangePolicy == nil || *sc.FSGroupChangePolicy != corev1.FSGroupChangeOnRootMismatch {
+		t.Errorf("pod security context %+v", sc)
+	}
+
+	// An existing claim replaces the chart's; a storage class is passed through.
+	m = render(t, consoleValues+"  accessManagement: {enabled: true, audit: {existingClaim: restored-audit, storageClassName: fast}}\n")
+	for _, obj := range m {
+		if obj.Kind == "PersistentVolumeClaim" {
+			t.Errorf("existingClaim still renders %s", obj.Metadata.Name)
+		}
+	}
+	pod = decode[appsv1.Deployment](t, m.named(t, "Deployment", "tailnet-operator-console")).Spec.Template.Spec
+	if !slices.ContainsFunc(pod.Volumes, func(v corev1.Volume) bool {
+		return v.Name == "audit" && v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == "restored-audit"
+	}) {
+		t.Errorf("volumes with existingClaim %+v", pod.Volumes)
+	}
+	m = render(t, consoleValues+"  accessManagement: {enabled: true, audit: {storageClassName: fast, size: 5Gi}}\n")
+	pvc = decode[corev1.PersistentVolumeClaim](t, m.named(t, "PersistentVolumeClaim", audit))
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "fast" || pvc.Spec.Resources.Requests.Storage().String() != "5Gi" {
+		t.Errorf("audit volume %+v", pvc.Spec)
+	}
+	if _, err := helmTemplate(t, consoleValues+"  accessManagement: {enabled: true, audit: {size: 1G}}\n"); err == nil {
+		t.Error("audit size 1G accepted")
+	}
+
+	m = render(t, consoleValues+"  accessManagement: {enabled: true, fourEyes: true}\nmonitoring: {serviceMonitor: {enabled: true, labels: {prometheus: site}}}\n")
+	pod = decode[appsv1.Deployment](t, m.named(t, "Deployment", "tailnet-operator-console")).Spec.Template.Spec
+	equal(t, "four-eyes on", envVar(t, pod.Containers[0], "CONSOLE_FOUR_EYES").Value, "true")
+	// The console's ServiceMonitor scrapes only the console; the operator's does not select it.
+	sm := decode[struct {
+		Metadata metav1.ObjectMeta `json:"metadata"`
+		Spec     struct {
+			Selector  metav1.LabelSelector `json:"selector"`
+			Endpoints []struct {
+				Port string `json:"port"`
+			} `json:"endpoints"`
+		} `json:"spec"`
+	}](t, m.named(t, "ServiceMonitor", "tailnet-operator-console"))
+	consoleSvc := decode[corev1.Service](t, m.named(t, "Service", "tailnet-operator-console"))
+	opSvc := decode[corev1.Service](t, m.named(t, "Service", "tailnet-operator-metrics"))
+	if !matches(t, sm.Spec.Selector, consoleSvc.Labels) || matches(t, sm.Spec.Selector, opSvc.Labels) || len(sm.Spec.Endpoints) != 1 ||
+		sm.Spec.Endpoints[0].Port != "metrics" || sm.Metadata.Labels["prometheus"] != "site" {
+		t.Errorf("console ServiceMonitor %+v", sm)
+	}
+	opSM := decode[struct {
+		Spec struct {
+			Selector metav1.LabelSelector `json:"selector"`
+		} `json:"spec"`
+	}](t, m.named(t, "ServiceMonitor", "tailnet-operator"))
+	if matches(t, opSM.Spec.Selector, consoleSvc.Labels) {
+		t.Error("operator ServiceMonitor selects the console")
+	}
+}
+
 func TestConsoleNetworkPolicy(t *testing.T) {
 	const isolation = "networkPolicy:\n  enabled: true\n  kubeAPICIDRs: [10.96.0.1/32]\n  headscaleCIDRs: [192.0.2.1/32]\n"
 	values := consoleValues + "  networkPolicy: {idpCIDRs: [203.0.113.10/32]}\n" + isolation
@@ -1389,6 +1524,18 @@ func TestConsoleNetworkPolicy(t *testing.T) {
 		if !ports[fmt.Sprintf("%d/TCP", c.ContainerPort)] {
 			t.Errorf("operator port %s (%d) has no cilium ingress rule", c.Name, c.ContainerPort)
 		}
+	}
+	// Access management opens the console's metrics port: to metricsPeers, under cilium to all.
+	am := consoleValues + "  accessManagement: {enabled: true}\n  networkPolicy: {idpCIDRs: [203.0.113.10/32]}\n" + isolation +
+		"  metricsPeers: [{podSelector: {matchLabels: {app: prometheus}}}]\n"
+	amNP := decode[networkingv1.NetworkPolicy](t, render(t, am).named(t, "NetworkPolicy", "tailnet-operator-console"))
+	if len(amNP.Spec.Ingress) != 2 || !reflect.DeepEqual(amNP.Spec.Ingress[1].Ports, []networkingv1.NetworkPolicyPort{port(8081)}) ||
+		amNP.Spec.Ingress[1].From[0].PodSelector.MatchLabels["app"] != "prometheus" {
+		t.Errorf("console metrics ingress = %+v", amNP.Spec.Ingress)
+	}
+	amCNP := decode[ciliumPolicy](t, render(t, am+"  provider: cilium\n").named(t, "CiliumNetworkPolicy", "tailnet-operator-console"))
+	if len(amCNP.Spec.Ingress) != 3 || !slices.Equal(amCNP.Spec.Ingress[2].FromEntities, []string{"all"}) || !slices.Equal(amCNP.ingressPorts(2), []string{"8081/TCP"}) {
+		t.Errorf("console cilium metrics ingress = %+v", amCNP.Spec.Ingress)
 	}
 	ipBlock := consoleValues + "  networkPolicy: {idpCIDRs: [203.0.113.10/32], ingressPeers: [{ipBlock: {cidr: 10.0.0.0/8}}]}\n" + isolation
 	if _, err := helmTemplate(t, ipBlock+"  provider: cilium\n"); err == nil || !strings.Contains(err.Error(), "ipBlock") {

@@ -7,8 +7,9 @@
 {{- if not $np.kubeAPICIDRs }}
 {{- fail "networkPolicy.kubeAPICIDRs is required when networkPolicy.enabled=true" }}
 {{- end }}
-# The console receives HTTP from its TailnetIngress agent and dials only DNS, the API server (its
-# watch), the operator's console API and the identity provider.
+# The console receives HTTP from its TailnetIngress agent (and, with access management, metrics
+# scrapes) and dials only DNS, the API server (its watch), the operator's console API and the
+# identity provider.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -21,12 +22,22 @@ spec:
     matchLabels:
       {{- include "tailnet-operator.consoleSelector" . | nindent 6 }}
   policyTypes: [Ingress, Egress]
-  {{- with $c.ingressPeers }}
+  {{- $metrics := and .Values.console.accessManagement.enabled $np.metricsPeers }}
+  {{- if or $c.ingressPeers $metrics }}
   ingress:
+    {{- with $c.ingressPeers }}
     - from:
         {{- toYaml . | nindent 8 }}
       ports:
         - {protocol: TCP, port: 8080}
+    {{- end }}
+    {{- if $metrics }}
+    # Access management adds the console's metrics, scraped by networkPolicy.metricsPeers.
+    - from:
+        {{- toYaml $np.metricsPeers | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 8081}
+    {{- end }}
   {{- else }}
   ingress: []
   {{- end }}
@@ -87,6 +98,14 @@ spec:
       toPorts:
         - ports:
             - {port: "8080", protocol: TCP}
+    {{- if .Values.console.accessManagement.enabled }}
+    # The console's metrics stay open, like the operator's (metricsPeers is not applied).
+    - fromEntities:
+        - all
+      toPorts:
+        - ports:
+            - {port: "8081", protocol: TCP}
+    {{- end }}
   egress:
     - toEntities:
         - kube-apiserver

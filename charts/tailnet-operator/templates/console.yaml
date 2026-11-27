@@ -3,7 +3,10 @@
 {{- $name := printf "%s-console" (include "tailnet-operator.name" .) }}
 {{- $ns := include "tailnet-operator.namespace" . }}
 {{- $c := .Values.console }}
-# Read-only web console. Its own labels keep it out of the operator's selectors, PDB and monitors.
+{{- $am := $c.accessManagement }}
+{{- $audit := printf "%s-audit" $name }}
+# Web console, read-only unless accessManagement. Its own labels keep it out of the operator's
+# selectors, PDB and monitors.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -12,7 +15,8 @@ metadata:
   labels:
     {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
 ---
-# Read access to four kinds and nothing else: no Secrets, no ConfigMaps, no writes.
+# Read access to four kinds and nothing else: no Secrets, no ConfigMaps. With accessManagement
+# the console also writes TailnetGrants and TailnetAccessRequests, but never deletes one.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -23,6 +27,17 @@ rules:
   - apiGroups: [tsunaro.io]
     resources: [tailnets, tailnetingresses, tailnetsites, tailnetgrants]
     verbs: [get, list, watch]
+  {{- if $am.enabled }}
+  - apiGroups: [tsunaro.io]
+    resources: [tailnetgrants]
+    verbs: [create, update, patch]
+  - apiGroups: [tsunaro.io]
+    resources: [tailnetaccessrequests]
+    verbs: [get, list, watch, create]
+  - apiGroups: [tsunaro.io]
+    resources: [tailnetaccessrequests/status]
+    verbs: [update, patch]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -39,6 +54,71 @@ subjects:
     name: {{ $name | quote }}
     namespace: {{ $ns | quote }}
 ---
+{{- if $am.enabled }}
+{{- if not $am.audit.existingClaim }}
+# The audit log. Helm keeps it on uninstall: it is the record of who changed which access.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $audit | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $am.audit.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $am.audit.size | quote }}
+---
+{{- end }}
+# The head of the audit chain, written by the console after every entry. The chart renders no
+# data, so an upgrade keeps it; Flux must not correct it either.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $audit | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    helm.toolkit.fluxcd.io/driftDetection: disabled
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $audit | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [{{ $audit | quote }}]
+    verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $audit | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "tailnet-operator.consoleLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $audit | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name | quote }}
+    namespace: {{ $ns | quote }}
+---
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -51,6 +131,9 @@ spec:
     {{- include "tailnet-operator.consoleSelector" . | nindent 4 }}
   ports:
     - {name: http, port: 8080, targetPort: http}
+    {{- if $am.enabled }}
+    - {name: metrics, port: 8081, targetPort: metrics}
+    {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -74,7 +157,11 @@ spec:
     spec:
       serviceAccountName: {{ $name | quote }}
       securityContext:
+        {{- if $am.enabled }}
+        {{- toYaml (merge (deepCopy .Values.podSecurityContext) (dict "fsGroup" 65532 "fsGroupChangePolicy" "OnRootMismatch")) | nindent 8 }}
+        {{- else }}
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -114,12 +201,31 @@ spec:
               value: {{ printf "http://%s-console-api.%s.svc:8082" (include "tailnet-operator.name" .) $ns | quote }}
             - name: CONSOLE_API_TOKEN_FILE
               value: /var/run/secrets/tsunaro.io/console-api/token
+            {{- if $am.enabled }}
+            - name: CONSOLE_AUDIT_DIR
+              value: /var/lib/tsunaro-console
+            - name: CONSOLE_AUDIT_ANCHOR
+              value: {{ $audit | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONSOLE_FOUR_EYES
+              value: {{ $am.fourEyes | toString | quote }}
+            {{- end }}
           ports:
             - {name: http, containerPort: 8080}
+            {{- if $am.enabled }}
+            - {name: metrics, containerPort: 8081}
+            {{- end }}
           volumeMounts:
             - name: console-api-token
               mountPath: /var/run/secrets/tsunaro.io/console-api
               readOnly: true
+            {{- if $am.enabled }}
+            - name: audit
+              mountPath: /var/lib/tsunaro-console
+            {{- end }}
           livenessProbe:
             httpGet: {path: /healthz, port: http}
             initialDelaySeconds: 15
@@ -138,4 +244,9 @@ spec:
                   audience: tailnet-operator
                   expirationSeconds: 600
                   path: token
+        {{- if $am.enabled }}
+        - name: audit
+          persistentVolumeClaim:
+            claimName: {{ $am.audit.existingClaim | default $audit | quote }}
+        {{- end }}
 {{- end }}
