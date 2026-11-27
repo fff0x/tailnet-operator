@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -43,11 +44,17 @@ func main() {
 		l.Error(err, "invalid AGENT_SCRAPE_PEERS")
 		os.Exit(1)
 	}
+	consoleSubject, err := parseConsoleAPISubject(os.Getenv("CONSOLE_API_SUBJECT"))
+	if err != nil {
+		l.Error(err, "invalid CONSOLE_API_SUBJECT")
+		os.Exit(1)
+	}
 	mgr, err := manager.New(ctrl.GetConfigOrDie(), manager.Options{
 		Namespace: ns, Image: image, AgentImagePullSecrets: imagePullSecrets, AgentResources: agentResources,
 		AgentScrapePeers:   scrapePeers,
 		LeaderElection:     *leaderElection,
 		MetricsBindAddress: ":8080", HealthProbeBindAddress: ":8081",
+		ConsoleAPISubject: consoleSubject, ConsoleAPIBindAddress: ":8082",
 	})
 	if err != nil {
 		l.Error(err, "create manager")
@@ -62,6 +69,20 @@ func main() {
 
 func leaderElectionFlag(fs *flag.FlagSet) *bool {
 	return fs.Bool("leader-elect", true, "Elect one active operator using a namespaced Lease; disable only for a single non-overlapping process")
+}
+
+// parseConsoleAPISubject accepts only a ServiceAccount username, so a typo cannot authorize a
+// human or a group. Empty disables the console API.
+func parseConsoleAPISubject(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	parts := strings.Split(raw, ":")
+	if len(parts) != 4 || parts[0] != "system" || parts[1] != "serviceaccount" ||
+		len(validation.IsDNS1123Label(parts[2])) > 0 || len(validation.IsDNS1123Subdomain(parts[3])) > 0 {
+		return "", fmt.Errorf("must be system:serviceaccount:<namespace>:<name>")
+	}
+	return raw, nil
 }
 
 // parseAgentImagePullSecrets deliberately omits input values from errors: startup logs must not

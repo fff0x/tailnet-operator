@@ -4,6 +4,7 @@ package manager
 
 import (
 	"fmt"
+	"net/http"
 	"slices"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	runtimemanager "sigs.k8s.io/controller-runtime/pkg/manager"
 	runtimemetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -41,6 +43,9 @@ type Options struct {
 	AgentScrapePeers       []networkingv1.NetworkPolicyPeer
 	MetricsBindAddress     string
 	HealthProbeBindAddress string
+	// ConsoleAPISubject is the console's ServiceAccount username; empty disables the console API.
+	ConsoleAPISubject     string
+	ConsoleAPIBindAddress string
 }
 
 // New requires an explicit REST config; it never discovers the user's current kube-context.
@@ -116,6 +121,17 @@ func New(cfg *rest.Config, opts Options) (ctrl.Manager, error) {
 	for _, s := range setups {
 		if err := s.setup(mgr); err != nil {
 			return nil, fmt.Errorf("setup %s controller: %w", s.name, err)
+		}
+	}
+	if opts.ConsoleAPISubject != "" {
+		// Read-only, so every replica serves it; the Service spreads calls without leader election.
+		api := &controller.ConsoleAPI{Client: mgr.GetClient(), OperatorNamespace: opts.Namespace, Subject: opts.ConsoleAPISubject, Metrics: metrics}
+		timeout := 20 * time.Second
+		if err := mgr.Add(&runtimemanager.Server{Name: "console-api", ShutdownTimeout: &timeout, Server: &http.Server{
+			Addr: opts.ConsoleAPIBindAddress, Handler: api.Handler(), MaxHeaderBytes: 64 << 10,
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute,
+		}}); err != nil {
+			return nil, fmt.Errorf("add console API: %w", err)
 		}
 	}
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

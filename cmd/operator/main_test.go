@@ -78,6 +78,20 @@ func TestParseAgentImagePullSecretsRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestParseConsoleAPISubject(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"": true, "system:serviceaccount:operator:tsunaro-console": true,
+		"system:serviceaccount:operator": false, "system:serviceaccounts:operator": false,
+		"admin@example.test": false, "system:serviceaccount:Operator:console": false,
+		"system:serviceaccount:operator:console:extra": false,
+	} {
+		got, err := parseConsoleAPISubject(raw)
+		if (err == nil) != ok || (ok && got != raw) {
+			t.Errorf("%q: got %q, %v", raw, got, err)
+		}
+	}
+}
+
 func TestParseAgentImagePullSecretsErrorsDoNotExposeValues(t *testing.T) {
 	for _, raw := range []string{`["SENSITIVE-VALUE"]`, `{"SENSITIVE-VALUE":`, `"SENSITIVE-VALUE"`} {
 		_, err := parseAgentImagePullSecrets(raw)
