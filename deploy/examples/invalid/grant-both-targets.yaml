@@ -1,0 +1,16 @@
+# ExpectedError: exactly one of tag and prefixes must be set
+---
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetGrant
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  sources:
+    - group:ops
+  target:
+    tag: tag:example
+    prefixes:
+      - 203.0.113.5/32
+  ports: [5432]

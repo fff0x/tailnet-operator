@@ -22,7 +22,7 @@ for file in "${files[@]}"; do
     echo "UNEXPECTED ACCEPTANCE: $file" >&2
     exit 1
   fi
-  if ! grep -Eq '(^The (Tailnet|TailnetEgress|TailnetIngress|TailnetGateway|TailnetSite) .* is invalid:|Error from server [(]Invalid[)])' <<<"$output" || ! grep -Fq -- "$expected" <<<"$output"; then
+  if ! grep -Eq '(^The (Tailnet|TailnetEgress|TailnetIngress|TailnetGateway|TailnetSite|TailnetGrant) .* is invalid:|Error from server [(]Invalid[)])' <<<"$output" || ! grep -Fq -- "$expected" <<<"$output"; then
     printf 'WRONG FAILURE: %s\nExpected: %s\n%s\n' "$file" "$expected" "$output" >&2
     exit 1
   fi

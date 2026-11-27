@@ -11,4 +11,5 @@ resources:
   - crds/tsunaro.io_tailnetingresses.yaml
   - crds/tsunaro.io_tailnetgateways.yaml
   - crds/tsunaro.io_tailnetsites.yaml
+  - crds/tsunaro.io_tailnetgrants.yaml
   - operator.yaml

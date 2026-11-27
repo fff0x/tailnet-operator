@@ -1,0 +1,14 @@
+# ExpectedError: tags and autogroups are not allowed
+---
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetGrant
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  sources:
+    - tag:example
+  target:
+    tag: tag:example
+  ports: [5432]

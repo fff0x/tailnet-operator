@@ -5,6 +5,7 @@ package validation
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,7 +98,7 @@ func TestAdmission(t *testing.T) {
 	}
 
 	templates := map[string]*unstructured.Unstructured{}
-	for _, kind := range []string{"tailnet", "tailnetegress", "tailnetingress", "tailnetgateway", "tailnetsite"} {
+	for _, kind := range []string{"tailnet", "tailnetegress", "tailnetingress", "tailnetgateway", "tailnetsite", "tailnetgrant"} {
 		obj := load(t, filepath.Join(root, "deploy", "examples", kind+".yaml"))
 		templates[kind] = obj
 		t.Run("example/"+kind, func(t *testing.T) { accept(t, obj) })
@@ -127,6 +128,60 @@ func TestAdmission(t *testing.T) {
 			if err := c.Create(ctx, bad, client.DryRunAll); !apierrors.IsInvalid(err) {
 				t.Fatalf("bridgeNameAllowlist=%v accepted: %v", zones, err)
 			}
+		}
+	})
+
+	t.Run("grant-sources", func(t *testing.T) {
+		// A source is group:<name> or a user reference with exactly one @; a site target is a prefix list.
+		with := func(source string) *unstructured.Unstructured {
+			obj := templates["tailnetgrant"].DeepCopy()
+			obj.Object["spec"].(map[string]any)["sources"] = []any{source}
+			return obj
+		}
+		for _, source := range []string{"group:ops", "alice@", "alice@example.com", "https://id.example.com/59ac9125@"} {
+			accept(t, with(source))
+		}
+		for _, source := range []string{"alice", "a@b@c", "@", "group:", "group:two words", "tag:x@", "autogroup:member", "autogroup:member@", "two words@"} {
+			if err := c.Create(ctx, with(source), client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Fatalf("source %q accepted: %v", source, err)
+			}
+		}
+		site := templates["tailnetgrant"].DeepCopy()
+		site.Object["spec"].(map[string]any)["target"] = map[string]any{"prefixes": []any{"203.0.113.5/32", "2001:db8::/64"}}
+		delete(site.Object["spec"].(map[string]any), "expiresAt")
+		accept(t, site)
+		// Upper bounds: 16 sources, ports and prefixes, and port 65535.
+		many := func(n int, item func(int) any) []any {
+			out := make([]any, n)
+			for i := range out {
+				out[i] = item(i)
+			}
+			return out
+		}
+		source := func(i int) any { return fmt.Sprintf("user-%d@", i) }
+		port := func(i int) any { return int64(65535 - i) }
+		prefix := func(i int) any { return fmt.Sprintf("203.0.113.%d/32", i) }
+		for _, tc := range []struct {
+			name string
+			set  func(spec map[string]any, n int)
+		}{
+			{"sources", func(spec map[string]any, n int) { spec["sources"] = many(n, source) }},
+			{"ports", func(spec map[string]any, n int) { spec["ports"] = many(n, port) }},
+			{"prefixes", func(spec map[string]any, n int) { spec["target"] = map[string]any{"prefixes": many(n, prefix)} }},
+		} {
+			full := templates["tailnetgrant"].DeepCopy()
+			tc.set(full.Object["spec"].(map[string]any), 16)
+			accept(t, full)
+			over := templates["tailnetgrant"].DeepCopy()
+			tc.set(over.Object["spec"].(map[string]any), 17)
+			if err := c.Create(ctx, over, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Fatalf("17 %s accepted: %v", tc.name, err)
+			}
+		}
+		high := templates["tailnetgrant"].DeepCopy()
+		high.Object["spec"].(map[string]any)["ports"] = []any{int64(65536)}
+		if err := c.Create(ctx, high, client.DryRunAll); !apierrors.IsInvalid(err) {
+			t.Fatalf("port 65536 accepted: %v", err)
 		}
 	})
 

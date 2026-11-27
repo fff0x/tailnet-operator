@@ -5,8 +5,8 @@
 # Apply). The operator appends autoApprovers for the prefixes, replays
 # the approval on every node carrying an advertiser tag — in this or
 # another cluster — and reports
-# Advertised/Approved/Ready. Who may reach the prefixes stays a grant in
-# the base policy. Overlap with Tailnet.spec.reservedNetworks or an
+# Advertised/Approved/Ready. Who may reach the prefixes is a grant in
+# the base policy or a TailnetGrant. Overlap with Tailnet.spec.reservedNetworks or an
 # older TailnetSite blocks the CR (RouteConflict) until resolved.
 # docs/how-to/site-network.md: a branch behind a tagged router you run and
 # the prod-1 LAN behind the operator-managed gateway

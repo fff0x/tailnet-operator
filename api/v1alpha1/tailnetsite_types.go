@@ -17,7 +17,8 @@ type SiteAdvertiser struct {
 // TailnetSiteSpec declares a remote network (a branch, a management net, a single host as /32)
 // that a tagged router advertises into the tailnet. The operator renders autoApprovers for the
 // prefixes, replays approvals on the advertising nodes and reports whether the routes are
-// advertised and approved. Who may *reach* the prefixes stays a grant in the base policy.
+// advertised and approved. Who may *reach* the prefixes is a grant in the base policy
+// or a TailnetGrant.
 type TailnetSiteSpec struct {
 	TailnetRef TailnetRef `json:"tailnetRef"`
 	// Prefixes of the site. A /32 is a single host. Overlap with Tailnet.spec.reservedNetworks

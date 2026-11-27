@@ -1,0 +1,14 @@
+# ExpectedError: spec.ports[0]
+---
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetGrant
+metadata:
+  name: invalid
+spec:
+  tailnetRef:
+    name: corp
+  sources:
+    - group:ops
+  target:
+    tag: tag:example
+  ports: [0]

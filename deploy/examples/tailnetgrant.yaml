@@ -1,0 +1,32 @@
+---
+# Time-bound TCP access for people or policy groups to one target.
+# Cluster-scoped, in the cluster whose operator owns the policy (mode
+# Apply). The operator renders one grant and removes it at expiresAt by
+# its own clock; the object stays with Ready=False/Expired. Omit
+# expiresAt for a permanent grant; set a new one to extend.
+# A grant is administrative: it bypasses the allowFrom of the ingress
+# and a spoke's ingressSourceAllowlist. It gives network access to the
+# port, not a login — the database credentials stay with the app.
+# docs/how-to/grants.md: ingress on the hub, ingress on a spoke and a
+# host inside a TailnetSite.
+apiVersion: tsunaro.io/v1alpha1
+kind: TailnetGrant
+metadata:
+  name: alice-shop-db
+spec:
+  tailnetRef:
+    name: corp
+  description: Maintenance of the production database
+  sources:
+    # Headscale provider identifier (<issuer>/<subject>@): stable, unlike
+    # an e-mail address or user name. From /api/v1/user, field providerId.
+    - https://id.example.com/59ac9125-c31b-46c5-814e-06242908cf57@
+    # A group the base policy declares.
+    - group:db-maintainers
+  target:
+    # TailnetIngress.status.tag, or an ingress tag from a spoke fragment.
+    tag: tag:example
+    # Hosts inside a TailnetSite instead of an ingress:
+    # prefixes: ["203.0.113.5/32"]
+  ports: [5432]
+  expiresAt: "2026-12-01T18:00:00Z"
