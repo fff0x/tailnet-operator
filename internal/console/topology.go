@@ -155,46 +155,14 @@ func buildMap(tn *tnv1.Tailnet, ins []tnv1.TailnetIngress, sites []tnv1.TailnetS
 	y = m.Hub.list(y, "Sites", siteEntries, "No TailnetSite.")
 	m.Hub.H = y + boxPad - m.Hub.Y
 
-	// Rules 4 and 5: candidate tags with their ports, then the first spoke whose patterns match.
 	refs := slices.Clone(tn.Spec.Policy.Spokes)
 	slices.SortFunc(refs, func(a, b tnv1.SpokeRef) int { return strings.Compare(a.Name, b.Name) })
-	ports := map[string][]string{}
-	for _, n := range data.Nodes {
-		for _, t := range n.Tags {
-			if _, ok := ports[t]; !ok {
-				ports[t] = nil
-			}
-		}
-	}
-	for _, r := range rules {
-		for _, d := range r.dst {
-			if strings.HasPrefix(d, "tag:") {
-				for _, p := range r.ports {
-					if !slices.Contains(ports[d], p) {
-						ports[d] = append(ports[d], p)
-					}
-				}
-				if _, ok := ports[d]; !ok {
-					ports[d] = nil
-				}
-			}
-		}
-	}
 	owned := map[string][]entry{}
-	for tag, ps := range ports {
-		if hubTags[tag] {
-			continue
-		}
-		for _, sp := range refs {
-			if policy.Allowed(tag, spokePatterns(&sp)) {
-				slices.Sort(ps)
-				ns := nodes(tag)
-				tip := []string{tag, "spoke " + sp.Name, "ports: " + or(strings.Join(ps, ", "), "— (no live rule)"), "nodes: " + ns}
-				owned[sp.Name] = append(owned[sp.Name], entry{label: tag, tip: strings.Join(tip, "\n"),
-					ready: state{Text: ns, Class: map[string]string{"online": "ok", "offline": "bad", "unknown": "unknown"}[ns]}, notReady: ns != "online"})
-				break
-			}
-		}
+	for _, st := range spokeTags(tn, hubTags, data, rules) {
+		ns := nodes(st.tag)
+		tip := []string{st.tag, "spoke " + st.spoke, "ports: " + or(strings.Join(st.ports, ", "), "— (no live rule)"), "nodes: " + ns}
+		owned[st.spoke] = append(owned[st.spoke], entry{label: st.tag, tip: strings.Join(tip, "\n"),
+			ready: state{Text: ns, Class: map[string]string{"online": "ok", "offline": "bad", "unknown": "unknown"}[ns]}, notReady: ns != "online"})
 	}
 
 	statuses := map[string]tnv1.SpokeStatus{}
@@ -230,6 +198,56 @@ func buildMap(tn *tnv1.Tailnet, ins []tnv1.TailnetIngress, sites []tnv1.TailnetS
 	}
 	m.Grid = grid.String()
 	return m
+}
+
+type spokeTag struct {
+	spoke, tag string
+	ports      []string // as the live rules write them, sorted
+}
+
+// spokeTags applies rules 4 and 5: candidate tags are those of tagged nodes and the tag
+// destinations of the live rules; each goes to the first spoke by name whose patterns match it,
+// except a tag of the hub's own ingresses. The result is sorted by tag.
+func spokeTags(tn *tnv1.Tailnet, hubTags map[string]bool, data tailnetData, rules []liveRule) []spokeTag {
+	refs := slices.Clone(tn.Spec.Policy.Spokes)
+	slices.SortFunc(refs, func(a, b tnv1.SpokeRef) int { return strings.Compare(a.Name, b.Name) })
+	ports := map[string][]string{}
+	for _, n := range data.Nodes {
+		for _, t := range n.Tags {
+			if _, ok := ports[t]; !ok {
+				ports[t] = nil
+			}
+		}
+	}
+	for _, r := range rules {
+		for _, d := range r.dst {
+			if strings.HasPrefix(d, "tag:") {
+				if _, ok := ports[d]; !ok {
+					ports[d] = nil
+				}
+				for _, p := range r.ports {
+					if !slices.Contains(ports[d], p) {
+						ports[d] = append(ports[d], p)
+					}
+				}
+			}
+		}
+	}
+	var out []spokeTag
+	for tag, ps := range ports {
+		if hubTags[tag] {
+			continue
+		}
+		for _, sp := range refs {
+			if policy.Allowed(tag, spokePatterns(&sp)) {
+				slices.Sort(ps)
+				out = append(out, spokeTag{spoke: sp.Name, tag: tag, ports: ps})
+				break
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b spokeTag) int { return strings.Compare(a.tag, b.tag) })
+	return out
 }
 
 // header places the condition rows (Y is a text baseline; title at Y+26, subtitle at Y+46) and

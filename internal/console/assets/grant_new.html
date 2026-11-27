@@ -1,0 +1,54 @@
+{{define "content"}}
+<h1>{{.Title}}</h1>
+{{if .Body.Self}}
+<p class="lede">Ask for access for yourself to one target of a tailnet that writes its policy. {{if .Body.Admin}}One other admin{{else if .Body.FourEyes}}Two admins{{else}}An admin{{end}} must approve it. The duration counts from the last approval.</p>
+{{else}}
+<p class="lede">A grant lets people or groups reach one target of a tailnet that writes its policy. The operator renders it into the live policy; the expiry is checked against the clock of the operator.</p>
+{{end}}
+{{if and .Body.FourEyes .Body.Self}}<p class="notice">Four-eyes approval is on: a user's request needs two admins, an admin's request one other admin. With only one admin, nothing can be approved.</p>{{end}}
+{{if and .Body.FourEyes .Body.Admin (not .Body.Self)}}<p class="notice">Four-eyes approval is on: this form makes a request that another admin approves. With only one admin, nothing can be approved.</p>{{end}}
+{{with .Body.Errors}}<div class="notice notice--bad form__errors" role="alert"><ul>{{range .}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
+<section class="panel">
+  <h2>1. Target</h2>
+  <form method="get" action="{{.Body.Path}}/new" class="form">
+    <label for="target">Tailnet and target</label>
+    <select id="target" name="target" required>
+      <option value="">Choose a target</option>
+      {{range .Body.Tailnets}}<optgroup label="{{.Name}}">{{range .Targets}}<option value="{{.Key}}"{{if eq .Key $.Body.Form.Target}} selected{{end}}>{{.Label}}</option>{{else}}<option disabled>no target</option>{{end}}</optgroup>{{end}}
+    </select>
+    {{if not .Body.Tailnets}}<p class="muted">{{if .Body.Self}}No tailnet that writes its policy knows you: sign in to the tailnet with the identity provider first.{{else}}No Tailnet writes its policy: a grant needs policy mode DryRun or Apply and a base ConfigMap.{{end}}</p>{{end}}
+    <p><button type="submit" class="button">Continue</button></p>
+  </form>
+</section>
+{{with .Body.Target}}
+<section class="panel">
+  <h2>2. Access to {{.Label}}</h2>
+  {{if $.Body.Tailnet.Problem}}<p class="notice notice--bad">The operator cannot provide this tailnet's users or policy right now: no recipient can be chosen.</p>{{end}}
+  <form method="post" action="{{$.Body.Path}}" class="form">
+    <input type="hidden" name="target" value="{{.Key}}">
+    {{if .Site}}
+    <label for="prefixes">Addresses or prefixes inside the site</label>
+    <input id="prefixes" name="prefixes" value="{{$.Body.Form.Prefixes}}" required>
+    <p class="form__hint">Comma-separated, within {{range $i, $p := .Site}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}.</p>
+    {{end}}
+    <label for="ports">TCP ports</label>
+    <input id="ports" name="ports" value="{{$.Body.Form.Ports}}" required>
+    <p class="form__hint">Comma-separated, at most 16. Prefilled with the target's current ports; the grant keeps this list.</p>
+    {{if $.Body.Self}}
+    <p>Recipient: {{range $.Body.Tailnet.Recipients}}{{.Label}}{{end}} (you)</p>
+    {{else}}
+    <fieldset>
+      <legend>Recipients</legend>
+      {{range $i, $r := $.Body.Tailnet.Recipients}}<label class="check"><input type="checkbox" name="sources" value="{{$r.Value}}"{{range $.Body.Form.Sources}}{{if eq . $r.Value}} checked{{end}}{{end}}> {{$r.Label}}</label>{{else}}<p class="muted">No user with an identity-provider sign-in and no group in the live policy.</p>{{end}}
+      <p class="form__hint">People who never signed in to the tailnet with the identity provider cannot be chosen.</p>
+    </fieldset>
+    {{end}}
+    <label for="duration">Duration</label>
+    <select id="duration" name="duration">{{range $.Body.Durations}}<option value="{{.Value}}"{{if eq .Value $.Body.Form.Duration}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+    <label for="description">Description</label>
+    <input id="description" name="description" maxlength="253" value="{{$.Body.Form.Description}}">
+    <p><button type="submit" class="button button--brand">{{if or $.Body.Self $.Body.FourEyes}}Request grant{{else}}Create grant{{end}}</button> <a href="{{$.Body.Path}}">Cancel</a></p>
+  </form>
+</section>
+{{end}}
+{{end}}

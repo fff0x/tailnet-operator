@@ -1,0 +1,66 @@
+{{define "list"}}{{range $i, $v := .}}{{if $i}}<br>{{end}}<code>{{$v}}</code>{{else}}<span class="muted">—</span>{{end}}{{end}}
+{{define "content"}}
+<div class="heading">
+  <h1>Requests</h1>
+  <a class="button button--brand" href="/requests/new">New request</a>
+</div>
+{{if .Body.Admin}}
+<p class="lede">Every access request. An admin approves or rejects a request of somebody else; one rejection ends it. The last approval makes or extends the grant, its duration counted from then. Every decision is in the <a href="/audit">audit log</a> before it is made.</p>
+{{else}}
+<p class="lede">Ask for access for yourself, or to extend a grant that names you alone. An admin decides; you may withdraw a request until then.</p>
+{{end}}
+{{if .Body.FourEyes}}<p class="notice">Four-eyes approval is on: a user's request needs two admins, an admin's request one other admin. With only one admin, nothing can be approved.</p>{{end}}
+{{if not .Body.Admin}}
+<section class="panel">
+  <h2>Your grants</h2>
+{{with .Body.Grants}}
+  <div class="scroll"><table>
+    <thead><tr><th>Grant</th><th>Tailnet</th><th>Target</th><th>Ports</th><th>Expires</th><th>Extend</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td><code>{{.Name}}</code>{{with .Description}}<span class="target__name">{{.}}</span>{{end}}</td>
+      <td><code>{{.Tailnet}}</code></td>
+      <td class="nowrap">{{template "list" .Target}}</td>
+      <td class="nowrap">{{template "list" .Ports}}</td>
+      <td>{{.Expires}}</td>
+      <td><form class="inline" method="post" action="/grants/{{.Name}}/request">
+        <label class="visually-hidden" for="d-{{.Name}}">Duration for {{.Name}}</label>
+        <select id="d-{{.Name}}" name="duration">{{range $.Body.Durations}}<option value="{{.Value}}"{{if eq .Value "8h"}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+        <button type="submit" class="button">Ask to {{if .Expired}}renew{{else}}extend{{end}}</button>
+      </form></td>
+    </tr>{{end}}</tbody>
+  </table></div>
+{{else}}
+  <p class="muted">No console grant names you alone.</p>
+{{end}}
+</section>
+{{end}}
+<section class="panel">
+  <h2>{{if .Body.Admin}}All requests{{else}}Your requests{{end}}</h2>
+{{with .Body.Rows}}
+  <div class="scroll"><table>
+    <thead><tr><th>Request</th><th>Tailnet</th><th>Asks for</th><th>Target</th><th>Ports</th><th>Recipients</th><th>Duration</th><th>Requested by</th><th>State</th><th>Decide</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td><code class="nowrap">{{.Name}}</code>{{with .Created}}<span class="target__name">{{.}}</span>{{end}}{{with .Description}}<span class="target__name">{{.}}</span>{{end}}</td>
+      <td><code>{{.Tailnet}}</code></td>
+      <td>{{if eq .Action "Extend"}}extend <code>{{.Grant}}</code>{{else}}new grant{{end}}</td>
+      <td class="nowrap">{{if eq .Action "Create"}}{{template "list" .Target}}{{else}}<span class="muted">as granted</span>{{end}}</td>
+      <td class="nowrap">{{if eq .Action "Create"}}{{template "list" .Ports}}{{else}}<span class="muted">as granted</span>{{end}}</td>
+      <td>{{range $i, $r := .Recipients}}{{if $i}}<br>{{end}}{{$r}}{{else}}<span class="muted">as granted</span>{{end}}</td>
+      <td>{{.Duration}}</td>
+      <td>{{.Requester}}<span class="target__name">{{if eq .RequestedAs "Admin"}}admin{{else}}user{{end}}</span></td>
+      <td><span class="state state--{{if eq .Phase "Approved"}}ok{{else if eq .Phase "Pending"}}unknown{{else}}bad{{end}}">{{.Phase}}</span>
+        {{if .Applied}}<span class="target__name">grant written; approve to close</span>{{else if eq .Phase "Pending"}}<span class="target__name">{{.Count}} of {{.Needed}} approvals</span>{{end}}
+        {{range .Approvals}}<span class="target__name">approved by {{.}}</span>{{end}}
+        {{with .Decided}}<span class="target__name">{{.}}</span>{{end}}
+        {{if eq .Phase "Approved"}}<span class="target__name">grant <code>{{.Grant}}</code></span>{{end}}</td>
+      <td>{{if .Approve}}<form class="inline" method="post" action="/requests/{{.Name}}/approve"><button type="submit" class="button button--brand">Approve</button></form>{{end}}
+        {{if .Reject}}<form class="inline" method="post" action="/requests/{{.Name}}/reject"><button type="submit" class="button button--danger">Reject</button></form>{{end}}
+        {{if .Withdraw}}<form class="inline" method="post" action="/requests/{{.Name}}/withdraw"><button type="submit" class="button">Withdraw</button></form>{{end}}
+        {{if not (or .Approve .Reject .Withdraw)}}<span class="muted">—</span>{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+{{else}}
+  <p class="muted">No request yet.</p>
+{{end}}
+</section>
+{{end}}

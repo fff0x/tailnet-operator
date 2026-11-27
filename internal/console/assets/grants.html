@@ -1,0 +1,34 @@
+{{define "content"}}
+<div class="heading">
+  <h1>Grants</h1>
+  <a class="button button--brand" href="/grants/new">New grant</a>
+</div>
+<p class="lede">Every TailnetGrant in the cluster. The console changes only the grants it created; every change is in the <a href="/audit">audit log</a> before it is made. Revoking sets the expiry to now and keeps the object.</p>
+{{if .Body.FourEyes}}<p class="notice">Four-eyes approval is on: a new grant or an extension becomes a <a href="/requests">request</a> that another admin approves; revoking acts at once. With only one admin, nothing can be approved.</p>{{end}}
+<section class="panel">
+{{with .Body.Rows}}
+  <div class="scroll"><table>
+    <thead><tr><th>Grant</th><th>Tailnet</th><th>Target</th><th>Ports</th><th>Recipients</th><th>Expires</th><th>Ready</th><th>Change</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td><code>{{.Name}}</code>{{with .Description}}<span class="target__name">{{.}}</span>{{end}}</td>
+      <td><code>{{.Tailnet}}</code></td>
+      <td class="nowrap">{{template "list" .Target}}</td>
+      <td class="nowrap">{{template "list" .Ports}}</td>
+      <td>{{range $i, $r := .Recipients}}{{if $i}}<br>{{end}}{{$r}}{{end}}</td>
+      <td>{{.Expires}}</td>
+      <td>{{template "state" .Ready}}</td>
+      <td>{{if .Managed}}
+        <form class="inline" method="post" action="/grants/{{.Name}}/extend">
+          <label class="visually-hidden" for="d-{{.Name}}">Duration for {{.Name}}</label>
+          <select id="d-{{.Name}}" name="duration">{{range $.Body.Durations}}<option value="{{.Value}}"{{if eq .Value "8h"}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+          <button type="submit" class="button">{{if .Expired}}Renew{{else}}Extend{{end}}</button>
+        </form>
+        {{if not .Expired}}<form class="inline" method="post" action="/grants/{{.Name}}/revoke"><button type="submit" class="button button--danger">Revoke</button></form>{{end}}
+      {{else}}<span class="muted">Git or kubectl</span>{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+{{else}}
+  <p class="muted">No TailnetGrant yet.</p>
+{{end}}
+</section>
+{{end}}

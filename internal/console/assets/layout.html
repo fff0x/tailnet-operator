@@ -15,6 +15,13 @@
   <nav class="nav">
     <a href="/"{{if eq .Title "Overview"}} aria-current="page"{{end}}>Overview</a>
     <a href="/access"{{if eq .Title "My access"}} aria-current="page"{{end}}>My access</a>
+    {{if .Requests}}
+    <a href="/requests"{{if or (eq .Title "Requests") (eq .Title "New request")}} aria-current="page"{{end}}>Requests{{if .Pending}} <span class="count" title="{{.Pending}} undecided">{{.Pending}}</span>{{end}}</a>
+    {{end}}
+    {{if .Manage}}
+    <a href="/grants"{{if or (eq .Title "Grants") (eq .Title "New grant")}} aria-current="page"{{end}}>Grants</a>
+    <a href="/audit"{{if eq .Title "Audit log"}} aria-current="page"{{end}}>Audit log</a>
+    {{end}}
   </nav>
   {{end}}
   {{with .Session}}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -111,6 +112,9 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	if err := tnv1.AddToScheme(s); err != nil {
 		t.Fatal(err)
 	}
+	if err := corev1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
 	return s
 }
 
@@ -133,8 +137,8 @@ func newTestConsole(t *testing.T, mutate func(*Config), objs ...client.Object) *
 	logs := &strings.Builder{}
 	var mu sync.Mutex
 	log := funcr.New(func(prefix, args string) { mu.Lock(); logs.WriteString(prefix + args + "\n"); mu.Unlock() }, funcr.Options{})
-	reader := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(objs...).Build()
-	s, err := New(cfg, reader, log)
+	reader := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(objs...).WithStatusSubresource(&tnv1.TailnetAccessRequest{}).Build()
+	s, err := New(cfg, reader, reader, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +414,7 @@ func TestConfigValidate(t *testing.T) {
 			t.Errorf("%s: error echoes the secret", name)
 		}
 	}
-	if _, err := New(Config{}, nil, logr.Discard()); err == nil {
+	if _, err := New(Config{}, nil, nil, logr.Discard()); err == nil {
 		t.Error("New accepted an empty configuration")
 	}
 }

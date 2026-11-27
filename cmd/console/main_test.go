@@ -18,4 +18,21 @@ func TestConfigFromEnv(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	if cfg.AuditDir != "" || cfg.FourEyes {
+		t.Fatal("access management on without CONSOLE_AUDIT_DIR")
+	}
+	env["CONSOLE_FOUR_EYES"] = "true"
+	if err := configFromEnv(func(k string) string { return env[k] }).Validate(); err == nil {
+		t.Fatal("four-eyes accepted without access management")
+	}
+	env["CONSOLE_AUDIT_DIR"] = "/var/lib/tsunaro-console"
+	cfg = configFromEnv(func(k string) string { return env[k] })
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("audit directory accepted without its anchor")
+	}
+	env["CONSOLE_AUDIT_ANCHOR"], env["POD_NAMESPACE"] = "tsunaro-console-audit", "tsunaro-system"
+	cfg = configFromEnv(func(k string) string { return env[k] })
+	if err := cfg.Validate(); err != nil || cfg.AuditDir != "/var/lib/tsunaro-console" || cfg.AuditAnchor != "tsunaro-console-audit" || cfg.Namespace != "tsunaro-system" || !cfg.FourEyes {
+		t.Fatalf("config %+v: %v", cfg, err)
+	}
 }

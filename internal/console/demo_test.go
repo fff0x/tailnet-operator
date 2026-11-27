@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -26,7 +27,9 @@ import (
 // It is not a way to run the console. The data is made up, and this test server puts one session
 // into every request, because a browser does not keep the __Host- cookie over plain HTTP. The
 // session ends after its hour, which shows the notice of the live update. The site "office"
-// changes its state every 15 seconds. Stop with Ctrl-C.
+// changes its state every 15 seconds. Grant management is on with four-eyes approval; its audit
+// log lives in a temporary directory that the test removes when it stops. "?as=admin2" and
+// "?as=user" switch to the second admin Bob and the user Carol, "?as=admin" back. Stop with Ctrl-C.
 func TestDemo(t *testing.T) {
 	addr := os.Getenv("CONSOLE_DEMO")
 	if addr == "" {
@@ -43,15 +46,25 @@ func TestDemo(t *testing.T) {
 				Prefixes: []tnv1.GatewayPrefix{tnv1.GatewayPrefix(fmt.Sprintf("10.%d.0.0/16", 40+i))}},
 			Status: tnv1.TailnetSiteStatus{Conditions: []metav1.Condition{cond("Ready", status, "Ready")}}})
 	}
-	c := newTestConsole(t, nil, objs...)
-	users, _ := json.Marshal([]headscale.User{{ID: "1", Name: "alice", Email: "alice@example.com", ProviderID: c.idp.srv.URL + "/" + testSubject}})
-	policy, _ := json.Marshal(`{"grants":[` +
+	objs = append(objs, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: testNS, Name: testAnchorCM}})
+	dir := t.TempDir()
+	c := newTestConsole(t, func(cfg *Config) { cfg.AuditDir, cfg.AuditAnchor, cfg.Namespace = dir, testAnchorCM, testNS }, objs...)
+	c.fourEyes = true
+	users, _ := json.Marshal([]headscale.User{{ID: "1", Name: "alice", DisplayName: "Alice Example", Email: "alice@example.com", ProviderID: c.idp.srv.URL + "/" + testSubject},
+		{ID: "2", Name: "bob", DisplayName: "Bob Example", ProviderID: c.id("bob")}, {ID: "3", Name: "carol", DisplayName: "Carol Example", ProviderID: c.id("carol")},
+		{ID: "4", Name: "dave"}})
+	policy, _ := json.Marshal(`{"groups":{"group:staff":["alice@"]},"grants":[` +
 		`{"src":["alice@"],"dst":["tag:wiki"],"ip":["tcp:443","tcp:22"]},` +
 		`{"src":["alice@"],"dst":["tag:db-zeta-1"],"ip":["tcp:5432"]},` +
 		`{"src":["autogroup:member"],"dst":["tag:api-zeta-2"],"ip":["tcp:8443"]}]}`)
 	op, _, _ := fakeOperator(t, string(users), string(policy))
 	c.dir = newDirectory(op.URL, tokenFile(t, "tok"))
-	sc := cookie(c.signIn(t, flow{returnTo: "/"}, map[string]any{"groups": []string{"admins"}, "name": "Demo"}), sessionCookie)
+	sessions := map[string]*http.Cookie{
+		"admin":  cookie(c.signIn(t, flow{returnTo: "/"}, map[string]any{"groups": []string{"admins"}, "name": "Demo"}), sessionCookie),
+		"admin2": c.as(t, "bob", true)[0],
+		"user":   c.as(t, "carol", false)[0],
+	}
+	c.expect(t, "demo request", c.post(t, "/requests", []*http.Cookie{sessions["user"]}, wikiForm), http.StatusSeeOther)
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -61,7 +74,14 @@ func TestDemo(t *testing.T) {
 	defer stop()
 	go func() {
 		_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r.AddCookie(sc)
+			as := "admin"
+			if v := r.URL.Query().Get("as"); sessions[v] != nil {
+				as = v
+				http.SetCookie(w, &http.Cookie{Name: "demo-as", Value: v, Path: "/"})
+			} else if ck, err := r.Cookie("demo-as"); err == nil && sessions[ck.Value] != nil {
+				as = ck.Value
+			}
+			r.AddCookie(sessions[as])
 			c.h.ServeHTTP(w, r)
 		}))
 	}()

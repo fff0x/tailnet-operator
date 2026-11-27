@@ -38,6 +38,15 @@ type Config struct {
 	// ServiceAccount token presented to it.
 	OperatorURL string
 	TokenFile   string
+	// AuditDir switches access management on: admins manage TailnetGrants, and every change is
+	// first appended to AuditDir/audit.jsonl, whose head the ConfigMap AuditAnchor in Namespace
+	// keeps. Empty: the console only reads.
+	AuditDir    string
+	AuditAnchor string
+	Namespace   string
+	// FourEyes makes admins request their own grants and extensions: another admin approves
+	// them, and a user's request needs two admins.
+	FourEyes bool
 }
 
 // Validate never echoes the secret.
@@ -66,6 +75,12 @@ func (c Config) Validate() error {
 	if u, err := url.Parse(c.OperatorURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
 		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return errors.New("console operator URL must be an http(s) URL without path, query or credentials")
+	}
+	if c.AuditDir != "" && (strings.TrimSpace(c.AuditAnchor) == "" || strings.TrimSpace(c.Namespace) == "") {
+		return errors.New("console access management needs the audit anchor ConfigMap and its namespace")
+	}
+	if c.FourEyes && c.AuditDir == "" {
+		return errors.New("console four-eyes approval needs access management")
 	}
 	if !slices.Contains(c.Scopes, oidc.ScopeOpenID) {
 		return errors.New("console scopes must contain openid")
@@ -280,4 +295,15 @@ func (s *Server) signedIn(page func(http.ResponseWriter, *http.Request, *session
 		}
 		page(w, r, &sess)
 	}
+}
+
+// adminOnly serves the page to admins and answers everybody else with 403 (rule 1).
+func (s *Server) adminOnly(page func(http.ResponseWriter, *http.Request, *session)) http.HandlerFunc {
+	return s.signedIn(func(w http.ResponseWriter, r *http.Request, sess *session) {
+		if sess.Role != roleAdmin {
+			s.message(w, r, http.StatusForbidden, "Admins only", "Only console admins manage grants, decide requests and read the audit log.")
+			return
+		}
+		page(w, r, sess)
+	})
 }
