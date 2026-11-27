@@ -207,7 +207,8 @@ func reason(s string) string {
 		"Denied", "WorkloadBlocked", "WorkloadMigrating", "WorkloadMigrationBlocked", "HTTPTransitionPending", "HTTPTransitionBlocked",
 		"AddressAssigned", "PendingAddress", "BackendProbePending",
 		"BackendCAUnavailable", "BackendCAMissing", "BackendCAInvalid", "BackendCAForbidden", "BackendTLSConfigurationInvalid",
-		"WorkloadUpdateConflict", "WorkloadUpdateBlocked", "ServiceUpdateConflict", "ServiceUpdateBlocked", "PodCurrent", "PodTemplateStale", "HubMerged":
+		"WorkloadUpdateConflict", "WorkloadUpdateBlocked", "ServiceUpdateConflict", "ServiceUpdateBlocked", "PodCurrent", "PodTemplateStale", "HubMerged",
+		"Expired", "ExpiryPending", "TargetUnknown", "TargetOutsideSites", "NotPolicyWriter":
 		return s
 	default:
 		return "Other"
@@ -254,6 +255,17 @@ func (m *Metrics) Observe(obj metav1.Object) {
 		// A suspended gateway reports Ready=False/Suspended by design; exporting it would page
 		// TailnetResourceNotReady forever. Suspended gateways are absent from the gauges.
 		if o.Spec.Suspend == nil || *o.Spec.Suspend {
+			m.delete(identity{kind, "", o.Name})
+			return
+		}
+	case *tnv1.TailnetGrant:
+		kind = "TailnetGrant"
+		tailnet = o.Spec.TailnetRef.Name
+		conditions = o.Status.Conditions
+		// An expired grant reports Ready=False/Expired by design and stays until somebody deletes
+		// it; exporting it would page TailnetResourceNotReady forever. Expired grants are absent
+		// from the gauges. ExpiryPending stays: the access then outlives the expiry.
+		if c := meta.FindStatusCondition(conditions, "Ready"); c != nil && c.Reason == "Expired" && c.ObservedGeneration == o.Generation {
 			m.delete(identity{kind, "", o.Name})
 			return
 		}

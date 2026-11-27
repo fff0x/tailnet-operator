@@ -52,6 +52,13 @@ rules:
   - apiGroups: ["tsunaro.io"]
     resources: [tailnetsites/status]
     verbs: [get, update, patch]
+  # Grants are rendered by the policy controller; only their status is written.
+  - apiGroups: ["tsunaro.io"]
+    resources: [tailnetgrants]
+    verbs: [get, list, watch]
+  - apiGroups: ["tsunaro.io"]
+    resources: [tailnetgrants/status]
+    verbs: [get, update, patch]
   # OwnerReferencesPermissionEnforcement checks this authorization, including
   # when a child is created. Preserve foreground-GC behavior without CR spec writes.
   - apiGroups: ["tsunaro.io"]

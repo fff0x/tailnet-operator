@@ -57,10 +57,19 @@ type Gateway struct {
 }
 
 // Site is one unblocked TailnetSite: its prefixes and the tags allowed to advertise them. Only
-// autoApprovers are rendered — who may reach a site stays a grant in the base policy.
+// autoApprovers are rendered — who may reach a site is a grant in the base policy or a TailnetGrant.
 type Site struct {
 	Prefixes  []string
 	Approvers []string
+}
+
+// Grant is one TailnetGrant the controller found valid and unexpired: who may reach a tag or
+// prefixes on which TCP ports. The destination is not checked here: the controller admits only
+// declared ingress tags and prefixes inside unblocked sites.
+type Grant struct {
+	Sources []string
+	Dst     []string
+	Ports   []int32
 }
 
 // Inputs is everything Render needs besides the base document.
@@ -72,6 +81,7 @@ type Inputs struct {
 	Ingresses              []Ingress
 	Gateways               []Gateway
 	Sites                  []Site
+	Grants                 []Grant
 }
 
 // Summary counts what was added (including spoke fragment contributions), how many fragments were
@@ -209,7 +219,8 @@ func generate(doc map[string]any, in Inputs, sum *Summary) {
 		}
 	}
 
-	// grants: one per (egress, port) and one per ingress; identical rules are not duplicated.
+	// grants: one per (egress, port), one per ingress and one per TailnetGrant; identical rules are
+	// not duplicated.
 	grants := arr(doc["grants"])
 	seen := map[string]bool{}
 	for _, g := range grants {
@@ -252,18 +263,57 @@ func generate(doc map[string]any, in Inputs, sum *Summary) {
 			sum.Denied = append(sum.Denied, i.Tag)
 			continue
 		}
-		ports := make([]int, 0, len(i.Ports))
-		for _, p := range i.Ports {
-			ports = append(ports, int(p))
+		add(map[string]any{"src": toAny(dedupe(i.AllowFrom)), "dst": []any{i.Tag}, "ip": tcpPorts(i.Ports)})
+	}
+	// TailnetGrants, one entry each. Sorted by content, so the render does not depend on list order.
+	extra := make([]map[string]any, 0, len(in.Grants))
+	for _, g := range in.Grants {
+		if len(g.Sources) == 0 || len(g.Dst) == 0 || len(g.Ports) == 0 {
+			continue
 		}
-		sort.Ints(ports)
-		ip := make([]any, 0, len(ports))
-		for _, p := range dedupeInts(ports) {
-			ip = append(ip, fmt.Sprintf("tcp:%d", p))
-		}
-		add(map[string]any{"src": toAny(dedupe(i.AllowFrom)), "dst": []any{i.Tag}, "ip": ip})
+		extra = append(extra, map[string]any{"src": toAny(dedupe(g.Sources)), "dst": toAny(dedupe(g.Dst)), "ip": tcpPorts(g.Ports)})
+	}
+	sort.Slice(extra, func(a, b int) bool { return canon(extra[a]) < canon(extra[b]) })
+	for _, g := range extra {
+		add(g)
 	}
 	doc["grants"] = grants
+}
+
+// tcpPorts returns the sorted, de-duplicated "tcp:<port>" entries of a grant.
+func tcpPorts(ports []int32) []any {
+	sorted := make([]int, 0, len(ports))
+	for _, p := range ports {
+		sorted = append(sorted, int(p))
+	}
+	sort.Ints(sorted)
+	ip := make([]any, 0, len(sorted))
+	for _, p := range dedupeInts(sorted) {
+		ip = append(ip, fmt.Sprintf("tcp:%d", p))
+	}
+	return ip
+}
+
+// GrantDstTags returns the sorted tags that the fragments' grants name as dst. A validated fragment
+// may grant only to its own tags (ValidateFragment), so each one is an ingress tag that fragment
+// declares. A fragment that does not parse contributes nothing; Render reports it.
+func GrantDstTags(fragments ...[]byte) []string {
+	var tags []string
+	for _, f := range fragments {
+		m, err := parse(f)
+		if err != nil {
+			continue
+		}
+		for _, g := range arr(m["grants"]) {
+			gm, _ := g.(map[string]any)
+			for _, d := range strs(gm["dst"]) {
+				if strings.HasPrefix(d, "tag:") {
+					tags = append(tags, d)
+				}
+			}
+		}
+	}
+	return dedupe(tags)
 }
 
 // dropUnknownSources removes a tag: source that no tagOwner declares and a group: source that the
@@ -271,7 +321,7 @@ func generate(doc map[string]any, in Inputs, sum *Summary) {
 // grant, so one undeclared source — a typo, an egress tag not created yet, a group nobody added —
 // can no longer make Headscale reject the whole policy (observed 2026-11-18: HTTP 500, live policy
 // frozen). Base grants (keyed before generate) are never touched: the base is the admin's word. A
-// grant left with no source disappears. Unknown sources are reported so the owning ingress can show
+// grant left with no source disappears, as does one that now equals another grant. Unknown sources are reported so the owning ingress can show
 // SourceTagUnknown or SourceGroupUnknown. Users are not checked: Headscale accepts unknown users.
 func dropUnknownSources(doc map[string]any, baseGrants map[string]bool, sum *Summary) {
 	owners := ensureMap(doc, "tagOwners")
@@ -279,9 +329,11 @@ func dropUnknownSources(doc map[string]any, baseGrants map[string]bool, sum *Sum
 	grants := arr(doc["grants"])
 	out := grants[:0]
 	unknown := map[string]bool{}
+	seen := map[string]bool{}
 	for _, g := range grants {
 		gm, ok := g.(map[string]any)
 		if baseGrants[canon(g)] || !ok {
+			seen[canon(g)] = true
 			out = append(out, g)
 			continue
 		}
@@ -307,6 +359,13 @@ func dropUnknownSources(doc map[string]any, baseGrants map[string]bool, sum *Sum
 		}
 		if len(kept) != len(src) {
 			gm["src"] = toAny(kept)
+		}
+		// Without the dropped source the grant can equal one that is already there.
+		if k := canon(gm); seen[k] {
+			sum.Grants--
+			continue
+		} else {
+			seen[k] = true
 		}
 		out = append(out, gm)
 	}

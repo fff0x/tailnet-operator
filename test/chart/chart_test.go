@@ -352,11 +352,11 @@ func TestRBACPrivilegesExact(t *testing.T) {
 			}
 			expected := map[string][]grant{
 				"ClusterRole/tailnet-operator-crds": {
-					{"tsunaro.io", "tailnets tailnetsites", read},
+					{"tsunaro.io", "tailnets tailnetsites tailnetgrants", read},
 					// patch only carries a finalizer (gateway teardown, ingress authkey expiry);
 					// spec is CEL-guarded.
 					{"tsunaro.io", "tailnetgateways tailnetingresses", read + " patch"},
-					{"tsunaro.io", "tailnets/status tailnetingresses/status tailnetgateways/status tailnetsites/status", status},
+					{"tsunaro.io", "tailnets/status tailnetingresses/status tailnetgateways/status tailnetsites/status tailnetgrants/status", status},
 					{"tsunaro.io", "tailnets/finalizers tailnetingresses/finalizers", "update"},
 				},
 				"ClusterRole/tailnet-operator-workloads": append(append([]grant{}, workloads...),

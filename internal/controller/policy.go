@@ -67,6 +67,8 @@ type TailnetPolicyReconciler struct {
 	Scheme            *runtime.Scheme
 	Recorder          record.EventRecorder
 	OperatorNamespace string
+	// Now is the clock that decides when a TailnetGrant expires; nil means time.Now.
+	Now func() time.Time
 
 	mu       sync.Mutex
 	failures map[string]int // consecutive rejected/failed writes per Tailnet
@@ -91,7 +93,20 @@ func (r *TailnetPolicyReconciler) clearRetry(name string) {
 	delete(r.failures, name)
 }
 
+// Reconcile wraps reconcile: a TailnetGrant expires without any Kubernetes event, so the next
+// reconcile is due at the next expiry at the latest. A failed reconcile keeps its error backoff.
 func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	run := &grantRun{}
+	res, err := r.reconcile(ctx, req, run)
+	if err == nil && !run.next.IsZero() && run.stage != grantsNotWriter {
+		if wait := max(run.next.Sub(r.now()), time.Second); res.RequeueAfter == 0 || wait < res.RequeueAfter {
+			res.RequeueAfter = wait
+		}
+	}
+	return res, err
+}
+
+func (r *TailnetPolicyReconciler) reconcile(ctx context.Context, req ctrl.Request, run *grantRun) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 	var tn tnv1.Tailnet
 	if err := r.Get(ctx, req.NamespacedName, &tn); err != nil {
@@ -101,8 +116,18 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	// Grants are read before any exit below: every exit reports on them (grantStatus) and the
+	// wrapper needs the next expiry.
+	grants, err := r.boundGrants(ctx, tn.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	run.now, run.grants = r.now(), grants
+	run.next = nextExpiry(run.now, grants)
+	defer func() { r.grantStatus(ctx, run) }()
 	spec := tn.Spec.Policy
 	if spec.BaseConfigMap == "" && spec.Mode != "Export" {
+		run.stage = grantsNotWriter
 		return ctrl.Result{}, r.off(ctx, &tn)
 	}
 	// Idle reconciliations expose a zero baseline before later events, so increase() can
@@ -111,6 +136,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	r.Metrics.Approved(tn.Name, 0)
 
 	if spec.Mode == "Export" {
+		run.stage = grantsNotWriter // a spoke never renders grants into its fragment
 		return r.export(ctx, &tn)
 	}
 
@@ -173,6 +199,16 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 	frags = append(frags, spokeFrags...)
+	// TailnetGrants: valid spoke ingress tags are known only now, after every fragment is in.
+	ingressTags := make([]string, 0, len(in.Ingresses))
+	for _, i := range in.Ingresses {
+		ingressTags = append(ingressTags, i.Tag)
+	}
+	var sitePrefixes []string
+	for _, s := range in.Sites {
+		sitePrefixes = append(sitePrefixes, s.Prefixes...)
+	}
+	in.Grants, run.verdicts, _ = resolveGrants(run.now, run.grants, ingressTags, policy.GrantDstTags(frags...), sitePrefixes)
 	spokesCond := func(t *tnv1.Tailnet) {
 		t.Status.Spokes = spokeStatuses
 		if len(spec.Spokes) == 0 {
@@ -197,6 +233,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			setCond(&t.Status.Conditions, t.Generation, "PolicyRendered", metav1.ConditionFalse, reason, err.Error())
 		})
 	}
+	run.stage, run.unknown = grantsRendered, sum.UnknownSources
 	canonical, err := policy.Normalize(rendered)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -301,6 +338,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	now := metav1.Now()
 	if liveHash == hash {
+		run.stage = grantsLive
 		r.clearRetry(tn.Name)
 		nodes = r.approveRoutes(ctx, hs, &tn, rendered)
 		return ctrl.Result{RequeueAfter: policyRequeue}, r.status(ctx, tn.Name, func(t *tnv1.Tailnet) {
@@ -352,6 +390,7 @@ func (r *TailnetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			setCond(&t.Status.Conditions, t.Generation, "PolicyApplied", metav1.ConditionFalse, reason, emsg)
 		})
 	}
+	run.stage = grantsLive
 	r.clearRetry(tn.Name)
 	nodes = r.approveRoutes(ctx, hs, &tn, rendered)
 	l.Info("policy applied", "tailnet", tn.Name, "hash", hash[:12], "tags", sum.Tags, "grants", sum.Grants, "routes", sum.Routes)
@@ -744,8 +783,8 @@ func policyModeChanged(e event.UpdateEvent) bool {
 	return a.Status != b.Status || a.Reason != b.Reason
 }
 
-// SetupWithManager: driven by the Tailnet, re-rendered when a bound egress/ingress or the base
-// ConfigMap changes.
+// SetupWithManager: driven by the Tailnet, re-rendered when a bound egress, ingress, gateway, site
+// or grant or the base ConfigMap changes.
 func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	byRef := func(_ context.Context, o client.Object) []reconcile.Request {
 		var name string
@@ -757,6 +796,8 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		case *tnv1.TailnetGateway:
 			name = string(cr.Spec.TailnetRef.Name)
 		case *tnv1.TailnetSite:
+			name = cr.Spec.TailnetRef.Name
+		case *tnv1.TailnetGrant:
 			name = cr.Spec.TailnetRef.Name
 		}
 		if name == "" {
@@ -789,6 +830,14 @@ func (r *TailnetPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			UpdateFunc: predicate.GenerationChangedPredicate{}.Update,
 			DeleteFunc: func(e event.DeleteEvent) bool {
 				r.Metrics.Delete("TailnetSite", "", e.Object.GetName())
+				return true
+			},
+		})).
+		// Grants neither: the policy reconcile renders them and writes their status.
+		Watches(&tnv1.TailnetGrant{}, handler.EnqueueRequestsFromMapFunc(byRef), builder.WithPredicates(predicate.Funcs{
+			UpdateFunc: predicate.GenerationChangedPredicate{}.Update,
+			DeleteFunc: func(e event.DeleteEvent) bool {
+				r.Metrics.Delete("TailnetGrant", "", e.Object.GetName())
 				return true
 			},
 		})).

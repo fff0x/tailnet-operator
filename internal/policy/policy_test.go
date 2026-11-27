@@ -353,3 +353,123 @@ func TestRenderWithFragments(t *testing.T) {
 		}
 	}
 }
+
+// grantEntries returns the canonical form of every rendered grant.
+func grantEntries(t *testing.T, doc []byte) []string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(doc, &m); err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, g := range arr(m["grants"]) {
+		out = append(out, canon(g))
+	}
+	return out
+}
+
+func TestRenderGrants(t *testing.T) {
+	plain, plainSum, err := Render([]byte(base), inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	with := func(grants ...Grant) Inputs {
+		in := inputs
+		in.Grants = grants
+		return in
+	}
+	// No TailnetGrant: the render is byte-identical to the one before the kind existed.
+	if out, _, _ := Render([]byte(base), with()); string(out) != string(plain) {
+		t.Fatal("empty grant list changed the render")
+	}
+
+	db := Grant{Sources: []string{"group:ops", "alice@"}, Dst: []string{"tag:ingress-shop"}, Ports: []int32{5432, 22, 22}}
+	host := Grant{Sources: []string{"bob@example.com"}, Dst: []string{"10.0.0.9/32", "10.0.0.5/32"}, Ports: []int32{443}}
+	out, sum, err := Render([]byte(base), with(db, host))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := grantEntries(t, out)
+	for _, want := range []string{
+		`{"dst":["tag:ingress-shop"],"ip":["tcp:22","tcp:5432"],"src":["alice@","group:ops"]}`,
+		`{"dst":["10.0.0.5/32","10.0.0.9/32"],"ip":["tcp:443"],"src":["bob@example.com"]}`,
+	} {
+		if !contains(entries, want) {
+			t.Fatalf("grant %s missing from %v", want, entries)
+		}
+	}
+	if sum.Grants != plainSum.Grants+2 {
+		t.Fatalf("grants counted %d, want %d", sum.Grants, plainSum.Grants+2)
+	}
+
+	// The render depends on neither the list order nor the order inside a grant.
+	shuffled := Grant{Sources: []string{"alice@", "group:ops"}, Dst: []string{"tag:ingress-shop"}, Ports: []int32{22, 5432}}
+	if again, _, _ := Render([]byte(base), with(host, shuffled)); string(again) != string(out) {
+		t.Fatal("render depends on grant order")
+	}
+
+	// A grant equal to a base rule is not rendered a second time.
+	const dupBase = `{"groups":{"group:ops":["ops@"]},"tagOwners":{"tag:app":["group:ops"]},
+	  "grants":[{"src":["group:ops"],"dst":["tag:app"],"ip":["tcp:443"]}]}`
+	dup, dupSum, err := Render([]byte(dupBase), Inputs{Grants: []Grant{{Sources: []string{"group:ops"}, Dst: []string{"tag:app"}, Ports: []int32{443}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := grantEntries(t, dup); len(got) != 1 || dupSum.Grants != 0 {
+		t.Fatalf("base rule duplicated: %v (%d generated)", got, dupSum.Grants)
+	}
+
+	// An undeclared group is dropped and reported; the user stays. A grant with no source left vanishes.
+	ghost, ghostSum, err := Render([]byte(base), with(
+		Grant{Sources: []string{"group:ghost", "alice@"}, Dst: []string{"tag:ingress-shop"}, Ports: []int32{22}},
+		Grant{Sources: []string{"group:ghost"}, Dst: []string{"tag:ingress-shop"}, Ports: []int32{23}},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries = grantEntries(t, ghost)
+	if !contains(entries, `{"dst":["tag:ingress-shop"],"ip":["tcp:22"],"src":["alice@"]}`) || strings.Contains(string(ghost), "group:ghost") || strings.Contains(string(ghost), "tcp:23") {
+		t.Fatalf("undeclared group not dropped: %v", entries)
+	}
+	if !contains(ghostSum.UnknownSources, "group:ghost") || ghostSum.Grants != plainSum.Grants+1 {
+		t.Fatalf("unknown=%v grants=%d", ghostSum.UnknownSources, ghostSum.Grants)
+	}
+
+	// Two grants that differ only in an undeclared group are one grant after the drop.
+	same, sameSum, err := Render([]byte(base), with(
+		Grant{Sources: []string{"alice@"}, Dst: []string{"tag:ingress-shop"}, Ports: []int32{22}},
+		Grant{Sources: []string{"alice@", "group:ghost"}, Dst: []string{"tag:ingress-shop"}, Ports: []int32{22}},
+		Grant{Sources: []string{"alice@", "group:aaa-ghost"}, Dst: []string{"tag:ingress-shop"}, Ports: []int32{22}},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range grantEntries(t, same) {
+		if e == `{"dst":["tag:ingress-shop"],"ip":["tcp:22"],"src":["alice@"]}` {
+			n++
+		}
+	}
+	if n != 1 || sameSum.Grants != plainSum.Grants+1 {
+		t.Fatalf("grant rendered %d times, %d generated (want %d)", n, sameSum.Grants, plainSum.Grants+1)
+	}
+
+	// A fragment never carries TailnetGrants unless the caller passes them; RenderFragment renders what it is given.
+	if frag, _, _ := RenderFragment(spokeInputs); strings.Contains(string(frag), "alice@") {
+		t.Fatal("fragment carries a grant nobody passed")
+	}
+}
+
+func TestGrantDstTags(t *testing.T) {
+	a := []byte(`{"tagOwners":{"tag:in-a":["x@"],"tag:eg-a":["x@"]},"grants":[
+	  {"src":["group:ops"],"dst":["tag:in-a"],"ip":["tcp:443"]},
+	  {"src":["tag:eg-a"],"dst":["10.0.0.1/32"],"ip":["tcp:5432"]}]}`)
+	b := []byte(`{"grants":[{"src":["group:ops"],"dst":["tag:in-b","tag:in-a"],"ip":["tcp:22"]}]}`)
+	got := GrantDstTags(a, []byte(`not json`), b)
+	if strings.Join(got, ",") != "tag:in-a,tag:in-b" {
+		t.Fatalf("GrantDstTags = %v", got)
+	}
+	if len(GrantDstTags()) != 0 {
+		t.Fatal("no fragments must yield no tags")
+	}
+}

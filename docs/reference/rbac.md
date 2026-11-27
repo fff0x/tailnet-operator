@@ -29,6 +29,8 @@ bindings: a RoleBinding limits its role to that namespace, a ClusterRoleBinding 
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetgateways/status` | `get`, `patch`, `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetgateways` | `get`, `list`, `patch`, `watch` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetgrants/status` | `get`, `patch`, `update` | all names | — |
+| `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetgrants` | `get`, `list`, `watch` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses/finalizers`, `tailnets/finalizers` | `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses/status` | `get`, `patch`, `update` | all names | — |
 | `ClusterRole/tailnet-operator-crds` | — | `cluster-wide` | `tsunaro.io` | `tailnetingresses` | `get`, `list`, `patch`, `watch` | all names | — |

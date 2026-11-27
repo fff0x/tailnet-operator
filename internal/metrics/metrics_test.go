@@ -358,3 +358,37 @@ func TestSiteConditions(t *testing.T) {
 		}
 	}
 }
+
+func TestGrantConditions(t *testing.T) {
+	m, reg := isolated(t)
+	grant := &tnv1.TailnetGrant{ObjectMeta: metav1.ObjectMeta{Name: "alice-db", Generation: 2}}
+	grant.Spec.TailnetRef.Name = "hub"
+	ready := map[string]string{"kind": "TailnetGrant", "name": "alice-db", "tailnet": "hub"}
+	// Every not-ready reason of a grant survives the allowlist and feeds TailnetResourceNotReady.
+	for _, reason := range []string{"NotPolicyWriter", "ExpiryPending", "TargetUnknown", "TargetOutsideSites", "SourceGroupUnknown", "PolicyPending"} {
+		grant.Status.Conditions = []metav1.Condition{cond("Ready", reason, metav1.ConditionFalse, 2)}
+		m.Observe(grant)
+		value(t, reg, "tailnet_resource_ready", ready, 0)
+		value(t, reg, "tailnet_resource_condition", map[string]string{"kind": "TailnetGrant", "name": "alice-db", "type": "Ready", "reason": reason}, 1)
+	}
+	grant.Status.Conditions = []metav1.Condition{cond("Ready", "Granted", metav1.ConditionTrue, 2)}
+	m.Observe(grant)
+	value(t, reg, "tailnet_resource_ready", ready, 1)
+	// An expired grant stays as an object; it must not page TailnetResourceNotReady forever.
+	grant.Status.Conditions = []metav1.Condition{cond("Ready", "Expired", metav1.ConditionFalse, 2)}
+	m.Observe(grant)
+	for _, name := range []string{"tailnet_resource_ready", "tailnet_resource_condition"} {
+		if len(samples(t, reg, name)) != 0 {
+			t.Fatalf("%s exported for an expired grant", name)
+		}
+	}
+	// A new generation (an extension) whose Ready is still the old Expired is not hidden as expired.
+	grant.Generation = 3
+	grant.Status.Conditions = []metav1.Condition{cond("Ready", "Expired", metav1.ConditionFalse, 2), cond("Ready", "Granted", metav1.ConditionTrue, 3)}
+	m.Observe(grant)
+	value(t, reg, "tailnet_resource_ready", ready, 1)
+	m.Delete("TailnetGrant", "", "alice-db")
+	if len(samples(t, reg, "tailnet_resource_ready")) != 0 {
+		t.Fatal("delete retained the grant series")
+	}
+}
