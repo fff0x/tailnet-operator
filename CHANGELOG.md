@@ -13,9 +13,24 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   `console.oidc.userGroup` (or every signed-in person when it is empty) are users. The session is
   a sealed cookie (AES-256-GCM, one hour, key generated at every start); no tokens are kept. User
   references in `allowFrom` appear only as a count, and logs carry no identity. The chart renders
-  a Deployment, a Service, a ServiceAccount and a ClusterRole with `get`, `list` and `watch` on the
-  three kinds, all named `<name>-console`; publish the console with a `TailnetIngress` in
-  `mode: http` ([Console](docs/how-to/console.md)). Off by default.
+  a Deployment, a Service, a ServiceAccount and a ClusterRole with `get`, `list` and `watch` on
+  Tailnets, TailnetIngresses, TailnetSites and TailnetGrants, all named `<name>-console`; publish
+  the console with a `TailnetIngress` in `mode: http` ([Console](docs/how-to/console.md)). Off by
+  default.
+  - **My access.** A page with two lists per Tailnet from the live policy: rules whose `src` names
+    the person (e-mail, user name or provider identifier, built as Headscale builds it) or one of
+    their policy groups, and rules for `autogroup:member` or `*`. Each row names the destination,
+    the matching source, the origin (`TailnetGrant`, `TailnetIngress` or `Policy`, by comparison)
+    and a grant's remaining time.
+  - **Operator console API.** With `console.enabled` every operator replica serves
+    `GET /v1/tailnets/<name>/{users,nodes,policy}` on port 8082 (Service `<name>-console-api`). It
+    reads Headscale with the working key and admits only the console's ServiceAccount, checked by a
+    `TokenReview` for the audience `tailnet-operator` (ClusterRole `<name>-console-api`). Nodes are
+    tagged nodes only.
+  - **Console network policy.** With `networkPolicy.enabled` the chart isolates the console pod
+    for both providers and admits it on the operator's port 8082; `console.networkPolicy.idpCIDRs`
+    is then required.
+  - The Headscale client decodes `displayName` and `providerId` of users.
 - **`TailnetGrant`: time-bound TCP access for people and policy groups.** A cluster-scoped kind in
   the policy-owning cluster (`policy.mode: Apply`). It grants user references or base-policy groups
   access to the tag of a `TailnetIngress`, to an ingress tag of a merged spoke fragment or to

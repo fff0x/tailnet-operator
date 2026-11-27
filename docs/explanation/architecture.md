@@ -146,14 +146,19 @@ ConfigMap, which the single Apply writer merges after review — see
 flowchart LR
   peer[Tailnet peer, browser] -->|HTTPS| ing[TailnetIngress console<br/>agent terminates TLS]
   ing -->|HTTP :8080| con[tailnet-console<br/>Deployment, chart value]
-  con -->|get / list / watch| api[Kubernetes API<br/>Tailnets, TailnetIngresses, TailnetSites]
+  con -->|get / list / watch| api[Kubernetes API<br/>Tailnets, TailnetIngresses,<br/>TailnetSites, TailnetGrants]
+  con -->|HTTP :8082, projected token| op[tailnet-operator<br/>console API]
+  op -->|TokenReview| api
+  op -->|working key| hs[Headscale API<br/>users, nodes, policy]
   peer -.->|sign-in, PKCE| idp[OIDC identity provider]
   con -.->|code exchange, keys, UserInfo| idp
 ```
 
-The chart renders the console with `console.enabled`; it is not created by a CR. It reads three
-kinds through its own ClusterRole and writes nothing, neither to Kubernetes nor to Headscale. The
-admin publishes it with a `TailnetIngress` in `mode: http` ([Console](../how-to/console.md)).
+The chart renders the console with `console.enabled`; it is not created by a CR. It reads four
+kinds through its own ClusterRole and writes nothing, neither to Kubernetes nor to Headscale. It
+has no Headscale key: users and the live policy come from the operator's console API, which every
+operator replica serves and which admits only the console's ServiceAccount. The admin publishes the
+console with a `TailnetIngress` in `mode: http` ([Console](../how-to/console.md)).
 
 ## What the operator creates
 

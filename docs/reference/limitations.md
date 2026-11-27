@@ -66,12 +66,18 @@ code. Versions and the preflight matrix are in [Compatibility](compatibility.md)
 
 | Limit | Why | Workaround or status |
 | --- | --- | --- |
-| The console is **read-only** and shows Tailnets, spokes, TailnetIngresses and TailnetSites; not egresses, gateways or grants. | First slice; the map, "my access" and Headscale users and nodes come with a read endpoint on the operator. | `kubectl get` for the other kinds. |
+| The console is **read-only** and shows Tailnets, spokes, TailnetIngresses, TailnetSites and the person's own access; not egresses, gateways or a list of grants. | The map and live updates come with the next console slice. | `kubectl get` for the other kinds. |
+| "My access" names the origin of a grant by comparison. A base-policy rule equal to a grant's rule shows the grant and its expiry, although the rule stays after the grant expires. | The rendered policy records no origin per grant. | Keep base rules and grants distinct. |
+| "My access" shows no SSH rules, no `via` and no app capabilities. | Only network access by `grants` and accepting `acls` is evaluated. | Read the policy. |
+| "My access" needs the Headscale user's provider identifier to be the one Headscale 0.29.6 builds from issuer and `sub`. | The console repeats that construction (one `/`, empty path segments dropped, URL-encoded); another form shows "no user for your sign-in". | Use the same issuer for Headscale and the console. |
+| The console API speaks plain HTTP inside the cluster. | No TLS on the operator's listener yet. | Enable `networkPolicy` with provider `kubernetes` (the `cilium` policies restrict egress only, so every pod reaches port 8082); use a CNI with pod-to-pod encryption. |
+| "My access" can be up to 15 seconds old. | The console keeps each answer of the console API for 15 seconds. | Reload after 15 seconds. |
 | **One replica**; a restart signs everybody out. | The session key lives in memory only, so no Secret holds it and no second replica could open its cookies. | Sign in again after a rollout. |
 | A session stays valid for its hour after the person leaves the group or the IdP. | The console checks the groups at sign-in only and keeps no refresh token. | Remove the person from the console ingress's `allowFrom` source group to cut access at the network level. |
 | Sign-out ends the console session only. | No RP-initiated logout at the IdP. | Sign out at the IdP as well. |
 | The page shows the state at load time. | No JavaScript, no polling. | Reload the page. |
-| No NetworkPolicy and no metrics for the console pod. | Planned with the second console slice. | Restrict the namespace with your own policy. |
+| No metrics for the console pod or the console API. | Not built yet. | Watch the console log lines `access read failed` and `sign-in rejected`. |
+| The console NetworkPolicy needs the identity provider as CIDRs. | NetworkPolicy and `toCIDR` cannot select a hostname. | Update `console.networkPolicy.idpCIDRs` when the IdP's addresses change. |
 | The IdP needs a certificate from a public CA. | The scratch image carries the public roots only; no CA ConfigMap is mounted for the console. | Use a publicly trusted issuer certificate. |
 
 ## Not provided
