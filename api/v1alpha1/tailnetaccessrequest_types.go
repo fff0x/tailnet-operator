@@ -58,7 +58,7 @@ type TailnetAccessRequestSpec struct {
 type TailnetAccessRequestStatus struct {
 	// Empty while nobody decided: the request is pending.
 	// +optional
-	// +kubebuilder:validation:Enum=Pending;Approved;Rejected;Withdrawn
+	// +kubebuilder:validation:Enum=Pending;Approved;Rejected;Withdrawn;Expired
 	Phase string `json:"phase,omitempty"`
 	// +optional
 	DecidedAt *metav1.Time `json:"decidedAt,omitempty"`

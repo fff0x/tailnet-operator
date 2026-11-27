@@ -243,6 +243,10 @@ func TestAdmission(t *testing.T) {
 		if err := c.Status().Update(ctx, live); err != nil {
 			t.Fatalf("status rejected: %v", err)
 		}
+		live.Object["status"] = map[string]any{"phase": "Expired", "decidedAt": "2026-12-27T13:00:00Z"}
+		if err := c.Status().Update(ctx, live); err != nil {
+			t.Fatalf("phase Expired rejected: %v", err)
+		}
 		live.Object["status"] = map[string]any{"phase": "Done"}
 		if err := c.Status().Update(ctx, live); !apierrors.IsInvalid(err) {
 			t.Fatalf("unknown phase accepted: %v", err)

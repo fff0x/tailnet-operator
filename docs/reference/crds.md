@@ -163,7 +163,7 @@ TailnetAccessRequestStatus is the decision, written by the console only. It name
 | --- | --- | --- | --- |
 | `decidedAt` | string | no | Format `date-time`. |
 | `grantName` | string | no | The TailnetGrant created or extended on approval. Max length 253. |
-| `phase` | string | no | Empty while nobody decided: the request is pending. One of `Pending`, `Approved`, `Rejected`, `Withdrawn`. |
+| `phase` | string | no | Empty while nobody decided: the request is pending. One of `Pending`, `Approved`, `Rejected`, `Withdrawn`, `Expired`. |
 
 ## TailnetEgress
 
