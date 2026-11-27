@@ -7,9 +7,10 @@
 #
 # The PUBLISHED image is scratch (the base below is discarded): no ENTRYPOINT, no shell, no
 # /etc/passwd, no CA bundle. Consequences, all handled in the pod specs / this file:
-#   * binaries sit flat at / — pod specs use absolute commands (/tailnet-operator, /tailnet-agent).
-#   * the agent (tsnet -> https control URL) needs ca-certificates.crt (bundled) + SSL_CERT_FILE.
-#   * both containers must set an explicit numeric runAsUser (scratch has no USER directive).
+#   * binaries sit flat at / — pod specs use absolute commands (/tailnet-operator, /tailnet-agent,
+#     /tailnet-console).
+#   * the agent (tsnet -> https control URL) and the console (https IdP) need ca-certificates.crt (bundled) + SSL_CERT_FILE.
+#   * every container must set an explicit numeric runAsUser (scratch has no USER directive).
 
 ##
 ## TEST — native architecture only; never published or used as the bundle carrier.
@@ -77,7 +78,7 @@ RUN go mod download
 
 COPY . .
 
-# Static, stripped. tsnet needs no cgo. Cross-compile both binaries for each target arch into the
+# Static, stripped. tsnet needs no cgo. Cross-compile the three binaries for each target arch into the
 # /bundle/<app>/<os>/<arch>/ layout build_bundle consumes; drop the CA bundle beside them so the
 # scratch image carries it at /ca-certificates.crt.
 ENV CGO_ENABLED=0
@@ -86,6 +87,7 @@ RUN set -eux; \
       d="/bundle/operator/linux/$arch"; mkdir -p "$d"; \
       GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$d/tailnet-operator" ./cmd/operator; \
       GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$d/tailnet-agent"    ./cmd/agent; \
+      GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$d/tailnet-console"  ./cmd/console; \
       cp /etc/ssl/certs/ca-certificates.crt "$d/ca-certificates.crt"; \
     done
 

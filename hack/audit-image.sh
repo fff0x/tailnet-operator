@@ -215,14 +215,14 @@ for arch in amd64 arm64; do
             type == "object" and (.VulnerabilityID | text) and (.PkgName | text) and
             (.Severity == "HIGH" or .Severity == "CRITICAL")))))))
   ' "$arch-trivy.json" >/dev/null
-  # Trivy sometimes omits the leading slash. Only the two root executables count;
+  # Trivy sometimes omits the leading slash. Only the three root executables count;
   # unrelated packages or a nested binary with the same basename do not suffice.
   # Source builds can omit the main module version, but stdlib and dependency
   # versions must still be present for each executable.
   jq -e '
     def text: type == "string" and length > 0;
     def main: .Name == "tsunaro.io/tailnet-operator";
-    .Results as $results | all("tailnet-agent", "tailnet-operator"; . as $binary |
+    .Results as $results | all("tailnet-agent", "tailnet-console", "tailnet-operator"; . as $binary |
       [$results[] | select(.Class == "lang-pkgs" and .Type == "gobinary" and
         (.Target | ltrimstr("/")) == $binary)] |
       length == 1 and (.[0].Packages | type == "array" and length > 0 and
@@ -239,7 +239,7 @@ for arch in amd64 arm64; do
     [[ $scan_status == 0 ]] || fail
   fi
   jq --arg arch "$arch" --arg digest "$child" --argjson high "$high" --argjson critical "$critical" \
-    '. + [{platform:("linux/" + $arch),digest:$digest,high:$high,critical:$critical,goBinaries:["/tailnet-agent","/tailnet-operator"]}]' \
+    '. + [{platform:("linux/" + $arch),digest:$digest,high:$high,critical:$critical,goBinaries:["/tailnet-agent","/tailnet-console","/tailnet-operator"]}]' \
     summaries.json >summaries.next
   mv summaries.next summaries.json
 done

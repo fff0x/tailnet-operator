@@ -337,7 +337,7 @@ func TestAuditRejectsIncompleteOrUntrustedEvidence(t *testing.T) {
 		"missing-platform", "duplicate-platform", "duplicate-digest", "extra-platform", "bad-index", "index-urls", "unsupported-descriptor", "foreign-artifact-type",
 		"config-mismatch", "layer-urls", "nested-index", "signature-error", "signature-mismatch", "signature-empty",
 		"malformed-spdx", "empty-spdx", "missing-spdx", "invalid-spdx",
-		"scan-error", "second-scan-error", "scan-timeout", "malformed-trivy", "empty-trivy", "missing-trivy", "missing-binary",
+		"scan-error", "second-scan-error", "scan-timeout", "malformed-trivy", "empty-trivy", "missing-trivy", "missing-binary", "missing-console",
 		"nested-binary", "empty-packages", "wrong-binary-type", "scan-reported-error", "invalid-vulnerability", "boolean-vulnerabilities", "boolean-errors", "findings-exit-zero", "clean-exit-42",
 	} {
 		t.Run(scenario, func(t *testing.T) {
@@ -724,7 +724,8 @@ func auditMockTool(tool string, args []string) int {
 		}
 		agent := map[string]any{"Target": "tailnet-agent", "Class": "lang-pkgs", "Type": "gobinary", "Packages": packages()}
 		operator := map[string]any{"Target": "/tailnet-operator", "Class": "lang-pkgs", "Type": "gobinary", "Packages": packages()}
-		results := []any{agent, operator}
+		console := map[string]any{"Target": "/tailnet-console", "Class": "lang-pkgs", "Type": "gobinary", "Packages": packages()}
+		results := []any{agent, operator, console}
 		if parts := strings.Split(scenario, "/"); len(parts) == 3 && parts[0] == "packages" {
 			binary := agent
 			if parts[2] == "operator" {
@@ -772,6 +773,8 @@ func auditMockTool(tool string, args []string) int {
 			results = []any{}
 		case "missing-binary":
 			results = results[:1]
+		case "missing-console":
+			results = results[:2]
 		case "nested-binary":
 			operator["Target"] = "/unrelated/tailnet-operator"
 		case "empty-packages":
