@@ -23,7 +23,7 @@ const (
 	cellGap   = 8
 	rowH      = 20
 	mapCap    = 12 // entries per list before "+N more"
-	labelMax  = 22 // characters before a label is shortened
+	labelMax  = 19 // characters before a label is shortened
 )
 
 type mapRow struct {

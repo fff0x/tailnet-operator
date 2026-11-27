@@ -17,7 +17,7 @@
   <div class="scroll"><table>
     <thead><tr><th>Grant</th><th>Tailnet</th><th>Target</th><th>Ports</th><th>Expires</th><th>Change</th></tr></thead>
     <tbody>{{range .}}<tr>
-      <td><code>{{.Name}}</code>{{with .Description}}<span class="target__name">{{.}}</span>{{end}}</td>
+      <td><code class="word">{{.Name}}</code>{{with .Description}}<span class="target__name">{{.}}</span>{{end}}</td>
       <td><code>{{.Tailnet}}</code></td>
       <td class="nowrap">{{template "list" .Target}}</td>
       <td class="nowrap">{{template "list" .Ports}}</td>
@@ -39,15 +39,14 @@
   <h2>{{if .Body.Admin}}All requests{{else}}Your requests{{end}}</h2>
 {{with .Body.Rows}}
   <div class="scroll"><table>
-    <thead><tr><th>Request</th><th>Tailnet</th><th>Asks for</th><th>Target</th><th>Ports</th><th>Recipients</th><th>Duration</th><th>Requested by</th><th>State</th><th>Decide</th></tr></thead>
+    <thead><tr><th>Request</th><th>Tailnet</th><th>Asks for</th><th>Target</th><th>Ports</th><th>Recipients</th><th>Requested by</th><th>State</th><th>Decide</th></tr></thead>
     <tbody>{{range .}}<tr>
-      <td><code class="nowrap">{{.Name}}</code>{{with .Created}}<span class="target__name">{{.}}</span>{{end}}{{with .Description}}<span class="target__name">{{.}}</span>{{end}}</td>
+      <td><code class="word">{{.Name}}</code>{{with .Created}}<span class="target__name">{{.}}</span>{{end}}{{with .Description}}<span class="target__name">{{.}}</span>{{end}}</td>
       <td><code>{{.Tailnet}}</code></td>
-      <td>{{if eq .Action "Extend"}}extend <code>{{.Grant}}</code>{{else}}new grant{{end}}</td>
-      <td class="nowrap">{{if eq .Action "Create"}}{{template "list" .Target}}{{else}}<span class="muted">as granted</span>{{end}}</td>
-      <td class="nowrap">{{if eq .Action "Create"}}{{template "list" .Ports}}{{else}}<span class="muted">as granted</span>{{end}}</td>
-      <td>{{range $i, $r := .Recipients}}{{if $i}}<br>{{end}}{{$r}}{{else}}<span class="muted">as granted</span>{{end}}</td>
-      <td>{{.Duration}}</td>
+      <td>{{if eq .Action "Extend"}}extend <code class="word">{{.Grant}}</code>{{else}}new grant{{end}}<span class="target__name">{{.Duration}}</span></td>
+      <td{{if eq .Action "Create"}} class="nowrap"{{end}}>{{if eq .Action "Create"}}{{template "list" .Target}}{{else}}<span class="muted">as granted</span>{{end}}</td>
+      <td{{if eq .Action "Create"}} class="nowrap"{{end}}>{{if eq .Action "Create"}}{{template "list" .Ports}}{{else}}<span class="muted">as granted</span>{{end}}</td>
+      <td class="wrap">{{range $i, $r := .Recipients}}{{if $i}}<br>{{end}}{{$r}}{{else}}<span class="muted">as granted</span>{{end}}</td>
       <td>{{.Requester}}<span class="target__name">{{if eq .RequestedAs "Admin"}}admin{{else}}user{{end}}</span></td>
       <td><span class="state state--{{if eq .Phase "Approved"}}ok{{else if eq .Phase "Pending"}}unknown{{else}}bad{{end}}">{{.Phase}}</span>
         {{if .Applied}}<span class="target__name">grant written; approve to close</span>{{else if eq .Phase "Pending"}}<span class="target__name">{{.Count}} of {{.Needed}} approvals</span>{{end}}

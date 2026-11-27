@@ -10,11 +10,11 @@
   <div class="scroll"><table>
     <thead><tr><th>Grant</th><th>Tailnet</th><th>Target</th><th>Ports</th><th>Recipients</th><th>Expires</th><th>Ready</th><th>Change</th></tr></thead>
     <tbody>{{range .}}<tr>
-      <td><code>{{.Name}}</code>{{with .Description}}<span class="target__name">{{.}}</span>{{end}}</td>
+      <td><code class="word">{{.Name}}</code>{{with .Description}}<span class="target__name">{{.}}</span>{{end}}</td>
       <td><code>{{.Tailnet}}</code></td>
       <td class="nowrap">{{template "list" .Target}}</td>
       <td class="nowrap">{{template "list" .Ports}}</td>
-      <td>{{range $i, $r := .Recipients}}{{if $i}}<br>{{end}}{{$r}}{{end}}</td>
+      <td class="wrap">{{range $i, $r := .Recipients}}{{if $i}}<br>{{end}}{{$r}}{{end}}</td>
       <td>{{.Expires}}</td>
       <td>{{template "state" .Ready}}</td>
       <td>{{if .Managed}}

@@ -177,13 +177,14 @@ func TestMapLayout(t *testing.T) {
 				if c.X < b.X || c.X+c.W > b.X+b.W || c.Y < b.Y || c.Y+cellH > b.Y+b.H {
 					t.Errorf("cell %s outside box %s", c.Label, b.Title)
 				}
-				if len([]rune(c.Label)) > labelMax {
+				// "+N more" has neither mark nor circle and is never shortened.
+				if !c.More && len([]rune(c.Label)) > labelMax {
 					t.Errorf("label %q not shortened", c.Label)
 				}
 			}
 		}
 	}
-	if c := m.Hub.Lists[1].Cells[0]; c.Label != "site-with-a-very-long…" || !strings.Contains(c.Tip, "site-with-a-very-long-name-00") {
+	if c := m.Hub.Lists[1].Cells[0]; c.Label != "site-with-a-very-l…" || !strings.Contains(c.Tip, "site-with-a-very-long-name-00") {
 		t.Errorf("shortened cell %+v", c)
 	}
 }

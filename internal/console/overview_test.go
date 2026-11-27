@@ -139,6 +139,20 @@ func TestOverviewPageMasksAndEscapes(t *testing.T) {
 			t.Errorf("map contains %q", leak)
 		}
 	}
+	// The legend shows each symbol of the map with the map's own classes, no sentence.
+	ls, le := strings.Index(html, `<ul class="legend"`), strings.Index(html, "</ul>")
+	if ls < 0 || le < ls {
+		t.Fatal("no legend list")
+	}
+	legend := html[ls:le]
+	if n := strings.Count(legend, "<li>"); n != 7 {
+		t.Errorf("legend has %d entries, want 7", n)
+	}
+	for _, want := range []string{"map__mark--ok", "map__mark--bad", "map__nodes--online", "map__nodes--offline", "map__frame--dashed"} {
+		if !strings.Contains(legend, want) {
+			t.Errorf("legend lacks %s", want)
+		}
+	}
 	writePreview(t, "overview.html", html)
 }
 
