@@ -1,0 +1,26 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · Tsunaro console</title>
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/console.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="/"><img src="/static/logo.svg" alt="" width="28" height="28"><span>Tsunaro <span class="brand__sub">console</span></span></a>
+  {{with .Session}}
+  <div class="who">
+    <span class="who__name">{{if .Name}}{{.Name}}{{else}}Signed in{{end}}</span>
+    <span class="badge badge--{{.Role}}">{{.Role}}</span>
+    <form method="post" action="/auth/logout"><button type="submit" class="button">Sign out</button></form>
+  </div>
+  {{end}}
+</header>
+<main class="main">
+{{template "content" .}}
+</main>
+</body>
+</html>
+{{end}}

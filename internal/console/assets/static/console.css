@@ -1,0 +1,91 @@
+/* Tsunaro console. Colour tokens follow the Tsunaro site (assets/css/custom.css there). */
+:root {
+  color-scheme: light dark;
+  --site-brand: #ff914d;
+  --site-ink: #0c0b0b;
+  --site-link: #b34a12;
+  --site-background: #faf9f6;
+  --site-text: #171717;
+  --site-muted: #5e5a55;
+  --site-surface: #f1efeb;
+  --site-selected: #f0ece6;
+  --site-border: #d2cbc2;
+  --site-border-strong: #9c9185;
+  --site-border-interactive: #82766b;
+  --state-ok: #2f7d32;
+  --state-bad: #b3261e;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --site-link: #ff944d;
+    --site-background: #111111;
+    --site-text: #f3f4f6;
+    --site-muted: #9ca3af;
+    --site-surface: #171717;
+    --site-selected: #262626;
+    --site-border: #262626;
+    --site-border-strong: #404040;
+    --site-border-interactive: #525252;
+    --state-ok: #7fcf83;
+    --state-bad: #ff8a80;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--site-background); color: var(--site-text);
+  font: 400 1rem/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: var(--site-link); }
+code { font-family: var(--mono); font-size: .8125rem; overflow-wrap: anywhere; }
+h1 { font-size: 1.75rem; margin: 0 0 .5rem; letter-spacing: -.01em; }
+h2 { font-size: 1.125rem; margin: 0 0 .75rem; }
+.muted, .lede { color: var(--site-muted); }
+.lede { margin: 0 0 1.5rem; }
+
+.bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+  padding: .75rem 1.5rem; border-bottom: 1px solid var(--site-border); background: var(--site-background);
+}
+.brand { display: flex; align-items: center; gap: .625rem; color: inherit; text-decoration: none; font-weight: 600; }
+.brand__sub { color: var(--site-muted); font-weight: 400; }
+.who { display: flex; align-items: center; gap: .75rem; }
+.who__name { color: var(--site-muted); font-size: .875rem; }
+.who form { margin: 0; }
+
+.badge {
+  font: 500 .6875rem/1 var(--mono); text-transform: uppercase; letter-spacing: .04em;
+  padding: .3rem .45rem; border: 1px solid var(--site-border-strong);
+}
+.badge--admin { background: var(--site-brand); color: var(--site-ink); border-color: var(--site-brand); }
+
+.button {
+  display: inline-block; padding: .4rem .8rem; border: 1px solid var(--site-border-interactive); border-radius: 0;
+  background: transparent; color: inherit; font: inherit; font-size: .875rem; text-decoration: none; cursor: pointer;
+}
+.button:hover { background: var(--site-selected); }
+.button--brand { background: var(--site-brand); color: var(--site-ink); border-color: var(--site-brand); font-weight: 600; }
+.button--brand:hover { background: var(--site-brand); filter: brightness(1.05); }
+.button:focus-visible, a:focus-visible { outline: 2px solid var(--site-brand); outline-offset: 2px; }
+
+.main { max-width: 80rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+.panel {
+  margin-bottom: 1.5rem; padding: 1.25rem; border: 1px solid var(--site-border);
+  border-top: 2px solid var(--site-brand); background: var(--site-surface);
+}
+.panel--message { max-width: 36rem; margin: 3rem auto; }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+th, td { padding: .5rem .625rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--site-border); }
+th { color: var(--site-muted); font-weight: 500; font-size: .8125rem; white-space: nowrap; }
+tbody tr:hover { background: var(--site-selected); }
+
+.state { font-family: var(--mono); font-size: .8125rem; white-space: nowrap; }
+.state::before { content: ""; display: inline-block; width: .5rem; height: .5rem; margin-right: .4rem; background: var(--site-border-strong); }
+.state--ok::before { background: var(--state-ok); }
+.state--bad { color: var(--state-bad); }
+.state--bad::before { background: var(--state-bad); }
+
+@media (max-width: 640px) {
+  .bar, .main { padding-inline: 1rem; }
+}

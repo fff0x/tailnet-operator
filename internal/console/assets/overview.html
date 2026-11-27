@@ -1,0 +1,58 @@
+{{define "state"}}<span class="state state--{{.Class}}">{{.Text}}</span>{{end}}
+{{define "list"}}{{range $i, $v := .}}{{if $i}}<br>{{end}}<code>{{$v}}</code>{{else}}<span class="muted">—</span>{{end}}{{end}}
+{{define "content"}}
+<h1>Overview</h1>
+<p class="lede">What the operator on this hub reports. The page reads the Kubernetes API when it loads.</p>
+
+<section class="panel">
+  <h2>Tailnets</h2>
+  {{with .Body.Tailnets}}
+  <div class="scroll"><table>
+    <thead><tr><th>Name</th><th>Server</th><th>Headscale</th><th>Policy mode</th><th>Policy</th><th>Generated</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td><code>{{.Name}}</code></td><td>{{.Server}}</td><td>{{or .Version "—"}}</td><td>{{.Mode}}</td>
+      <td>{{template "state" .Policy}}</td><td>{{or .Generated "—"}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  {{else}}<p class="muted">No Tailnet.</p>{{end}}
+</section>
+
+<section class="panel">
+  <h2>Spokes</h2>
+  {{with .Body.Spokes}}
+  <div class="scroll"><table>
+    <thead><tr><th>Tailnet</th><th>Spoke</th><th>Reachable</th><th>Fragment</th><th>Approved</th><th>Pending change</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td><code>{{.Tailnet}}</code></td><td><code>{{.Name}}</code></td><td>{{template "state" .Reachable}}</td>
+      <td>{{template "state" .Valid}}</td><td>{{template "state" .Approved}}</td><td>{{if .Pending}}yes{{else}}no{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  {{else}}<p class="muted">No spoke.</p>{{end}}
+</section>
+
+<section class="panel">
+  <h2>Ingresses</h2>
+  {{with .Body.Ingresses}}
+  <div class="scroll"><table>
+    <thead><tr><th>Namespace</th><th>Name</th><th>Tailnet</th><th>Tag</th><th>Hosts</th><th>Ports</th><th>Allowed from</th><th>Ready</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td><code>{{.Namespace}}</code></td><td><code>{{.Name}}</code></td><td><code>{{.Tailnet}}</code></td><td><code>{{or .Tag "—"}}</code></td>
+      <td>{{template "list" .Hosts}}</td><td>{{template "list" .Ports}}</td><td>{{template "list" .AllowFrom}}</td><td>{{template "state" .Ready}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  {{else}}<p class="muted">No TailnetIngress.</p>{{end}}
+</section>
+
+<section class="panel">
+  <h2>Sites</h2>
+  {{with .Body.Sites}}
+  <div class="scroll"><table>
+    <thead><tr><th>Tailnet</th><th>Name</th><th>Prefixes</th><th>Owner</th><th>Description</th><th>Ready</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td><code>{{.Tailnet}}</code></td><td><code>{{.Name}}</code></td><td>{{template "list" .Prefixes}}</td><td>{{.Owner}}</td>
+      <td>{{or .Description "—"}}</td><td>{{template "state" .Ready}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  {{else}}<p class="muted">No TailnetSite.</p>{{end}}
+</section>
+{{end}}
