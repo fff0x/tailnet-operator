@@ -4,6 +4,28 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+
+- **`TailnetGrant`: time-bound TCP access for people and policy groups.** A cluster-scoped kind in
+  the policy-owning cluster (`policy.mode: Apply`). It grants user references or base-policy groups
+  access to the tag of a `TailnetIngress`, to an ingress tag of a merged spoke fragment or to
+  prefixes inside a `TailnetSite`, on 1 to 16 TCP ports. With `expiresAt` the operator removes the
+  grant from the policy by its own clock and reports `Ready=False/Expired`; the object stays. A
+  grant with an invalid target is not rendered (`TargetUnknown`, `TargetOutsideSites`), so it
+  cannot make Headscale reject the policy. The kind is administrative: a grant bypasses `allowFrom`
+  and the spoke allowlist. Established connections at expiry are untested
+  ([Grants](docs/how-to/grants.md)).
+  **Upgrade:** apply the new CRD before the operator (`task crd-upgrade`, or `CreateReplace` on a
+  Flux `HelmRelease`). Without the `TailnetGrant` CRD the policy controller cannot
+  start its watch, and the operator exits after the cache sync timeout (2 minutes) and restarts in
+  a loop.
+
+### Changed
+
+- **A generated grant that loses an undeclared source is rendered once.** When the drop of an
+  undeclared tag or group makes a generated or spoke grant equal to another grant of the rendered
+  policy, the operator no longer renders the duplicate. Base grants stay unchanged.
+
 ## [0.27.1] - 2026-11-25
 
 ### Changed

@@ -38,6 +38,10 @@ code. Versions and the preflight matrix are in [Compatibility](compatibility.md)
 | The operator never edits `groups`, `hosts`, `acls`, `ssh` or `tests`; a fragment may only add `tagOwners`, `autoApprovers.routes` and `grants`. | Those blocks are the admin's authorization model; the operator only derives what its CRs imply. | Edit the base ConfigMap in Git; the operator re-renders. |
 | Requires Headscale **policy mode `database`** for `Apply`; in `file` mode it renders but never writes. | `PUT /api/v1/policy` is only accepted in database mode. | Migrate once ([Policy § migrate from file mode](../how-to/policy.md)); read-only `DryRun` works in either mode. |
 | `allowFrom` is checked against `ingressSourceAllowlist` with path-style globs; an empty allowlist denies every source. | Tenants must not grant themselves `autogroup:member` or `*`. | Set the allowlist on the `Tailnet` (`["group:*"]`, specific tags). |
+| A `TailnetGrant` grants **TCP ports only**, to one ingress tag or to prefixes inside a `TailnetSite`; sources are groups and user references. | The kind covers people reaching a service; UDP, ICMP, "all ports", tags and `autogroup:` sources are not modelled. | Write such a grant in the base policy. |
+| A `TailnetGrant` expires by the **operator's clock**, and the access ends with the next successful policy write. | Headscale has no expiry for a policy entry; the operator rewrites the policy at `expiresAt`. | A failed write shows as `Ready=False/ExpiryPending` and fires `TailnetResourceNotReady` after 10 min. |
+| After a `TailnetGrant` expires, new connections are refused; whether **established connections** are cut is untested. | The test opens a fresh connection per probe. | Open follow-up. End the session at the service if it must end at once. |
+| An **unknown user** in `TailnetGrant.spec.sources` is not reported. | Headscale accepts a reference to a user it does not know. | Use the provider identifier from `/api/v1/user` ([Grants § Sources](../how-to/grants.md#sources)). |
 | Headscale `tests` cannot assert operator-generated grants. | Tests run on the base alone (`headscale policy check`, rollback import) and `src` must resolve to existing nodes. | Test invariants of the base only, with a long-lived tagged node as `src`. |
 
 ## Gateway (`TailnetGateway`)
@@ -65,7 +69,7 @@ code. Versions and the preflight matrix are in [Compatibility](compatibility.md)
 | Exit nodes, app connectors, Tailscale Serve/Funnel, session recording | Not modelled. An exit-node tag can live in the base policy and on a node you run yourself. |
 | HA proxy groups / coalescing several CRs into one node | Not modelled; one CR = one node. |
 | Managing Headscale itself (users, pre-auth for humans, DNS config, OIDC) | Out of scope; the operator consumes the REST API for nodes, keys and policy only. |
-| Kubernetes `Ingress`/Gateway API objects as input | Not read; the input is the five `tsunaro.io` kinds. |
+| Kubernetes `Ingress`/Gateway API objects as input | Not read; the input is the six `tsunaro.io` kinds. |
 
 ## Control plane
 

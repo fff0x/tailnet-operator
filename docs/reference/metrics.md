@@ -15,7 +15,7 @@ credentials, peer addresses or dynamic Headscale paths. How to read them in prac
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `tailnet_resource_ready` | gauge | `kind`, `namespace`, `name`, `tailnet` | Current-generation `Ready` condition is True; absent without a current `Ready` condition (`Tailnet` has none; suspended gateways are withdrawn). |
+| `tailnet_resource_ready` | gauge | `kind`, `namespace`, `name`, `tailnet` | Current-generation `Ready` condition is True; absent without a current `Ready` condition (`Tailnet` has none; suspended gateways and `TailnetGrant`s with `Ready=False/Expired` are withdrawn). |
 | `tailnet_resource_condition` | gauge | `kind`, `namespace`, `name`, `type`, `reason` | 1 for the current-generation reason of each condition (including False and Unknown); previously observed reasons are 0. Read type and reason, not the value as a boolean. |
 | `tailnet_egress_target_state` | gauge | `namespace`, `name`, `target`, `reason` | Current-generation target route reason; `Present` represents an empty successful route reason. |
 | `tailnet_ingress_expose_reachable` | gauge | `namespace`, `name`, `expose` | Current-generation expose backend reachability. |
@@ -26,7 +26,7 @@ credentials, peer addresses or dynamic Headscale paths. How to read them in prac
 | `tailnet_spoke_reachable` | gauge | `tailnet`, `spoke` | 1 when the hub read the spoke's fragment ConfigMap on the last reconcile (`SpokeReachable=True`), 0 otherwise. One series per `policy.spokes[]` entry; withdrawn when the spoke is removed. |
 | `tailnet_spoke_fragment_valid` | gauge | `tailnet`, `spoke` | 1 when the last fetched fragment passed the hub's validation (`SpokeFragmentValid=True`), 0 when it failed or nothing was fetched. |
 | `tailnet_spoke_fragment_pending` | gauge | `tailnet`, `spoke` | 1 while a valid fetched fragment waits for `tsunaro.io/approve-spoke.<spoke>` (`approval: Manual`); 0 otherwise. |
-| `tailnet_policy_generated` | gauge | `tailnet`, `kind` | Generated entries in the persisted policy status (`kind` ∈ `tags`, `grants`, `routes`). |
+| `tailnet_policy_generated` | gauge | `tailnet`, `kind` | Generated entries in the persisted policy status (`kind` ∈ `tags`, `grants`, `routes`). `grants` includes rendered `TailnetGrant`s, so the value falls when grants expire. |
 | `tailnet_policy_applied_timestamp_seconds` | gauge | `tailnet` | Unix time the rendered policy was last applied to the control server. An old value alone is healthy. |
 | `tailnet_policy_apply_errors_total` | counter | `tailnet` | Policy writes the control server rejected or that failed. |
 | `tailnet_policy_write_duration_seconds` | histogram | `tailnet` | `SetPolicy` latency including failures. |

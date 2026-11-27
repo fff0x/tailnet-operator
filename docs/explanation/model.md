@@ -1,7 +1,7 @@
 ---
 title: "Model and how it works"
 weight: 10
-description: "The five kinds, why the tag is the authorization, and what each reconciler turns a CR into."
+description: "The six kinds, why the tag is the authorization, and what each reconciler turns a CR into."
 ---
 
 Diagrams of the resulting shape, one per scenario, and the full list of objects each CR creates:
@@ -29,7 +29,12 @@ Diagrams of the resulting shape, one per scenario, and the full list of objects 
   management range, a single host as `/32`. Declared once in the policy-owning cluster; the router
   is identified **by tag**, so any tagged router, in this or another cluster, qualifies. The operator renders
   the `autoApprovers`, replays approvals, blocks overlaps with `reservedNetworks` or older sites and
-  reports `Advertised`/`Approved`/`Ready`. Who may *reach* the site stays a grant in the base policy.
+  reports `Advertised`/`Approved`/`Ready`. Who may *reach* the site is a grant in the base policy or a
+  `TailnetGrant`.
+- **`TailnetGrant`** (cluster-scoped) — TCP access for people or policy groups to one target: an
+  ingress tag, also of a spoke cluster, or hosts inside a `TailnetSite`. Declared in the
+  policy-owning cluster. The operator renders one grant and removes it at `expiresAt` by its own
+  clock. The kind is administrative: a grant bypasses `allowFrom`.
 - **`TailnetGateway`** (cluster-scoped) — the subnet router and split-DNS resolver as a CR: one
   kernel-mode Tailscale Pod advertising the site LAN, the tailnet LoadBalancer range and every
   egress target, plus a CoreDNS that serves the hosts file as the authoritative zone. Identity is
@@ -68,6 +73,8 @@ restart to add or remove a target:
   (including the base's `tests`) before storing, so a rejected render never becomes active. After a
   successful write it replays missed `autoApprovers` approvals (a route advertised before its
   approver existed) on the routers, so `NotApproved` heals without `headscale nodes approve-routes`.
+  It also renders every `TailnetGrant` with a valid target, writes the grant status and schedules
+  itself for the next `expiresAt`; a grant has no reconciler of its own.
 - **Data plane** — one agent pod per CR is a userspace tsnet node. `AGENT_MODE` sets the direction
   and has no default (the operator sets it on every agent Deployment; an unset value is a startup error):
   egress takes `--accept-routes` and `Dial`s the off-cluster address over the tailnet; ingress listens

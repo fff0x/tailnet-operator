@@ -10,7 +10,7 @@ in the operator namespace needs a backup.
 
 | Object | Owner | Loss means | Backup |
 | --- | --- | --- | --- |
-| CRs (`Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGateway`) | you (Git) | nothing — redeploy from Git | Git is the backup |
+| CRs (`Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGrant`, `TailnetGateway`) | you (Git) | nothing — redeploy from Git | Git is the backup |
 | Secret `headscale-bootstrap` (bootstrap API key) | you | no new working key can be minted; running agents keep working until their pre-auth key expires | **must back up** (or be able to mint a new key on Headscale) |
 | Secret `<tailnet>-apikey` (working key) | operator | re-minted from the bootstrap key at the next reconcile | no |
 | Secret `<cr>-authkey` (agent pre-auth key) | operator | re-minted; the agent pod restarts and re-registers as the same node name | no |

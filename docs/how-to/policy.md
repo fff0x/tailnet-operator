@@ -18,6 +18,7 @@ to Headscale.
 | every route of a `TailnetGateway` of this Tailnet (LAN, `tailnetLBCIDR`, egress host routes) | `autoApprovers.routes` | `prefix: the gateway's own spec.tags` (merged into an existing list) |
 | every egress, per port | `grants` | `{src: [tag], dst: [/32…], ip: ["tcp:port"]}` |
 | every ingress with `allowFrom` | `grants` | `{src: allowFrom, dst: [tag], ip: ["tcp:port"…]}` — only if every source matches `ingressSourceAllowlist` |
+| every [`TailnetGrant`](grants.md) with a valid target, until its `expiresAt` | `grants` | `{src: sources, dst: [tag] or [prefix…], ip: ["tcp:port"…]}` — not checked against `ingressSourceAllowlist` |
 
 Nothing is ever removed from the base; identical grants are not duplicated; unknown blocks (`ssh`,
 `tests`, `nodeAttrs`, …) pass through. Targets addressed by **name** get no grant (a policy cannot
@@ -27,7 +28,8 @@ A generated or spoke grant keeps only sources the rendered policy declares: a `t
 `tagOwners` entry, a `group:` source an entry in the base `groups`. Headscale rejects the whole
 policy over one undeclared tag or group, so the operator drops such a source, keeps the others,
 names it in the `PolicyApplied` message and reports `SourceTagUnknown` or `SourceGroupUnknown` on
-the ingress. Base grants are never changed.
+the ingress or the `TailnetGrant`. If a generated grant equals another one after the drop, it is
+rendered once. Base grants are never changed.
 
 **Route approval replay.** Headscale's `autoApprovers` act only on a route *change* event, so a route
 advertised before its approver existed stays "available, not approved". After every successful write

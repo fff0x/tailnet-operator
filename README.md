@@ -39,7 +39,12 @@ Go · [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime
   management range, a single host as `/32`. Declared once in the policy-owning cluster; the router
   is identified **by tag**, so any tagged router, in this or another cluster, qualifies. The operator renders
   the `autoApprovers`, replays approvals, blocks overlaps with `reservedNetworks` or older sites and
-  reports `Advertised`/`Approved`/`Ready`. Who may *reach* the site stays a grant in the base policy.
+  reports `Advertised`/`Approved`/`Ready`. Who may *reach* the site is a grant in the base policy or a
+  `TailnetGrant`.
+- **`TailnetGrant`** (cluster-scoped) — TCP access for people or policy groups to one target: an
+  ingress tag, also of a spoke cluster, or hosts inside a `TailnetSite`. Declared in the
+  policy-owning cluster. The operator renders one grant and removes it at `expiresAt` by its own
+  clock. The kind is administrative: a grant bypasses `allowFrom`.
 - **`TailnetGateway`** (cluster-scoped) — the subnet router and split-DNS resolver as a CR: one
   kernel-mode Tailscale Pod advertising the site LAN, the tailnet LoadBalancer range and every
   egress target, plus a CoreDNS that serves the hosts file as the authoritative zone. Identity is
@@ -119,7 +124,7 @@ Headscale API over TLS and give the chart the issuer CA
 
 ## CRD reference
 
-Every `spec` and `status` field of the five kinds, with types, defaults and constraints:
+Every `spec` and `status` field of the six kinds, with types, defaults and constraints:
 [CRD reference](docs/reference/crds.md) (generated from the CRDs). Worked examples for every kind:
 [how-to guides](docs/how-to/README.md). Condition types and reasons per kind, as shown by
 `kubectl get` and `describe`: [Conditions and reasons](docs/reference/reasons.md).
@@ -163,7 +168,7 @@ chart; see [CONTRIBUTING](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad
 
 | Path | What |
 | --- | --- |
-| `api/v1alpha1` | `Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGateway` CRD types |
+| `api/v1alpha1` | `Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGrant`, `TailnetGateway` CRD types |
 | `cmd/operator`, `cmd/agent` | control plane; `tailnet-agent`: tsnet node, TCP/HTTP forwarders, health and probe endpoints |
 | `internal/controller` | reconcilers (tailnet, egress, ingress, gateway, dns, policy) and resource builders |
 | `internal/gateway` | gateway renderer, route planner, DNS zone, receipts and the fresh writer |

@@ -8,7 +8,7 @@ description: "Join another Kubernetes cluster to the same Headscale: one policy 
 `prod-2` at another site, should publish its own services on the same tailnet and reach the same
 site networks — without a second Headscale and without anyone copying tags and grants by hand.*
 
-Both clusters run the same chart and the same five CRDs. What differs is one block in each
+Both clusters run the same chart and the same six CRDs. What differs is one block in each
 `Tailnet` and which repository the policy entries are reviewed in.
 
 ## Roles: one hub, any number of spokes

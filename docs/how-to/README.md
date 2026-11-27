@@ -17,6 +17,7 @@ operator is installed; if it is not, start with [Getting started](../tutorials/g
 | [Ingress: reach the Kubernetes API over the tailnet](kubernetes-api.md) | API server (and node management API) without a public endpoint; kubeconfig and grant |
 | [Serve DNS names with CoreDNS](dns-coredns.md) | Turn the operator's hosts file into a resolvable zone and wire the cluster CoreDNS |
 | [Let the operator own the policy](policy.md) | Read what the operator renders, review in DryRun, switch to Apply, migrate from file mode |
+| [Grant time-bound access (TailnetGrant)](grants.md) | People or policy groups reach an ingress or a host inside a site over TCP; the operator removes the grant at `expiresAt` |
 | [Declare a site network (TailnetSite)](site-network.md) | Give a LAN a name and a status; block overlapping routes |
 | [Run the gateway (subnet router + split-DNS)](gateway.md) | Prerequisites and order, complete example with LB pool, iBGP, split-DNS and site |
 | [Connect a second cluster](second-cluster.md) | Hub and spokes on one Headscale: per-cluster names, exported policy fragments, grants between clusters, one DNS zone per cluster, what lives in which repository |

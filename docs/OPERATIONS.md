@@ -38,7 +38,7 @@ monitoring:
 
 ### Metric interpretation
 
-- `tailnet_resource_ready` exists only for the current-generation `Ready` condition; `Tailnet` has none, suspended `TailnetGateway`s are withdrawn.
+- `tailnet_resource_ready` exists only for the current-generation `Ready` condition; `Tailnet` has none, suspended `TailnetGateway`s and expired `TailnetGrant`s (`Ready=False/Expired`) are withdrawn.
 - `tailnet_resource_condition` is 1 for the active reason and 0 for previously seen reasons — read type and reason, not the value as a boolean.
 - `tailnet_policy_pending` is 1 only in `Apply` mode while `renderedHash != appliedHash`; an old `appliedAt` alone is healthy.
 - `tailnet_headscale_user_conflicts` mirrors `status.userConflicts` (shared Headscale user names); anything above 0 blocks policy writes.
@@ -72,6 +72,12 @@ order `Registered`, `PolicyGranted`, `TLSReady`, `BackendsReachable` — so the 
 `NotRegistered`, `RoutesMissing`, `ProbeFailed`, `Unreachable`, `PolicyDenied` and the `TLS*` reasons
 directly. Use the reason tables in [Egress](how-to/egress.md), [Ingress: TCP](how-to/ingress-tcp.md) and [Ingress: HTTPS](how-to/ingress-https.md) for the remedy per reason.
 
+For a `TailnetGrant` (`kind="TailnetGrant"`) the reason is the grant's own `Ready` reason
+([Grants § Check](how-to/grants.md#check)). `ExpiryPending` needs attention first: the grant has
+expired, but the access can still be live. Read `PolicyRendered` and `PolicyApplied` on the
+`Tailnet`; the access ends with the next successful policy write. In `DryRun` every grant reports
+`PolicyPending` or `ExpiryPending`, because the operator does not write the policy.
+
 ## Monitoring: policy stale
 
 `TailnetPolicyStale`: `tailnet_policy_pending == 1` for 15 min. Compare the hashes and read
@@ -91,7 +97,9 @@ backoff on its own.
 ## Monitoring: policy generated drop
 
 `TailnetPolicyGeneratedDrop`: generated tags, grants or routes fell by more than half within 10 min.
-Compare with recent CR deletions and base changes; intended deletions trigger it too.
+Compare with recent CR deletions and base changes; intended deletions trigger it too. So do
+`TailnetGrant`s that expire together: compare `kubectl get tailnetgrant` (`READY=Expired`) with the
+time of the fall.
 
 ## Monitoring: route replays
 

@@ -17,6 +17,9 @@ LIVE_CR_FILE="$live" task test-validation; rm -f -- "$live"
 1. Apply the new CRDs. Helm installs CRDs from `crds/` but never upgrades them: run
    `task crd-upgrade KUBE_CONTEXT=<context>` for a manual installation, or set
    `install.crds: CreateReplace` and `upgrade.crds: CreateReplace` on a Flux `HelmRelease`.
+   A release that adds a kind needs its CRD first: without the `TailnetGrant` CRD (new in v0.28.0)
+   the policy controller of the new operator cannot start its watch. The operator process then exits
+   after the cache sync timeout (2 minutes) and restarts in a loop.
 2. `helm upgrade` (or apply the new `deploy/`). The operator re-rolls every agent whose image changed;
    agent Deployments use `Recreate`, so each affected CR's data path is interrupted for the restart.
 3. `kubectl get tailnet` — `COMPAT=Compatible`, `POLICY=InSync` or `Applied`, `DNS=Configured` (or `CannotVerify` without a gateway).

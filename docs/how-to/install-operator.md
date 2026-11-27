@@ -166,4 +166,4 @@ Use an overlay for namespace, images and site policies.
 | LoadBalancer IPs for gateways | not shipped | — | an LB implementation and pool matching `tailnetLBCIDR` / `service.poolLabels` ([Run the gateway](gateway.md)) |
 | Cluster CoreDNS forward | not touched | — | the `forward` stanza for the alias zones ([Wire the cluster CoreDNS](dns-coredns.md#wire-the-cluster-coredns)) |
 | Flux/cosign verification | public key in `deploy/cosign.pub` | — | the `verify` block on `OCIRepository`/`HelmRelease` ([SECURITY.md](../explanation/security-model.md)) |
-| `Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGateway` | none created | — | every CR; the chart installs only the schemas |
+| `Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGrant`, `TailnetGateway` | none created | — | every CR; the chart installs only the schemas |

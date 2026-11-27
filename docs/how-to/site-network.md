@@ -30,7 +30,7 @@ What the operator does — and does not do:
 
 | Does | Does not |
 | --- | --- |
-| Appends `autoApprovers.routes[<prefix>] = advertisedBy.tags` to the rendered policy | Render a grant: **who may reach the site stays a grant in the base policy** (`dst: 10.0.102.0/24`) |
+| Appends `autoApprovers.routes[<prefix>] = advertisedBy.tags` to the rendered policy | Render a grant: **who may reach the site is a grant in the base policy** (`dst: 10.0.102.0/24`) **or a [`TailnetGrant`](grants.md)** with `target.prefixes` inside the site |
 | Replays the approval on every node carrying an advertiser tag that advertises the prefix | Advertise anything: the router's own route list (`--advertise-routes`, `TS_ROUTES`) is still yours |
 | Reports `Advertised` / `Approved` / `Ready` per site from the control server's node list | De-approve or withdraw routes, ever |
 | Blocks a site whose prefix overlaps `Tailnet.spec.reservedNetworks` or an **older** site | Touch the older site: a conflict never flips an already-serving network |

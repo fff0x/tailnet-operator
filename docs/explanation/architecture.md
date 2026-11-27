@@ -149,6 +149,7 @@ ConfigMap, which the single Apply writer merges after review — see
 | `TailnetIngress shop` | Deployment `ingress-shop`, ConfigMap `shop-targets`, Secret `shop-authkey`, NetworkPolicy `ingress-shop`, ServiceAccount/Role/RoleBinding `ingress-shop`, state Secret `ingress-shop-state-<hash>`; `mode: http` with an issuer: cert-manager Certificate and its TLS Secret | Pre-auth key (reusable, non-ephemeral, rotated); persistent node `ingress-shop`; DNS name in the hosts file | Objects are garbage-collected; the operator deletes the node (best effort, before the finalizer is dropped) |
 | `TailnetGateway corp-gateway` | StatefulSet, headless Service, LoadBalancer Service, DNS ClusterIP Service, CoreDNS ConfigMap, ServiceAccount, Role, RoleBinding, PDB; state Secret and auth Secret; receipt ConfigMaps — none with an owner reference | Non-ephemeral bootstrap key; persistent node; approved routes | `Retain` (default): nothing; `Delete`: fail-closed teardown of what this Gateway provably created |
 | `TailnetSite` | none | `autoApprovers` and approvals for the declared network | Rendered policy loses the entries |
+| `TailnetGrant` | none | One grant in the rendered policy while the target is valid and `expiresAt` has not passed | Rendered policy loses the grant at the next policy reconcile |
 
 Names and labels follow the CR name; selectors are per CR, so two CRs never share a pod. For the
 field-level view see the [CRD reference](../reference/crds.md), for the gateway's exact contract

@@ -27,8 +27,8 @@ manual installation, or `install.crds: CreateReplace` / `upgrade.crds: CreateRep
 
 ## Permissions
 
-The operator never writes a CR spec. `Tailnet`, `TailnetEgress`, `TailnetIngress` and `TailnetSite`
-are `get/list/watch` plus `status` and (where owner references need it) `finalizers`; `TailnetGateway`
+The operator never writes a CR spec. `Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite` and
+`TailnetGrant` are `get/list/watch` plus `status` and (where owner references need it) `finalizers`; `TailnetGateway`
 additionally has `patch` on the main resource, used only to add or remove the `deletionPolicy: Delete`
 teardown finalizer (identity fields stay immutable through CEL for every writer). Pods and
 ReplicaSets are read-only; Services stay operator-namespace scoped; cert-manager access is limited to

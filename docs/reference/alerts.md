@@ -17,11 +17,11 @@ replaces the whole bundled group.
 | `TailnetOperatorDown` | critical | no healthy operator metrics endpoint for 5 min (`up` absent or 0) | [operator down](../OPERATIONS.md#monitoring-operator-down) |
 | `TailnetReconcileErrors` | warning | more than 0.1 controller-runtime reconcile errors/s for 10 min | [reconcile errors](../OPERATIONS.md#monitoring-reconcile-errors) |
 | `TailnetHeadscaleAPIErrors` | warning | more than 5 % HTTP 5xx on Headscale operations over 10 min (code 0 = transport, not 5xx) | [Headscale API](../OPERATIONS.md#monitoring-headscale-api) |
-| `TailnetResourceNotReady` | warning | a CR has been `Ready=False` for 10 min; the `reason` label is the current `Ready` reason | [resource not ready](../OPERATIONS.md#monitoring-resource-not-ready) |
+| `TailnetResourceNotReady` | warning | a CR has been `Ready=False` for 10 min; the `reason` label is the current `Ready` reason. An expired `TailnetGrant` does not fire (`Expired` is withdrawn); `ExpiryPending` fires: the grant expired, but its removal from the live policy is not confirmed | [resource not ready](../OPERATIONS.md#monitoring-resource-not-ready) |
 | `TailnetPolicyStale` | warning | `tailnet_policy_pending == 1` for 15 min (`Apply` mode, render ≠ applied) | [policy stale](../OPERATIONS.md#monitoring-policy-stale) |
 | `TailnetPolicyRejected` | warning | `PolicyApplied=False/PolicyRejected` for 5 min; the previous policy stays live | [policy rejected](../OPERATIONS.md#monitoring-policy-rejected) |
 | `TailnetPolicyApplyErrors` | warning | at least 6 failed policy writes in 30 min | [policy apply errors](../OPERATIONS.md#monitoring-policy-apply-errors) |
-| `TailnetPolicyGeneratedDrop` | warning | generated tags, grants or routes fell by more than half within 10 min | [policy generated drop](../OPERATIONS.md#monitoring-policy-generated-drop) |
+| `TailnetPolicyGeneratedDrop` | warning | generated tags, grants or routes fell by more than half within 10 min; `TailnetGrant`s that expire together count as such a fall | [policy generated drop](../OPERATIONS.md#monitoring-policy-generated-drop) |
 | `TailnetApprovalReplays` | warning | more than 3 routes re-approved by replay within 1 h | [route replays](../OPERATIONS.md#monitoring-route-replays) |
 | `TailnetRouteConflict` | warning | a `TailnetSite` has carried `RouteConflict` (`OverlapsReserved` / `OverlapsSite`) for 15 min | [route conflict](../OPERATIONS.md#monitoring-route-conflict) |
 | `TailnetUnmanagedRouteOverlap` | info | for 30 min a node without an advertiser tag advertises a route overlapping a `TailnetSite` | [unmanaged route overlap](../OPERATIONS.md#monitoring-unmanaged-route-overlap) |
