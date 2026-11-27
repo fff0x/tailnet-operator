@@ -27,7 +27,8 @@ import (
 // It is not a way to run the console. The data is made up, and this test server puts one session
 // into every request, because a browser does not keep the __Host- cookie over plain HTTP. The
 // session ends after its hour, which shows the notice of the live update. The site "office"
-// changes its state every 15 seconds. Grant management is on with four-eyes approval; its audit
+// changes its state every 15 seconds. Grant management is on with four-eyes approval, observation
+// every minute and a retention of 30 days; its audit
 // log lives in a temporary directory that the test removes when it stops. "?as=admin2" and
 // "?as=user" switch to the second admin Bob and the user Carol, "?as=admin" back. Stop with Ctrl-C.
 func TestDemo(t *testing.T) {
@@ -65,6 +66,25 @@ func TestDemo(t *testing.T) {
 		"user":   c.as(t, "carol", false)[0],
 	}
 	c.expect(t, "demo request", c.post(t, "/requests", []*http.Cookie{sessions["user"]}, wikiForm), http.StatusSeeOther)
+	// Grants for the first observation: one from Git, Carol's own and an expired one.
+	grant := func(name string, managed bool, expires time.Duration, source string) *tnv1.TailnetGrant {
+		g := &tnv1.TailnetGrant{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: tnv1.TailnetGrantSpec{TailnetRef: tnv1.TailnetRef{Name: "lab"},
+			Sources: []string{source}, Target: tnv1.GrantTarget{Tag: "tag:wiki"}, Ports: []int32{443}}}
+		if managed {
+			g.Labels = map[string]string{managedByLabel: managedBy}
+		}
+		if expires != 0 {
+			g.Spec.ExpiresAt = &metav1.Time{Time: time.Now().Add(expires)}
+		}
+		return g
+	}
+	expired := grant("console-expired001", true, -48*time.Hour, c.id("bob")+"@")
+	expired.Status.Conditions = []metav1.Condition{cond("Ready", "False", "Expired")}
+	for _, g := range []*tnv1.TailnetGrant{grant("staff-wiki", false, 0, "group:staff"), grant("console-carol00001", true, 8*time.Hour, c.id("carol")+"@"), expired} {
+		if err := c.writer.Create(context.Background(), g); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -101,6 +121,8 @@ func TestDemo(t *testing.T) {
 			}
 		}
 	}()
+	c.retention = 30
+	go c.Observe(ctx, time.Minute)
 	t.Logf("console demo at http://%s/ (Ctrl-C stops it)", ln.Addr())
 	<-ctx.Done()
 	_ = ln.Close()

@@ -307,29 +307,49 @@ func expiresText(t *metav1.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// change records the change, then makes it (rules 12 and 13). It answers the request itself when
-// something fails and reports whether the change was made.
-func (s *Server) change(w http.ResponseWriter, r *http.Request, e auditEntry, apply func() error) bool {
-	if err := s.audit.append(r.Context(), e); err != nil {
+func statusCode(err error) int32 {
+	if st, ok := err.(apierrors.APIStatus); ok || errors.As(err, &st) {
+		return st.Status().Code
+	}
+	return 0
+}
+
+// commit records the change, then makes it; a failed change is followed by grant.failed (rules 12
+// and 13). written is false when the audit log refused the entry and nothing was changed. Call
+// with s.changes held, so no observation runs between the entry and the change (rule 27).
+func (s *Server) commit(ctx context.Context, e auditEntry, apply func() error) (written bool, err error) {
+	if err := s.audit.append(ctx, e); err != nil {
 		s.log.Error(err, "audit write failed; change refused", "action", e.Action)
+		return false, err
+	}
+	if err := apply(); err != nil {
+		code := statusCode(err)
+		s.log.Info("write failed", "action", e.Action, "status", code)
+		failed := auditEntry{Action: actionFailed, Actor: e.Actor, Grant: e.Grant, Tailnet: e.Tailnet,
+			Details: map[string]any{"action": e.Action, "status": code}}
+		if aerr := s.audit.append(ctx, failed); aerr != nil {
+			s.log.Error(aerr, "audit write failed", "action", actionFailed)
+		}
+		return true, err
+	}
+	return true, nil
+}
+
+// change commits a change asked for in the console. It answers the request itself when something
+// fails and reports whether the change was made.
+func (s *Server) change(w http.ResponseWriter, r *http.Request, e auditEntry, apply func() error) bool {
+	s.changes.Lock()
+	written, err := s.commit(r.Context(), e, apply)
+	s.changes.Unlock()
+	if !written {
 		s.message(w, r, http.StatusServiceUnavailable, "Change refused",
 			"The console cannot write its audit log, so it makes no change. Check the audit volume and the anchor ConfigMap.")
 		return false
 	}
-	err := apply()
 	if err == nil {
 		return true
 	}
-	code := int32(0)
-	if st, ok := err.(apierrors.APIStatus); ok || errors.As(err, &st) {
-		code = st.Status().Code
-	}
-	s.log.Info("write failed", "action", e.Action, "status", code)
-	failed := auditEntry{Action: actionFailed, Actor: e.Actor, Grant: e.Grant, Tailnet: e.Tailnet,
-		Details: map[string]any{"action": e.Action, "status": code}}
-	if aerr := s.audit.append(r.Context(), failed); aerr != nil {
-		s.log.Error(aerr, "audit write failed", "action", actionFailed)
-	}
+	code := statusCode(err)
 	if apierrors.IsConflict(err) {
 		s.message(w, r, http.StatusConflict, "Changed meanwhile",
 			"Somebody changed it at the same time. Reload the page and try again. The audit log records the attempt.")
@@ -553,6 +573,7 @@ type auditRow struct {
 	Seq                 uint64
 	Time, Action, Actor string
 	Subject             string
+	Origin              string // who acted when the entry names nobody (rule 29)
 	Tailnet, Grant      string
 	Details             []string
 	Broken              bool
@@ -591,8 +612,15 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, sess *session
 		}
 		row := auditRow{Seq: e.Seq, Time: e.Time.UTC().Format("2006-01-02 15:04:05 UTC"), Action: e.Action,
 			Tailnet: e.Tailnet, Grant: e.Grant, Broken: e.Action == actionBroken}
-		if e.Actor != nil {
+		switch {
+		case e.Actor != nil:
 			row.Actor, row.Subject = or(e.Actor.Name, e.Actor.Subject), e.Actor.Issuer+" "+e.Actor.Subject
+		case e.Action == actionObserved:
+			row.Origin = "unknown"
+		case e.Action == actionExpired:
+			row.Origin = "operator"
+		default:
+			row.Origin = "console"
 		}
 		var keys []string
 		for k := range e.Details {

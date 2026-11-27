@@ -35,4 +35,15 @@ func TestConfigFromEnv(t *testing.T) {
 	if err := cfg.Validate(); err != nil || cfg.AuditDir != "/var/lib/tsunaro-console" || cfg.AuditAnchor != "tsunaro-console-audit" || cfg.Namespace != "tsunaro-system" || !cfg.FourEyes {
 		t.Fatalf("config %+v: %v", cfg, err)
 	}
+	for v, ok := range map[string]bool{"30": true, "0": true, "3650": true, "-1": false, "3651": false, "30d": false} {
+		env["CONSOLE_RETENTION_DAYS"] = v
+		if err := configFromEnv(func(k string) string { return env[k] }).Validate(); (err == nil) != ok {
+			t.Errorf("retention %q: %v", v, err)
+		}
+	}
+	env["CONSOLE_AUDIT_DIR"] = ""
+	env["CONSOLE_FOUR_EYES"], env["CONSOLE_RETENTION_DAYS"] = "", "30"
+	if err := configFromEnv(func(k string) string { return env[k] }).Validate(); err == nil {
+		t.Fatal("retention accepted without access management")
+	}
 }

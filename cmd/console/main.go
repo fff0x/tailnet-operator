@@ -2,7 +2,8 @@
 // the groups claim and shows the Tailnets, spokes, TailnetIngresses and TailnetSites it reads
 // through a watch cache, and the person's access from the operator's console API. Only with
 // CONSOLE_AUDIT_DIR set it writes: admins create, extend and revoke TailnetGrants and decide
-// access requests, each change recorded first in the audit log on that directory, and it serves
+// access requests, each change recorded first in the audit log on that directory, it records the
+// grant changes it observes, deletes what is done after CONSOLE_RETENTION_DAYS, and it serves
 // metrics on :8081.
 package main
 
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,13 +38,20 @@ func main() {
 }
 
 func configFromEnv(getenv func(string) string) console.Config {
+	retention := 0
+	if v := getenv("CONSOLE_RETENTION_DAYS"); v != "" {
+		var err error
+		if retention, err = strconv.Atoi(v); err != nil {
+			retention = -1
+		}
+	}
 	return console.Config{
 		URL: getenv("CONSOLE_URL"), Issuer: getenv("OIDC_ISSUER"), ClientID: getenv("OIDC_CLIENT_ID"),
 		ClientSecret: getenv("OIDC_CLIENT_SECRET"), Scopes: strings.Fields(strings.ReplaceAll(getenv("OIDC_SCOPES"), ",", " ")),
 		AdminGroup: getenv("CONSOLE_ADMIN_GROUP"), UserGroup: getenv("CONSOLE_USER_GROUP"),
 		OperatorURL: getenv("CONSOLE_OPERATOR_URL"), TokenFile: getenv("CONSOLE_API_TOKEN_FILE"),
 		AuditDir: getenv("CONSOLE_AUDIT_DIR"), AuditAnchor: getenv("CONSOLE_AUDIT_ANCHOR"), Namespace: getenv("POD_NAMESPACE"),
-		FourEyes: getenv("CONSOLE_FOUR_EYES") == "true",
+		FourEyes: getenv("CONSOLE_FOUR_EYES") == "true", RetentionDays: retention,
 	}
 }
 
@@ -86,6 +95,7 @@ func run(ctx context.Context, l logr.Logger) error {
 		ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10}}
 	if mh := srv.MetricsHandler(); mh != nil {
 		go srv.WatchAudit(ctx, 10*time.Minute)
+		go srv.Observe(ctx, time.Minute)
 		servers = append(servers, &http.Server{Addr: ":8081", Handler: mh, ReadHeaderTimeout: 5 * time.Second,
 			WriteTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10})
 	}

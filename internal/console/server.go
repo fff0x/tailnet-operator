@@ -45,7 +45,9 @@ type Server struct {
 	audit     *auditLog
 	now       func() time.Time
 	fourEyes  bool
-	decisions sync.Mutex   // one request decision at a time
+	retention int          // days before the console deletes what is done; 0 deletes nothing
+	decisions sync.Mutex   // one request decision at a time; taken before changes
+	changes   sync.Mutex   // an audit entry and its change, or one observation run
 	breaks    atomic.Int64 // audit chain breaks found by the last check
 }
 
@@ -97,7 +99,7 @@ func New(cfg Config, reader client.Reader, writer client.Client, log logr.Logger
 		reader: reader, dir: newDirectory(cfg.OperatorURL, cfg.TokenFile), log: log, pages: pages, poll: pollInterval, now: time.Now,
 	}
 	if cfg.AuditDir != "" {
-		s.writer, s.fourEyes = writer, cfg.FourEyes
+		s.writer, s.fourEyes, s.retention = writer, cfg.FourEyes, cfg.RetentionDays
 		s.audit = newAuditLog(cfg.AuditDir, configMapAnchor{c: writer, namespace: cfg.Namespace, name: cfg.AuditAnchor}, log.WithName("audit"), time.Now)
 	}
 	return s, nil

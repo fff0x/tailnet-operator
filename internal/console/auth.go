@@ -47,6 +47,9 @@ type Config struct {
 	// FourEyes makes admins request their own grants and extensions: another admin approves
 	// them, and a user's request needs two admins.
 	FourEyes bool
+	// RetentionDays: expired console grants and decided requests are deleted, and pending requests
+	// expire, this many days later. 0 deletes nothing; -1 marks an unreadable setting.
+	RetentionDays int
 }
 
 // Validate never echoes the secret.
@@ -81,6 +84,12 @@ func (c Config) Validate() error {
 	}
 	if c.FourEyes && c.AuditDir == "" {
 		return errors.New("console four-eyes approval needs access management")
+	}
+	if c.RetentionDays < 0 || c.RetentionDays > 3650 {
+		return errors.New("console retention must be a whole number of days from 0 to 3650")
+	}
+	if c.RetentionDays > 0 && c.AuditDir == "" {
+		return errors.New("console retention needs access management")
 	}
 	if !slices.Contains(c.Scopes, oidc.ScopeOpenID) {
 		return errors.New("console scopes must contain openid")

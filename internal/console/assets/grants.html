@@ -3,7 +3,7 @@
   <h1>Grants</h1>
   <a class="button button--brand" href="/grants/new">New grant</a>
 </div>
-<p class="lede">Every TailnetGrant in the cluster. The console changes only the grants it created; every change is in the <a href="/audit">audit log</a> before it is made. Revoking sets the expiry to now and keeps the object.</p>
+<p class="lede">Every TailnetGrant in the cluster. The console changes only the grants it created; every change is in the <a href="/audit">audit log</a> before it is made. Revoking sets the expiry to now; the object stays until the cleanup deletes it.</p>
 {{if .Body.FourEyes}}<p class="notice">Four-eyes approval is on: a new grant or an extension becomes a <a href="/requests">request</a> that another admin approves; revoking acts at once. With only one admin, nothing can be approved.</p>{{end}}
 <section class="panel">
 {{with .Body.Rows}}

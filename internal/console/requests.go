@@ -25,6 +25,7 @@ const (
 	phaseApproved        = "Approved"
 	phaseRejected        = "Rejected"
 	phaseWithdrawn       = "Withdrawn"
+	phaseExpired         = "Expired" // nobody decided within the retention (rule 31)
 	requestedAsUser      = "User"
 	requestedAsAdmin     = "Admin"
 )
@@ -365,6 +366,8 @@ func (s *Server) requestsPage(w http.ResponseWriter, r *http.Request, sess *sess
 				row.Approvals = append(row.Approvals, name(*g))
 			}
 			switch d := h.Decided; {
+			case row.Phase == phaseExpired && req.Status.DecidedAt != nil:
+				row.Decided = "expired undecided · " + when(req.Status.DecidedAt.Time)
 			case d == nil || row.Phase == phasePending:
 			case row.Phase == phaseApproved:
 				row.Decided = "closed by " + name(*d)

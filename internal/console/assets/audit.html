@@ -1,6 +1,6 @@
 {{define "content"}}
 <h1>Audit log</h1>
-<p class="lede">Every change the console made or tried, oldest first on disk, newest first here. Each entry carries the hash of the one before; the head is also kept in a ConfigMap and in the pod log.</p>
+<p class="lede">Every change the console made or tried, and every grant change and expiry it observed in the cluster (by <code>unknown</code> or <code>operator</code>), oldest first on disk, newest first here. Each entry carries the hash of the one before; the head is also kept in a ConfigMap and in the pod log.</p>
 <section class="panel">
   <h2>Chain</h2>
   {{if .Body.Problem}}<p class="notice notice--bad">The console cannot read the audit log or its anchor. It refuses every change until it can.</p>
@@ -14,7 +14,7 @@
     <thead><tr><th>#</th><th>Time</th><th>Action</th><th>By</th><th>Tailnet</th><th>Grant</th><th>Details</th></tr></thead>
     <tbody>{{range .}}<tr{{if .Broken}} class="row--bad"{{end}}>
       <td>{{.Seq}}</td><td class="nowrap">{{.Time}}</td><td><code>{{.Action}}</code></td>
-      <td>{{if .Actor}}<span title="{{.Subject}}">{{.Actor}}</span>{{else}}<span class="muted">console</span>{{end}}</td>
+      <td>{{if .Actor}}<span title="{{.Subject}}">{{.Actor}}</span>{{else}}<span class="muted">{{.Origin}}</span>{{end}}</td>
       <td>{{with .Tailnet}}<code>{{.}}</code>{{end}}</td><td>{{with .Grant}}<code>{{.}}</code>{{end}}</td>
       <td>{{range $i, $d := .Details}}{{if $i}}<br>{{end}}{{$d}}{{end}}</td>
     </tr>{{end}}</tbody>
