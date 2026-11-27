@@ -6,6 +6,16 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Added
 
+- **Read-only web console (`console.enabled`).** A third program in the operator image,
+  `/tailnet-console`, shows Tailnets, spokes, TailnetIngresses and TailnetSites in four tables. It
+  signs people in with OIDC (authorization code with PKCE S256, `state` and `nonce`) and takes the
+  role from the `groups` claim: members of `console.oidc.adminGroup` are admins, members of
+  `console.oidc.userGroup` (or every signed-in person when it is empty) are users. The session is
+  a sealed cookie (AES-256-GCM, one hour, key generated at every start); no tokens are kept. User
+  references in `allowFrom` appear only as a count, and logs carry no identity. The chart renders
+  a Deployment, a Service, a ServiceAccount and a ClusterRole with `get`, `list` and `watch` on the
+  three kinds, all named `<name>-console`; publish the console with a `TailnetIngress` in
+  `mode: http` ([Console](docs/how-to/console.md)). Off by default.
 - **`TailnetGrant`: time-bound TCP access for people and policy groups.** A cluster-scoped kind in
   the policy-owning cluster (`policy.mode: Apply`). It grants user references or base-policy groups
   access to the tag of a `TailnetIngress`, to an ingress tag of a merged spoke fragment or to
@@ -26,7 +36,7 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 - **The ingress agent closes open connections that the policy no longer permits.** Until now a
   policy change refused new connections only; a session that was open before continued while the
   two nodes stayed peers. Once per second the agent now compares each open connection of a
-  `TailnetIngress` (`mode: tcp` and `mode: http`, including WebSockets) with its packet filter and
+  `TailnetIngress` (`mode: l4` and `mode: http`, including WebSockets) with its packet filter and
   closes it, with the connection to the backend, when the filter would not admit it again. This
   applies to every policy change: an expired or deleted `TailnetGrant`, a changed `allowFrom`, a
   changed base policy. Measured with an L4 ingress: the connection failed 0.7 to 2.5 seconds

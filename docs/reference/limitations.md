@@ -62,6 +62,18 @@ code. Versions and the preflight matrix are in [Compatibility](compatibility.md)
 | The rendered **hosts file is IPv4-only**: an ingress node's tailnet IPv6 address is skipped. | Clients prefer AAAA, and tsnet/netstack agents did not accept tailnet IPv6 in the clusters verified so far; a dead AAAA would cost a connect timeout on every lookup. | Planned as a `Tailnet.spec.dns` switch once IPv6 is verified. |
 | The gateway is IPv4-only (above). | Fresh writer scope. | — |
 
+## Console
+
+| Limit | Why | Workaround or status |
+| --- | --- | --- |
+| The console is **read-only** and shows Tailnets, spokes, TailnetIngresses and TailnetSites; not egresses, gateways or grants. | First slice; the map, "my access" and Headscale users and nodes come with a read endpoint on the operator. | `kubectl get` for the other kinds. |
+| **One replica**; a restart signs everybody out. | The session key lives in memory only, so no Secret holds it and no second replica could open its cookies. | Sign in again after a rollout. |
+| A session stays valid for its hour after the person leaves the group or the IdP. | The console checks the groups at sign-in only and keeps no refresh token. | Remove the person from the console ingress's `allowFrom` source group to cut access at the network level. |
+| Sign-out ends the console session only. | No RP-initiated logout at the IdP. | Sign out at the IdP as well. |
+| The page shows the state at load time. | No JavaScript, no polling. | Reload the page. |
+| No NetworkPolicy and no metrics for the console pod. | Planned with the second console slice. | Restrict the namespace with your own policy. |
+| The IdP needs a certificate from a public CA. | The scratch image carries the public roots only; no CA ConfigMap is mounted for the console. | Use a publicly trusted issuer certificate. |
+
 ## Not provided
 
 | Feature | Status |

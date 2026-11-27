@@ -140,6 +140,21 @@ the Headscale cannot write; in `mode: Export` it renders only its own entries in
 ConfigMap, which the single Apply writer merges after review — see
 [Second cluster](../how-to/policy.md#second-cluster-export-on-the-spoke-merge-on-the-hub).
 
+## Console: a read-only web view
+
+```mermaid
+flowchart LR
+  peer[Tailnet peer, browser] -->|HTTPS| ing[TailnetIngress console<br/>agent terminates TLS]
+  ing -->|HTTP :8080| con[tailnet-console<br/>Deployment, chart value]
+  con -->|get / list / watch| api[Kubernetes API<br/>Tailnets, TailnetIngresses, TailnetSites]
+  peer -.->|sign-in, PKCE| idp[OIDC identity provider]
+  con -.->|code exchange, keys, UserInfo| idp
+```
+
+The chart renders the console with `console.enabled`; it is not created by a CR. It reads three
+kinds through its own ClusterRole and writes nothing, neither to Kubernetes nor to Headscale. The
+admin publishes it with a `TailnetIngress` in `mode: http` ([Console](../how-to/console.md)).
+
 ## What the operator creates
 
 | CR | Kubernetes objects (owned, garbage-collected with the CR) | Headscale side | On delete |

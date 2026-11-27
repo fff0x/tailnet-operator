@@ -144,7 +144,8 @@ Metrics (operator TCP 8080, agents TCP 9080) and the bundled alerts with their r
 
 Six reconcilers (Tailnet, Egress, Ingress, Gateway, DNS, Policy) turn CRs into desired state
 applied with server-side apply; one agent pod per CR is a userspace tsnet node, the same image
-carrying `/tailnet-operator` and `/tailnet-agent`. The full walk-through — key rotation, route
+carrying `/tailnet-operator` and `/tailnet-agent`. The optional read-only
+[console](docs/how-to/console.md) (`/tailnet-console`) is in that image too. The full walk-through — key rotation, route
 diagnosis, policy rendering and replay, the data plane — is
 [Model and how it works](docs/explanation/model.md#how-it-works).
 
@@ -170,6 +171,7 @@ chart; see [CONTRIBUTING](https://app.radicle.xyz/nodes/seed.this-is-fine.io/rad
 | --- | --- |
 | `api/v1alpha1` | `Tailnet`, `TailnetEgress`, `TailnetIngress`, `TailnetSite`, `TailnetGrant`, `TailnetGateway` CRD types |
 | `cmd/operator`, `cmd/agent` | control plane; `tailnet-agent`: tsnet node, TCP/HTTP forwarders, health and probe endpoints |
+| `cmd/console`, `internal/console` | `tailnet-console`: read-only web console with OIDC sign-in |
 | `internal/controller` | reconcilers (tailnet, egress, ingress, gateway, dns, policy) and resource builders |
 | `internal/gateway` | gateway renderer, route planner, DNS zone, receipts and the fresh writer |
 | `internal/{headscale,policy,certificates}` | Headscale REST client; base + CR → rendered policy; TLS serving and certificate validation |
