@@ -237,7 +237,7 @@ Before a downgrade, restore a verified legacy gateway path; do not remove backen
 Removing gateway authentication is a separate access-control decision. Native application login and credentials remain independent.
 
 When the policy stops permitting a peer, the agent closes its open connections, including keep-alive connections and WebSockets, with the request to the backend.
-The agent checks once per second ([Grants § Expiry](grants.md#expiry)). Agent unit tests cover this for `mode: http`; the kind suite measures `mode: tcp` only.
+The agent checks once per second ([Grants § Expiry](grants.md#expiry)). Agent unit tests cover this for `mode: http`; the kind suite measures `mode: l4` only.
 
 ## Tailnet without a policy writer (spoke cluster)
 

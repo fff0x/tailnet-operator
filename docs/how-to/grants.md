@@ -107,7 +107,7 @@ Once per second the agent asks its packet filter whether each open connection co
 again, from the same source to the same port. If not, the agent closes the connection and its
 connection to the backend. The cause of the policy change does not matter: an expired or deleted
 grant, a changed `allowFrom` or a changed base policy. The check covers
-`mode: tcp` and `mode: http`, including WebSockets. The agent logs the number of closed
+`mode: l4` and `mode: http`, including WebSockets. The agent logs the number of closed
 connections, without addresses.
 
 The kind test measured an L4 ingress with a userspace (tsnet) client in three runs. It exchanges
