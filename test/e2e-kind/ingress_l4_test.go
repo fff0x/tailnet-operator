@@ -160,6 +160,7 @@ func TestIngressL4(t *testing.T) {
 	f := x.f
 	var tn *tnv1.Tailnet
 	var ingress *tnv1.TailnetIngress
+	var grant *tnv1.TailnetGrant
 	installed := false
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
@@ -195,6 +196,9 @@ func TestIngressL4(t *testing.T) {
 				case <-time.After(time.Second):
 				}
 			}
+		}
+		if grant != nil {
+			remove(grant)
 		}
 		if ingress != nil {
 			remove(ingress)
@@ -429,15 +433,42 @@ func TestIngressL4(t *testing.T) {
 	setAllowed(false)
 	// Policy application precedes asynchronous peer updates. Only revocation
 	// gets a bounded convergence window, recorded separately from assertions.
-	eventually(t, "L4 revocation converges before fixed negative assertions", func() bool {
-		got, err := probeOnce("revocation-convergence", denied.Name, target)
-		if err != nil || (!got.Connected && !l4Denied(got)) {
-			t.Fatal("L4 revocation probe unavailable or unclassified")
-		}
-		return l4Denied(got)
-	})
+	converge := func(label string) {
+		t.Helper()
+		eventually(t, "L4 revocation converges before fixed negative assertions", func() bool {
+			got, err := probeOnce(label, denied.Name, target)
+			if err != nil || (!got.Connected && !l4Denied(got)) {
+				t.Fatal("L4 revocation probe unavailable or unclassified")
+			}
+			return l4Denied(got)
+		})
+	}
+	converge("revocation-convergence")
 	probeDenied("denied-again")
 	probeAllowed("allowed-after", x.peer.Name)
+	// Time-bound grant: the denied user is still outside allowFrom and reaches the ingress only
+	// through a TailnetGrant. At expiresAt the operator withdraws it; no object is touched.
+	grant = &tnv1.TailnetGrant{ObjectMeta: metav1.ObjectMeta{Name: "fixture-denied-l4"}, Spec: tnv1.TailnetGrantSpec{
+		TailnetRef: tnv1.TailnetRef{Name: tn.Name}, Sources: []string{"fixture-denied@"}, Target: tnv1.GrantTarget{Tag: ingress.Status.Tag}, Ports: []int32{8443},
+		ExpiresAt: &metav1.Time{Time: time.Now().Add(120 * time.Second)},
+	}}
+	x.create(grant)
+	grantIs := func(reason string) bool {
+		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(grant), grant) != nil {
+			return false
+		}
+		c := meta.FindStatusCondition(grant.Status.Conditions, "Ready")
+		return c != nil && c.ObservedGeneration == grant.Generation && c.Reason == reason
+	}
+	eventually(t, "time-bound grant applied", func() bool { return grantIs("Granted") })
+	probeAllowed("grant-active", denied.Name)
+	eventuallyWithin(t, 150*time.Second, "time-bound grant expired", func() bool { return grantIs("Expired") })
+	if time.Now().Before(grant.Spec.ExpiresAt.Time) {
+		t.Fatal("grant reported Expired before expiresAt")
+	}
+	converge("grant-expiry-convergence")
+	probeDenied("grant-expired")
+	probeAllowed("allowed-after-grant", x.peer.Name)
 	if !ready() || !policyReady() || f.kube.Get(t.Context(), client.ObjectKeyFromObject(&deployment), &deployment) != nil || deployment.Generation != generation {
 		t.Fatal("L4 fixture health or agent template changed")
 	}
@@ -446,6 +477,6 @@ func TestIngressL4(t *testing.T) {
 			t.Fatal("ACL sequence replaced or restarted a participant")
 		}
 	}
-	x.save("result.json", map[string]any{"realChartAndReconciler": true, "generatedAgentStartupGate": true, "l4ByteExchange": true, "separateUserACLNegative": true, "denyAllowDenyRecovery": true, "sameParticipants": true, "probes": results, "egressSubnetRoutingTested": false, "httpCoexistenceTested": false, "aclNegativeAddress": "tailnet-ipv4", "negativeSamplesPerPhase": l4NegativeSamples, "dnsACLNegativeTested": false, "immediateRevocationTested": false})
-	t.Log("gate: generated L4 ingress, IPv4/MagicDNS byte exchange, independent user IPv4 deny/allow/deny with fixed timeout/no-route samples and positive controls; unchanged participants; revocation convergence recorded separately")
+	x.save("result.json", map[string]any{"realChartAndReconciler": true, "generatedAgentStartupGate": true, "l4ByteExchange": true, "separateUserACLNegative": true, "denyAllowDenyRecovery": true, "sameParticipants": true, "probes": results, "egressSubnetRoutingTested": false, "httpCoexistenceTested": false, "aclNegativeAddress": "tailnet-ipv4", "negativeSamplesPerPhase": l4NegativeSamples, "dnsACLNegativeTested": false, "immediateRevocationTested": false, "timeBoundGrant": true, "establishedConnectionsAtExpiryTested": false})
+	t.Log("gate: generated L4 ingress, IPv4/MagicDNS byte exchange, independent user IPv4 deny/allow/deny with fixed timeout/no-route samples and positive controls; unchanged participants; revocation convergence recorded separately; time-bound TailnetGrant allows the denied user until expiresAt and new connections are denied after it")
 }

@@ -9,7 +9,7 @@ exec 3>&1
 exec >/dev/null 2>&1
 reject() { printf 'projection: stage=preflight result=rejected\n' >&3; exit 2; }
 test_pattern='^Test(FixtureCAProjection|PodNetworkGate|HeadscaleHTTPS|AgentHTTPSPeer|IngressHTTP|IngressL4)$'
-test_timeout=26m
+test_timeout=30m
 kernel_only=false
 gateway_only=false
 if [[ $# == 1 && $1 == --http-only ]]; then
@@ -19,7 +19,8 @@ if [[ $# == 1 && $1 == --http-only ]]; then
     test_timeout=22m
 elif [[ $# == 1 && $1 == --l4-only ]]; then
     test_pattern='^TestIngressL4$'
-    test_timeout=10m
+    # 14m, not 10m: the time-bound grant phase waits for a 120 s expiry and its convergence.
+    test_timeout=14m
 elif [[ $# == 1 && $1 == --rest-only ]]; then
     # The remaining P1.4 gates share one bootstrap; each builds its own namespace, control
     # plane and peer, so the budget is the sum of four fixtures, not of four clusters.
