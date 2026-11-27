@@ -2,9 +2,10 @@
 {{- if and (not .Values.networkPolicy.cilium.headscalePeers) (not .Values.networkPolicy.headscaleCIDRs) }}
 {{- fail "networkPolicy.provider cilium requires at least one of networkPolicy.cilium.headscalePeers (in-cluster) or networkPolicy.headscaleCIDRs (remote Headscale)" }}
 {{- end }}
-# Egress-only: the operator may reach exactly the destinations it dials. Ingress (metrics
-# :8080, health :8081) stays open. If any rule is missing the operator fails silently; keep this
-# in sync with what internal/controller dials.
+# Egress: the operator may reach exactly the destinations it dials. If any rule is missing the
+# operator fails silently; keep this in sync with what internal/controller dials. Ingress stays
+# open without the console; with it, only the console reaches the console API on :8082, and
+# metrics (:8080) and health (:8081) stay open by an explicit rule.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -14,6 +15,22 @@ spec:
   endpointSelector:
     matchLabels:
       {{- include "tailnet-operator.selector" . | nindent 6 }}
+  {{- if .Values.console.enabled }}
+  # An ingress section puts the pod into default deny for ingress: every port needs a rule.
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            {{- include "tailnet-operator.consoleSelector" . | nindent 12 }}
+      toPorts:
+        - ports:
+            - {port: "8082", protocol: TCP}
+    - fromEntities:
+        - all
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+            - {port: "8081", protocol: TCP}
+  {{- end }}
   egress:
     # 1. kube-apiserver — watch/patch CRs, Secrets, child objects
     - toEntities:

@@ -61,7 +61,8 @@ spec:
         - {protocol: TCP, port: {{ . }}}
         {{- end }}
 {{- else }}
-# Egress-only, like the operator's CiliumNetworkPolicy: ingress stays open.
+# The console receives HTTP from ingressPeers and the kubelet's probes from its node, and dials
+# only the API server, DNS, the operator's console API and the identity provider.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -73,6 +74,19 @@ spec:
   endpointSelector:
     matchLabels:
       {{- include "tailnet-operator.consoleSelector" . | nindent 6 }}
+  ingress:
+    {{- with $c.ingressPeers }}
+    - fromEndpoints:
+        {{- include "tailnet-operator.ciliumEndpoints" . | trim | nindent 8 }}
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+    {{- end }}
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
   egress:
     - toEntities:
         - kube-apiserver

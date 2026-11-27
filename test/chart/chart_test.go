@@ -907,8 +907,25 @@ type ciliumPolicy struct {
 				Ports []struct{ Port, Protocol string } `json:"ports"`
 			} `json:"toPorts"`
 		} `json:"egress"`
-		Ingress []interface{} `json:"ingress"`
+		Ingress []struct {
+			FromEntities  []string               `json:"fromEntities"`
+			FromEndpoints []metav1.LabelSelector `json:"fromEndpoints"`
+			ToPorts       []struct {
+				Ports []struct{ Port, Protocol string } `json:"ports"`
+			} `json:"toPorts"`
+		} `json:"ingress"`
 	} `json:"spec"`
+}
+
+// ingressPorts lists the ports of one Cilium ingress rule.
+func (p ciliumPolicy) ingressPorts(i int) []string {
+	var out []string
+	for _, tp := range p.Spec.Ingress[i].ToPorts {
+		for _, port := range tp.Ports {
+			out = append(out, port.Port+"/"+port.Protocol)
+		}
+	}
+	return out
 }
 
 func TestCiliumNetworkPolicy(t *testing.T) {
@@ -1344,8 +1361,38 @@ func TestConsoleNetworkPolicy(t *testing.T) {
 
 	m = render(t, values+"  provider: cilium\n")
 	cnp := decode[ciliumPolicy](t, m.named(t, "CiliumNetworkPolicy", "tailnet-operator-console"))
-	if !matches(t, cnp.Spec.EndpointSelector, console) || len(cnp.Spec.Ingress) != 0 || len(cnp.Spec.Egress) != 4 {
+	if !matches(t, cnp.Spec.EndpointSelector, console) || len(cnp.Spec.Ingress) != 2 || len(cnp.Spec.Egress) != 4 {
 		t.Fatalf("console CiliumNetworkPolicy = %+v", cnp.Spec)
+	}
+	// Console ingress: the ingress agent (release namespace) and the node's probes, on 8080 only.
+	if in := cnp.Spec.Ingress[0]; len(in.FromEndpoints) != 1 || in.FromEndpoints[0].MatchLabels["app.kubernetes.io/name"] != "tailnet-ingress" ||
+		len(in.FromEndpoints[0].MatchExpressions) != 0 || !slices.Equal(cnp.ingressPorts(0), []string{"8080/TCP"}) {
+		t.Errorf("console ingress from the agent = %+v", in)
+	}
+	if !slices.Equal(cnp.Spec.Ingress[1].FromEntities, []string{"host"}) || !slices.Equal(cnp.ingressPorts(1), []string{"8080/TCP"}) {
+		t.Errorf("console ingress for probes = %+v", cnp.Spec.Ingress[1])
+	}
+	// Operator ingress with the console: only the console on 8082; metrics and health stay open.
+	op := decode[ciliumPolicy](t, m.named(t, "CiliumNetworkPolicy", "tailnet-operator"))
+	if len(op.Spec.Ingress) != 2 || len(op.Spec.Ingress[0].FromEndpoints) != 1 || !matches(t, op.Spec.Ingress[0].FromEndpoints[0], console) ||
+		matches(t, op.Spec.Ingress[0].FromEndpoints[0], opDep.Spec.Template.Labels) || !slices.Equal(op.ingressPorts(0), []string{"8082/TCP"}) ||
+		!slices.Equal(op.Spec.Ingress[1].FromEntities, []string{"all"}) || !slices.Equal(op.ingressPorts(1), []string{"8080/TCP", "8081/TCP"}) {
+		t.Errorf("operator cilium ingress = %+v", op.Spec.Ingress)
+	}
+	ports := map[string]bool{}
+	for i := range op.Spec.Ingress {
+		for _, p := range op.ingressPorts(i) {
+			ports[p] = true
+		}
+	}
+	for _, c := range opDep.Spec.Template.Spec.Containers[0].Ports {
+		if !ports[fmt.Sprintf("%d/TCP", c.ContainerPort)] {
+			t.Errorf("operator port %s (%d) has no cilium ingress rule", c.Name, c.ContainerPort)
+		}
+	}
+	ipBlock := consoleValues + "  networkPolicy: {idpCIDRs: [203.0.113.10/32], ingressPeers: [{ipBlock: {cidr: 10.0.0.0/8}}]}\n" + isolation
+	if _, err := helmTemplate(t, ipBlock+"  provider: cilium\n"); err == nil || !strings.Contains(err.Error(), "ipBlock") {
+		t.Errorf("ipBlock ingress peer under cilium: %v", err)
 	}
 	e := cnp.Spec.Egress
 	if !slices.Equal(e[0].ToEntities, []string{"kube-apiserver"}) || !matches(t, e[2].ToEndpoints[0], opDep.Spec.Template.Labels) ||

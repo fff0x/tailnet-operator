@@ -105,7 +105,7 @@ console:
     idpCIDRs: []
     # -- Identity provider TCP ports.
     idpPorts: [443]
-    # -- Peers that may reach the console on TCP/8080 (provider kubernetes): the agent of the console's TailnetIngress. Without a namespaceSelector a peer is in the release namespace.
+    # -- Peers that may reach the console on TCP/8080: the agent of the console's TailnetIngress. Without a namespaceSelector a peer is in the release namespace. Provider cilium translates them to `fromEndpoints` (no ipBlock) and also admits the node (`host`) for the probes.
     ingressPeers:
       - podSelector:
           matchLabels:
@@ -162,7 +162,7 @@ monitoring:
 networkPolicy:
   # -- Enable operator isolation. With provider kubernetes this requires explicit kubeAPI and Headscale CIDRs; CNI Service-DNAT behavior must be checked locally.
   enabled: false
-  # -- `kubernetes` renders a NetworkPolicy (ingress and egress, ipBlock-based). `cilium` renders an egress-only CiliumNetworkPolicy using `toEntities: kube-apiserver`, label selectors and `toCIDR`; ipBlock peers in `dnsPeers`/`cilium.headscalePeers` are rejected, ingress stays open, requires the cilium.io/v2 CRDs. For a Headscale that lives outside the cluster (shared control plane, spoke clusters) set `cilium.headscalePeers: []` and populate `headscaleCIDRs` — the template renders a `toCIDR` egress for the Headscale IPs on `headscalePorts`.
+  # -- `kubernetes` renders a NetworkPolicy (ingress and egress, ipBlock-based). `cilium` renders a CiliumNetworkPolicy using `toEntities: kube-apiserver`, label selectors and `toCIDR`; ipBlock peers in `dnsPeers`/`cilium.headscalePeers` are rejected, requires the cilium.io/v2 CRDs. Its ingress stays open without the console; with `console.enabled` only the console reaches TCP/8082, while metrics (8080) and health (8081) stay open to all (`metricsPeers` is not applied). For a Headscale that lives outside the cluster (shared control plane, spoke clusters) set `cilium.headscalePeers: []` and populate `headscaleCIDRs` — the template renders a `toCIDR` egress for the Headscale IPs on `headscalePorts`.
   provider: kubernetes
   cilium:
     # -- Headscale peers for provider cilium (namespaceSelector / podSelector; no ipBlock). Without a namespaceSelector the peer is scoped to the operator namespace. Set to `[]` when the Headscale control plane is reached by IP via `headscaleCIDRs` instead.
