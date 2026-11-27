@@ -13,8 +13,9 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
   grant from the policy by its own clock and reports `Ready=False/Expired`; the object stays. A
   grant with an invalid target is not rendered (`TargetUnknown`, `TargetOutsideSites`), so it
   cannot make Headscale reject the policy. The kind is administrative: a grant bypasses `allowFrom`
-  and the spoke allowlist. Established connections at expiry are untested
-  ([Grants](docs/how-to/grants.md)).
+  and the spoke allowlist. After the expiry new connections are refused, and the agent closes
+  the established connections to an ingress. An established connection to a host inside a
+  `TailnetSite` is not closed ([Grants](docs/how-to/grants.md#expiry)).
   **Upgrade:** apply the new CRD before the operator (`task crd-upgrade`, or `CreateReplace` on a
   Flux `HelmRelease`). Without the `TailnetGrant` CRD the policy controller cannot
   start its watch, and the operator exits after the cache sync timeout (2 minutes) and restarts in
@@ -22,6 +23,18 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ### Changed
 
+- **The ingress agent closes open connections that the policy no longer permits.** Until now a
+  policy change refused new connections only; a session that was open before continued while the
+  two nodes stayed peers. Once per second the agent now compares each open connection of a
+  `TailnetIngress` (`mode: tcp` and `mode: http`, including WebSockets) with its packet filter and
+  closes it, with the connection to the backend, when the filter would not admit it again. This
+  applies to every policy change: an expired or deleted `TailnetGrant`, a changed `allowFrom`, a
+  changed base policy. Measured with an L4 ingress: the connection failed 0.7 to 2.5 seconds
+  after the revocation. Sessions that survived a revocation before now end;
+  connections of peers that stay permitted are not touched. Not covered: a target inside a
+  `TailnetSite` (no agent in the path) and an agent that has no contact to Headscale
+  ([Grants](docs/how-to/grants.md#expiry)). The change is in the agent image: with a pinned
+  `agentImage`, move the pin to get it.
 - **A generated grant that loses an undeclared source is rendered once.** When the drop of an
   undeclared tag or group makes a generated or spoke grant equal to another grant of the rendered
   policy, the operator no longer renders the duplicate. Base grants stay unchanged.

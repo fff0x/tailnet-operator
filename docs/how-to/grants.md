@@ -99,8 +99,46 @@ grants nothing and is not reported.
 - If the policy write fails at `expiresAt`, the access stays until a write succeeds. The grant
   reports `ExpiryPending`, and `TailnetResourceNotReady` fires after 10 minutes.
 
-After the expiry Headscale distributes the new policy to the nodes, and **new** connections are
-refused. Whether a connection that is already open is cut is not tested.
+After the expiry Headscale distributes the new policy to the nodes. **New** connections are
+refused. The agent of a `TailnetIngress` also closes each connection that is **already open** and
+that the new policy does not permit.
+
+Once per second the agent asks its packet filter whether each open connection could be opened
+again, from the same source to the same port. If not, the agent closes the connection and its
+connection to the backend. The cause of the policy change does not matter: an expired or deleted
+grant, a changed `allowFrom` or a changed base policy. The check covers
+`mode: tcp` and `mode: http`, including WebSockets. The agent logs the number of closed
+connections, without addresses.
+
+The kind test measured an L4 ingress with a userspace (tsnet) client in three runs. It exchanges
+data on the open connection once per second. The table shows when the first failed exchange
+started, counted from the revocation (`expiresAt`, or the change of the object):
+
+| Revocation | First failed exchange | The client sees |
+| --- | --- | --- |
+| `expiresAt`; no other rule connects the two nodes | 0.7 to 1.8 s | A timeout. |
+| `expiresAt`; another rule keeps the two nodes peers | 1.5 and 2.5 s; one run between 1.4 and 6.5 s | A closed connection. |
+| The grant is deleted | 1.2 to 2.2 s | A closed connection. |
+| The user leaves the `allowFrom` group of the ingress | 1.2 to 2.3 s | A closed connection. |
+
+These times include the policy write of the operator. In the run with "between 1.4 and 6.5 s" the
+test did not sample in that interval. In the first row the nodes stop being peers, so the close
+does not reach the client and its data stops instead. A connection of a user who stayed permitted
+never failed in these runs.
+
+The agent does not close these connections:
+
+- **A target inside a `TailnetSite`.** The path goes through the `TailnetGateway`, and no agent is
+  in it. The Tailscale packet filter checks the packet that opens a TCP connection and accepts the
+  later packets of that connection (source of `tailscale.com` v1.94.1). Not measured; assume that
+  the connection continues while another rule keeps the client and the gateway peers. If such a
+  session must end at `expiresAt`, end it at the service.
+- **An agent without contact to Headscale.** The agent checks against the last policy it received.
+  A revocation that did not reach the agent has no effect there, neither on new nor on open
+  connections.
+
+Not measured in kind: `mode: http` (agent unit tests cover a keep-alive connection and a
+WebSocket), a client with kernel `tailscaled` and a deleted client node.
 
 ## Check
 
@@ -142,6 +180,10 @@ Status messages, logs and metric labels never contain a user reference. Group na
 - **Spoke ingress outside the spoke allowlist.** A spoke exports an ingress tag as a grant
   destination only when the `allowFrom` of the ingress passes the spoke's `ingressSourceAllowlist`.
   A hub grant to an ingress that the spoke does not export reports `TargetUnknown`.
+- **Open connections to a site target are not cut.** The agent of a `TailnetIngress` closes an
+  open connection that the policy no longer permits. No agent is in the path to a host inside a
+  `TailnetSite`; such a connection can continue after the expiry or the deletion of the grant
+  ([Expiry](#expiry)).
 - **`Expired` is kept.** A grant that reported `Expired` keeps this reason while its `spec` is
   unchanged, also when a later reconcile cannot compare the live policy. The operator never
   renders an expired grant again.

@@ -29,6 +29,11 @@ kubectl -n shop-dev get tailnetingress shop
 From a laptop in `group:shop`: `psql -h shop-shop-dev.prod-1.tailnet.example.internal -p 5432`
 (or `ingress-shop` via MagicDNS).
 
+When the policy stops permitting a peer, for example after a change of `allowFrom` or of the
+group, the agent refuses its new connections and closes its open connections, with the connection
+to the backend. The agent checks once per second ([Grants § Expiry](grants.md#expiry) has the
+measurements). A peer that stays permitted keeps its connections.
+
 | Condition | Meaning | Fix |
 | --- | --- | --- |
 | `PolicyGranted=False/PolicyDenied` | an `allowFrom` entry is outside the admin allowlist (`Tailnet.spec.policy.ingressSourceAllowlist`) | use an allowed principal (e.g. a `group:`), or ask the admin to widen the allowlist |

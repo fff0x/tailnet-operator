@@ -209,7 +209,9 @@ func startFixture(key string, roots *x509.CertPool, denied bool) error {
 	backendMux.Handle("/socket", webSocketBackendHandler(ip))
 	backendMux.Handle("/", backendHandler(ip))
 	backend := boundedServer(backendMux)
-	control := boundedServer(controlHandler(func(ctx context.Context, input probeInput) probeResult {
+	var hold l4Hold
+	defer hold.close()
+	control := boundedServer(holdHandler(controlHandler(func(ctx context.Context, input probeInput) probeResult {
 		client, tr := probeClient(roots, peer.Dial, input)
 		defer tr.CloseIdleConnections()
 		return probe(ctx, input, client.Do)
@@ -219,7 +221,9 @@ func startFixture(key string, roots *x509.CertPool, denied bool) error {
 		return probeWebSocket(ctx, input, roots, peer.Dial)
 	}, func(ctx context.Context, input probeInput) httpACLProbeResult {
 		return probeHTTPACL(ctx, input, roots, peer.Dial)
-	}))
+	}), func(ctx context.Context, input l4ProbeInput) l4ProbeResult {
+		return hold.open(ctx, input, peer.Dial)
+	}, hold.exchange))
 	errs := make(chan error, 4)
 	go func() { errs <- backend.Serve(backendListener) }()
 	go func() { errs <- control.Serve(controlListener) }()

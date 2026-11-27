@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -205,17 +206,113 @@ func readCertificateSnapshot(certFile, keyFile string) ([]byte, []byte, error) {
 
 // trackedListener tracks the raw connections BELOW TLS: http.Server still sees *tls.Conn (needed
 // for HTTP/2), while Close also reaches hijacked WebSockets, which Server.Close does not own.
+// The same set serves revocation (enforce) for HTTP and L4.
 type trackedListener struct {
 	net.Listener
 	mu     sync.Mutex
 	closed bool
 	conns  map[*trackedConn]struct{}
+	// keepConns (L4): Close stops accepting and leaves the accepted connections open, as a
+	// stopped L4 target always did. enforce still watches them until the last one is gone.
+	keepConns bool
 }
 
 type trackedConn struct {
 	net.Conn
 	owner *trackedListener
 	once  sync.Once
+	// Taken at Accept: a netstack connection reports no address once its endpoint failed.
+	src, dst netip.AddrPort
+	// Guarded by owner.mu.
+	revoked bool
+	also    io.Closer
+}
+
+// revokeInterval bounds how long a connection outlives the policy that admitted it.
+// ponytail: one filter check per open connection and tick. For very many connections per agent,
+// trigger the sweep from netmap changes (LocalClient.WatchIPNBus) and keep a slow tick as a net.
+var revokeInterval = time.Second
+
+func addrPort(a net.Addr) netip.AddrPort {
+	if tcp, ok := a.(*net.TCPAddr); ok {
+		ap := tcp.AddrPort()
+		return netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port())
+	}
+	return netip.AddrPort{}
+}
+
+// enforce closes each tracked connection that permit would not admit as a new connection now.
+// permit asks the same question as the packet filter does for the opening packet, so every kind of
+// revocation ends the connections it concerns and no others. The check runs every revokeInterval
+// until the listener is closed and its last connection is gone. A nil permit enforces nothing.
+func (l *trackedListener) enforce(name string, permit func(src, dst netip.AddrPort) bool) {
+	if permit == nil {
+		return
+	}
+	ticker := time.NewTicker(revokeInterval)
+	go func() {
+		defer ticker.Stop()
+		for range ticker.C {
+			if n := l.revoke(permit); n > 0 {
+				// No addresses: a source address identifies a person's device.
+				log.Printf("%s: closed %d connection(s) that the policy no longer permits", name, n)
+			}
+			l.mu.Lock()
+			done := l.closed && len(l.conns) == 0
+			l.mu.Unlock()
+			if done {
+				return
+			}
+		}
+	}()
+}
+
+func (l *trackedListener) revoke(permit func(src, dst netip.AddrPort) bool) int {
+	l.mu.Lock()
+	conns := make([]*trackedConn, 0, len(l.conns))
+	for c := range l.conns {
+		conns = append(conns, c)
+	}
+	l.mu.Unlock()
+	n := 0
+	for _, c := range conns {
+		if permit(c.src, c.dst) {
+			continue
+		}
+		l.mu.Lock()
+		c.revoked = true
+		also := c.also
+		l.mu.Unlock()
+		c.Close()
+		if also != nil {
+			also.Close()
+		}
+		n++
+	}
+	return n
+}
+
+// link ties a second connection (the L4 backend leg) to this one: revocation closes both. Without
+// it a backend that ignores the half-close keeps its side open. A connection that was revoked
+// before the backend dial returned closes the new leg at once.
+func (c *trackedConn) link(also io.Closer) {
+	c.owner.mu.Lock()
+	revoked := c.revoked
+	if !revoked {
+		c.also = also
+	}
+	c.owner.mu.Unlock()
+	if revoked {
+		also.Close()
+	}
+}
+
+// Embedding net.Conn would otherwise hide the optional half-close and regress pipe.
+func (c *trackedConn) CloseWrite() error {
+	if conn, ok := c.Conn.(closeWriter); ok {
+		return conn.CloseWrite()
+	}
+	return nil
 }
 
 func (c *trackedConn) Close() error {
@@ -239,7 +336,7 @@ func (l *trackedListener) Accept() (net.Conn, error) {
 		c.Close()
 		return nil, net.ErrClosed
 	}
-	tc := &trackedConn{Conn: c, owner: l}
+	tc := &trackedConn{Conn: c, owner: l, src: addrPort(c.RemoteAddr()), dst: addrPort(c.LocalAddr())}
 	l.conns[tc] = struct{}{}
 	return tc, nil
 }
@@ -253,6 +350,9 @@ func (l *trackedListener) Close() error {
 	}
 	l.mu.Unlock()
 	err := l.Listener.Close()
+	if l.keepConns {
+		return err
+	}
 	for _, c := range conns {
 		c.Close()
 	}

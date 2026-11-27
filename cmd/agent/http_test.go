@@ -538,3 +538,87 @@ func TestHTTPHealthDoesNotClaimTLSFromTCP(t *testing.T) {
 		t.Fatal("L4 schema changed")
 	}
 }
+
+// The HTTP path tracks the raw connection below TLS, so a revocation ends a keep-alive connection
+// (which would otherwise carry new requests) and an upgraded WebSocket with its backend leg.
+// Another source keeps its connection.
+func TestRevokedHTTPConnectionEnds(t *testing.T) {
+	shortRevokeInterval(t)
+	backendDone := make(chan struct{})
+	h, _ := localHTTPIngress(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/socket" {
+			return
+		}
+		defer close(backendDone)
+		c, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.Close()
+		rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n")
+		rw.Flush()
+		io.Copy(io.Discard, rw)
+	}))
+	var policy deniedSources
+	h.tracked.enforce("HTTP group", policy.permit) // as forwarder.listenHTTP does
+	type client struct {
+		raw net.Conn
+		*tls.Conn
+		br *bufio.Reader
+	}
+	dial := func() client {
+		raw, err := net.Dial("tcp", h.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { raw.Close() })
+		c := tls.Client(raw, &tls.Config{ServerName: testDNS, InsecureSkipVerify: true})
+		c.SetDeadline(time.Now().Add(5 * time.Second))
+		return client{raw, c, bufio.NewReader(c)}
+	}
+	get := func(c client, path, upgrade string) (int, error) {
+		c.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := fmt.Fprintf(c, "GET %s HTTP/1.1\r\nHost: %s\r\n%s\r\n", path, testDNS, upgrade); err != nil {
+			return 0, err
+		}
+		res, err := http.ReadResponse(c.br, &http.Request{Method: "GET"})
+		if err != nil {
+			return 0, err
+		}
+		_, err = io.Copy(io.Discard, res.Body)
+		return res.StatusCode, err
+	}
+	keepAlive, socket, kept := dial(), dial(), dial()
+	for _, c := range []client{keepAlive, kept} {
+		for range 2 { // The second request proves that the connection is reused.
+			if status, err := get(c, "/", ""); err != nil || status != http.StatusOK {
+				t.Fatalf("request before revocation: %d %v", status, err)
+			}
+		}
+	}
+	if status, err := get(socket, "/socket", "Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"); err != nil || status != http.StatusSwitchingProtocols {
+		t.Fatalf("upgrade: %d %v", status, err)
+	}
+	policy.deny(keepAlive.raw)
+	policy.deny(socket.raw)
+	for name, c := range map[string]client{"keep-alive": keepAlive, "WebSocket": socket} {
+		c.SetDeadline(time.Now().Add(3 * time.Second))
+		_, err := c.br.ReadByte()
+		var timeout net.Error
+		if err == nil || (errors.As(err, &timeout) && timeout.Timeout()) {
+			t.Fatalf("%s connection left open: %v", name, err)
+		}
+	}
+	if _, err := get(keepAlive, "/", ""); err == nil {
+		t.Fatal("revoked keep-alive connection served a new request")
+	}
+	select {
+	case <-backendDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("upgraded backend leg left open")
+	}
+	if status, err := get(kept, "/", ""); err != nil || status != http.StatusOK {
+		t.Fatalf("permitted connection closed with the revoked ones: %d %v", status, err)
+	}
+}

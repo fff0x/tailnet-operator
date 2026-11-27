@@ -602,3 +602,163 @@ func TestL4BackendDeadlineAndCancellation(t *testing.T) {
 		})
 	}
 }
+
+func loopbackDial(listener net.Listener) dialFunc {
+	return func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", listener.Addr().String())
+	}
+}
+
+// A held connection answers every exchange with a fresh digest; the single-exchange probe next to
+// it is unchanged, and opening again replaces the held connection.
+func TestL4HoldExchangesOnOneConnection(t *testing.T) {
+	if len(l4HoldPrefix) != len(l4RequestPrefix) || l4HoldPrefix == l4RequestPrefix || l4HoldLifetime != 12*time.Minute {
+		t.Fatal("fixed hold protocol changed")
+	}
+	listener, _, _ := loopbackL4Backend(t)
+	input := l4ProbeInput{Target: "100.64.0.9"}
+	var hold l4Hold
+	defer hold.close()
+	if got := hold.exchange(); got != (l4HoldResult{}) {
+		t.Fatalf("exchange without a held connection: %+v", got)
+	}
+	if got := hold.open(context.Background(), l4ProbeInput{Target: "127.0.0.1"}, loopbackDial(listener)); got != (l4ProbeResult{}) || hold.conn != nil {
+		t.Fatalf("target outside the allowlist dialed: %+v", got)
+	}
+	if got := hold.open(context.Background(), input, loopbackDial(listener)); got != (l4ProbeResult{OK: true, Connected: true}) {
+		t.Fatalf("open: %+v", got)
+	}
+	waitL4(t, listener.started)
+	first := hold.conn
+	for range 3 {
+		if got := hold.exchange(); got != (l4HoldResult{OK: true, Held: true}) {
+			t.Fatalf("exchange: %+v", got)
+		}
+	}
+	if hold.conn != first {
+		t.Fatal("exchange did not reuse the held connection")
+	}
+	if got := probeL4(context.Background(), input, loopbackDial(listener)); got != (l4ProbeResult{OK: true, Connected: true}) {
+		t.Fatalf("single exchange next to a held connection: %+v", got)
+	}
+	if got := hold.open(context.Background(), input, loopbackDial(listener)); !got.OK || hold.conn == first {
+		t.Fatalf("second open did not replace the held connection: %+v", got)
+	}
+	if _, err := first.Write([]byte{0}); err == nil {
+		t.Fatal("replaced connection left open")
+	}
+}
+
+// The first failed exchange closes the held connection, and a dial failure holds nothing.
+func TestL4HoldFailureClosesConnection(t *testing.T) {
+	listener, cancel, done := loopbackL4Backend(t)
+	var hold l4Hold
+	defer hold.close()
+	input := l4ProbeInput{Target: "100.64.0.9"}
+	if got := hold.open(context.Background(), input, loopbackDial(listener)); !got.OK {
+		t.Fatalf("open: %+v", got)
+	}
+	cancel() // The backend closes every connection.
+	waitL4(t, done)
+	if got := hold.exchange(); got.OK || !got.Held || hold.conn != nil {
+		t.Fatalf("exchange on a closed connection: %+v", got)
+	}
+	if got := hold.exchange(); got != (l4HoldResult{}) {
+		t.Fatalf("exchange after the failure: %+v", got)
+	}
+	got := hold.open(context.Background(), input, func(context.Context, string, string) (net.Conn, error) {
+		return nil, syscall.ECONNREFUSED
+	})
+	if got != (l4ProbeResult{DialError: "refused"}) || hold.conn != nil {
+		t.Fatalf("failed dial: %+v", got)
+	}
+}
+
+// A stalled peer is a timeout, not a hang: the exchange is bounded by the deadline it is given.
+func TestL4HoldExchangeTimeout(t *testing.T) {
+	client, server := net.Pipe()
+	defer server.Close()
+	go func() { _, _ = io.Copy(io.Discard, server) }() // Accepts the request, never answers.
+	hold := l4Hold{conn: client}
+	if got := hold.exchangeLocked(time.Now().Add(50 * time.Millisecond)); got != (l4HoldResult{Held: true, TimedOut: true}) || hold.conn != nil {
+		t.Fatalf("stalled exchange: %+v", got)
+	}
+}
+
+// The backend bounds a held connection by l4HoldLifetime and accepts only hold requests on it.
+func TestL4HoldBackendBounds(t *testing.T) {
+	old := l4HoldLifetime
+	l4HoldLifetime = 100 * time.Millisecond
+	t.Cleanup(func() { l4HoldLifetime = old })
+	listener, _, _ := loopbackL4Backend(t)
+	exchange := func(conn net.Conn, prefix string) error {
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		if _, err := conn.Write(append([]byte(prefix), make([]byte, l4NonceBytes)...)); err != nil {
+			return err
+		}
+		_, err := io.ReadFull(conn, make([]byte, len(l4ResponsePrefix)+sha256.Size))
+		return err
+	}
+	expired, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer expired.Close()
+	if err := exchange(expired, l4HoldPrefix); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * l4HoldLifetime)
+	if err := exchange(expired, l4HoldPrefix); err == nil {
+		t.Fatal("held connection outlived its lifetime")
+	}
+	mixed, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mixed.Close()
+	if err := exchange(mixed, l4HoldPrefix); err != nil {
+		t.Fatal(err)
+	}
+	if err := exchange(mixed, l4RequestPrefix); err == nil {
+		t.Fatal("held connection accepted a single-exchange request")
+	}
+}
+
+func TestL4HoldControlRoutes(t *testing.T) {
+	opens, exchanges, passed := 0, 0, 0
+	h := holdHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		passed++
+		w.WriteHeader(http.StatusTeapot)
+	}), func(context.Context, l4ProbeInput) l4ProbeResult {
+		opens++
+		return l4ProbeResult{OK: true, Connected: true}
+	}, func() l4HoldResult {
+		exchanges++
+		return l4HoldResult{Held: true, TimedOut: true}
+	})
+	for _, tc := range []struct {
+		method, path, body string
+		status             int
+		want               string
+	}{
+		{"GET", "/hold-l4", "", 405, ""}, {"GET", "/hold-l4-exchange", "", 405, ""},
+		{"POST", "/hold-l4", `null`, 400, ""}, {"POST", "/hold-l4", `{"target":"127.0.0.1"}`, 400, ""},
+		{"POST", "/hold-l4-exchange", `{}`, 400, ""},
+		{"POST", "/hold-l4?target=100.64.0.1", "", http.StatusTeapot, ""}, {"POST", "/hold-l4/", "", http.StatusTeapot, ""},
+		{"POST", "/probe-l4", `{"target":"100.64.0.1"}`, http.StatusTeapot, ""}, {"GET", "/readyz", "", http.StatusTeapot, ""},
+		{"POST", "/hold-l4", `{"target":"100.64.0.1"}`, 200, "{\"ok\":true,\"connected\":true,\"timedOut\":false,\"dialError\":\"\"}\n"},
+		{"POST", "/hold-l4-exchange", `{"target":"100.64.0.1"}`, 200, "{\"ok\":false,\"held\":true,\"timedOut\":true}\n"},
+	} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
+		if w.Code != tc.status || w.Body.Len() > 96 {
+			t.Fatalf("%s %s: %d %s", tc.method, tc.path, w.Code, w.Body.String())
+		}
+		if tc.status == 200 && (w.Body.String() != tc.want || w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Cache-Control") != "no-store") {
+			t.Fatalf("%s: unexpected result shape/headers: %s", tc.path, w.Body.String())
+		}
+	}
+	if opens != 1 || exchanges != 1 || passed != 4 {
+		t.Fatalf("opens=%d exchanges=%d passed=%d", opens, exchanges, passed)
+	}
+}

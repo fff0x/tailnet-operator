@@ -16,6 +16,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	"tailscale.com/ipn/store/kubestore"
 	"tailscale.com/ipn/store/mem"
 	"tailscale.com/tsnet"
+	"tailscale.com/wgengine/filter"
 )
 
 func env(key, def string) string {
@@ -119,6 +121,16 @@ func main() {
 
 	fw := &forwarder{ts: ts, mode: mode, run: map[string]running{}, changed: make(chan struct{}, 1), metrics: newAgentMetrics(mode)}
 	defer fw.stopAll()
+	// Ingress only: the tailnet packet filter checks the packet that opens a TCP connection and
+	// accepts the later ones, so a revoked peer keeps an open connection. The agent terminates
+	// every ingress connection and ends it when the live filter would not admit it again.
+	// Sys is not a stable tsnet API; filterPermits and its test pin the semantics relied upon.
+	if mode == "ingress" {
+		fw.permit = func(src, dst netip.AddrPort) bool {
+			engine, ok := ts.Sys().Engine.GetOK()
+			return ok && filterPermits(engine.GetFilter(), src, dst)
+		}
+	}
 
 	// First load must parse; after that a bad reload is logged and the last good set stays up.
 	// A listener that failed to bind is retried by watchTargets.
@@ -132,6 +144,15 @@ func main() {
 
 	<-ctx.Done()
 	log.Printf("shutting down")
+}
+
+// filterPermits reports whether f admits a new TCP connection from src to dst. No filter and an
+// unknown address are a denial: in those states the node accepts no new connection either.
+func filterPermits(f *filter.Filter, src, dst netip.AddrPort) bool {
+	if f == nil || !src.IsValid() || !dst.IsValid() {
+		return false // Filter.Check panics on an invalid address.
+	}
+	return f.CheckTCP(src.Addr().Unmap(), dst.Addr().Unmap(), dst.Port()) == filter.Accept
 }
 
 // running is one active listener and the cancel for its in-flight dials.
@@ -156,10 +177,13 @@ type forwarder struct {
 	ts *tsnet.Server
 	// Optional owned-listener seam for unit tests; production always uses tsnet.Listen.
 	listenTailnet func(network, address string) (net.Listener, error)
-	mode          string
-	mu            sync.Mutex
-	run           map[string]running
-	metrics       *agentMetrics
+	// permit reports whether the tailnet policy admits a new connection from src to dst now.
+	// nil (egress, tests) leaves open connections alone.
+	permit  func(src, dst netip.AddrPort) bool
+	mode    string
+	mu      sync.Mutex
+	run     map[string]running
+	metrics *agentMetrics
 	// desired includes failed binds: absence from run must not make HTTP ready.
 	desired        []target
 	nextGeneration uint64
@@ -277,6 +301,7 @@ func (f *forwarder) listenHTTP(ctx context.Context, targets []target) (net.Liste
 		ln.Close()
 		return nil, err
 	}
+	h.tracked.enforce("HTTP group", f.permit)
 	return h, nil
 }
 
@@ -305,6 +330,12 @@ func (f *forwarder) listen(ctx context.Context, t target) (net.Listener, error) 
 	if f.metrics != nil {
 		ln = &measuredListener{Listener: ln, metrics: metrics}
 	}
+	if f.permit != nil {
+		// Outermost, as on the HTTP path: closing a tracked connection also settles its metrics.
+		tracked := &trackedListener{Listener: ln, conns: make(map[*trackedConn]struct{}), keepConns: true}
+		tracked.enforce("target "+t.Name, f.permit)
+		ln = tracked
+	}
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -325,6 +356,9 @@ func (f *forwarder) handle(ctx context.Context, client net.Conn, t target, dial 
 		log.Printf("target %s: dial %s:%d: %v", t.Name, t.Address, t.Port, err)
 		client.Close()
 		return
+	}
+	if tracked, ok := client.(*trackedConn); ok {
+		tracked.link(upstream)
 	}
 	pipe(client, upstream)
 }

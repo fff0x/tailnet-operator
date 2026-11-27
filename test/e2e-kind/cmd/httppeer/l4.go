@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -18,9 +19,16 @@ const (
 	l4ProbePort      = "8443"
 	l4RequestPrefix  = "p1.8-l4-request\n"
 	l4ResponsePrefix = "p1.8-l4-response\n"
-	l4NonceBytes     = 32
-	l4BackendSlots   = 4
+	// A request with this prefix keeps the connection: the backend answers every further request
+	// on it. Same length as l4RequestPrefix, so both share one frame size.
+	l4HoldPrefix   = "p1.8-l4-holding\n"
+	l4NonceBytes   = 32
+	l4BackendSlots = 4
 )
+
+// l4HoldLifetime bounds a held backend connection as probeTimeout bounds a single exchange. A held
+// connection occupies one of the l4BackendSlots for that long.
+var l4HoldLifetime = 12 * time.Minute
 
 type l4ProbeInput struct {
 	Target string
@@ -144,6 +152,8 @@ func writeL4Frame(conn net.Conn, frame []byte) error {
 
 // One fixed-size request and reply per connection; no unbounded reads, payload
 // echo, logging or address output. Closing the connection terminates the frame.
+// A hold request keeps the connection for further fixed-size hold requests until
+// l4HoldLifetime; the first request decides and a connection never changes kind.
 func serveL4Conn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -152,11 +162,149 @@ func serveL4Conn(ctx context.Context, conn net.Conn) {
 		return
 	}
 	var request [len(l4RequestPrefix) + l4NonceBytes]byte
-	if _, err := io.ReadFull(conn, request[:]); err != nil || !bytes.HasPrefix(request[:], []byte(l4RequestPrefix)) {
+	if _, err := io.ReadFull(conn, request[:]); err != nil {
 		return
 	}
-	digest := sha256.Sum256(request[len(l4RequestPrefix):])
-	_ = writeL4Frame(conn, append([]byte(l4ResponsePrefix), digest[:]...))
+	hold := bytes.HasPrefix(request[:], []byte(l4HoldPrefix))
+	if !hold && !bytes.HasPrefix(request[:], []byte(l4RequestPrefix)) {
+		return
+	}
+	if hold && conn.SetDeadline(time.Now().Add(l4HoldLifetime)) != nil {
+		return
+	}
+	for {
+		digest := sha256.Sum256(request[len(l4RequestPrefix):])
+		if writeL4Frame(conn, append([]byte(l4ResponsePrefix), digest[:]...)) != nil || !hold {
+			return
+		}
+		if _, err := io.ReadFull(conn, request[:]); err != nil || !bytes.HasPrefix(request[:], []byte(l4HoldPrefix)) {
+			return
+		}
+	}
+}
+
+// l4Hold keeps at most one connection to the fixed probe port open across control requests, so a
+// test can observe what happens to an established connection when the policy changes under it.
+type l4Hold struct {
+	mu   sync.Mutex
+	conn net.Conn
+}
+
+type l4HoldResult struct {
+	OK       bool `json:"ok"`
+	Held     bool `json:"held"` // A connection was held when the exchange started.
+	TimedOut bool `json:"timedOut"`
+}
+
+// open replaces the held connection: one dial, as probeL4, and a first exchange inside the same
+// probeTimeout. The connection is kept only when that exchange succeeds.
+func (h *l4Hold) open(ctx context.Context, input l4ProbeInput, dial dialFunc) l4ProbeResult {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.drop()
+	var result l4ProbeResult
+	if !allowedTarget(input.Target) {
+		return result
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	conn, err := dial(ctx, "tcp", net.JoinHostPort(input.Target, l4ProbePort))
+	if err != nil || conn == nil {
+		if conn != nil {
+			_ = conn.Close()
+		}
+		result.TimedOut = l4TimedOut(ctx, err)
+		result.DialError = classifyHTTPACLDialError(err)
+		if err == nil {
+			result.DialError = "other"
+		}
+		return result
+	}
+	result.Connected = true
+	h.conn = conn
+	deadline, _ := ctx.Deadline()
+	first := h.exchangeLocked(deadline)
+	result.OK, result.TimedOut = first.OK, first.TimedOut
+	return result
+}
+
+// exchange runs one fresh challenge on the held connection. Any failure closes it: after a partial
+// frame the stream cannot be trusted again, and the test reads the first failure as the cut.
+func (h *l4Hold) exchange() l4HoldResult {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.exchangeLocked(time.Now().Add(probeTimeout))
+}
+
+func (h *l4Hold) exchangeLocked(deadline time.Time) l4HoldResult {
+	var result l4HoldResult
+	if h.conn == nil {
+		return result
+	}
+	result.Held = true
+	var nonce [l4NonceBytes]byte
+	_, err := rand.Read(nonce[:])
+	if err == nil {
+		err = h.conn.SetDeadline(deadline)
+	}
+	if err == nil {
+		err = writeL4Frame(h.conn, append([]byte(l4HoldPrefix), nonce[:]...))
+	}
+	digest := sha256.Sum256(nonce[:])
+	want := append([]byte(l4ResponsePrefix), digest[:]...)
+	got := make([]byte, len(want))
+	if err == nil {
+		_, err = io.ReadFull(h.conn, got)
+	}
+	if err == nil && bytes.Equal(got, want) && h.conn.SetDeadline(time.Time{}) == nil {
+		result.OK = true
+		return result
+	}
+	var networkError net.Error
+	result.TimedOut = errors.As(err, &networkError) && networkError.Timeout()
+	h.drop()
+	return result
+}
+
+func (h *l4Hold) drop() {
+	if h.conn != nil {
+		_ = h.conn.Close()
+		h.conn = nil
+	}
+}
+
+func (h *l4Hold) close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.drop()
+}
+
+// holdHandler serves the two held-connection routes in front of the control handler. Both take the
+// strict probe-l4 body; the exchange ignores its target, the held connection has one already.
+func holdHandler(next http.Handler, open func(context.Context, l4ProbeInput) l4ProbeResult, exchange func() l4HoldResult) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uri := r.URL.RequestURI()
+		if uri != "/hold-l4" && uri != "/hold-l4-exchange" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "rejected", http.StatusMethodNotAllowed)
+			return
+		}
+		input, err := decodeL4Probe(r.Body)
+		if err != nil {
+			http.Error(w, "rejected", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		if uri == "/hold-l4" {
+			_ = json.NewEncoder(w).Encode(open(r.Context(), input))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(exchange())
+	})
 }
 
 // serveL4Listeners runs the same bounded exchange on every listener and returns a function that

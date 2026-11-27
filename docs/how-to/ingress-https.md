@@ -236,6 +236,9 @@ Before a downgrade, restore a verified legacy gateway path; do not remove backen
 `allowFrom` authorizes tailnet peers; it neither performs OIDC nor supplies application identity headers.
 Removing gateway authentication is a separate access-control decision. Native application login and credentials remain independent.
 
+When the policy stops permitting a peer, the agent closes its open connections, including keep-alive connections and WebSockets, with the request to the backend.
+The agent checks once per second ([Grants § Expiry](grants.md#expiry)). Agent unit tests cover this for `mode: http`; the kind suite measures `mode: tcp` only.
+
 ## Tailnet without a policy writer (spoke cluster)
 
 Only one Tailnet per Headscale may run `policy.mode: Apply`. On every other cluster sharing that

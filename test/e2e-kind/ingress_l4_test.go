@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"path/filepath"
 	"reflect"
@@ -160,7 +161,7 @@ func TestIngressL4(t *testing.T) {
 	f := x.f
 	var tn *tnv1.Tailnet
 	var ingress *tnv1.TailnetIngress
-	var grant *tnv1.TailnetGrant
+	var grants []*tnv1.TailnetGrant
 	installed := false
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
@@ -197,7 +198,7 @@ func TestIngressL4(t *testing.T) {
 				}
 			}
 		}
-		if grant != nil {
+		for _, grant := range grants {
 			remove(grant)
 		}
 		if ingress != nil {
@@ -446,29 +447,184 @@ func TestIngressL4(t *testing.T) {
 	converge("revocation-convergence")
 	probeDenied("denied-again")
 	probeAllowed("allowed-after", x.peer.Name)
-	// Time-bound grant: the denied user is still outside allowFrom and reaches the ingress only
-	// through a TailnetGrant. At expiresAt the operator withdraws it; no object is touched.
-	grant = &tnv1.TailnetGrant{ObjectMeta: metav1.ObjectMeta{Name: "fixture-denied-l4"}, Spec: tnv1.TailnetGrantSpec{
-		TailnetRef: tnv1.TailnetRef{Name: tn.Name}, Sources: []string{"fixture-denied@"}, Target: tnv1.GrantTarget{Tag: ingress.Status.Tag}, Ports: []int32{8443},
-		ExpiresAt: &metav1.Time{Time: time.Now().Add(120 * time.Second)},
-	}}
-	x.create(grant)
-	grantIs := func(reason string) bool {
+	grantIs := func(grant *tnv1.TailnetGrant, reason string) bool {
 		if f.kube.Get(t.Context(), client.ObjectKeyFromObject(grant), grant) != nil {
 			return false
 		}
 		c := meta.FindStatusCondition(grant.Status.Conditions, "Ready")
 		return c != nil && c.ObservedGeneration == grant.Generation && c.Reason == reason
 	}
-	eventually(t, "time-bound grant applied", func() bool { return grantIs("Granted") })
-	probeAllowed("grant-active", denied.Name)
-	eventuallyWithin(t, 150*time.Second, "time-bound grant expired", func() bool { return grantIs("Expired") })
-	if time.Now().Before(grant.Spec.ExpiresAt.Time) {
-		t.Fatal("grant reported Expired before expiresAt")
+	newGrant := func(name string, port int32, lifetime time.Duration) *tnv1.TailnetGrant {
+		t.Helper()
+		grant := &tnv1.TailnetGrant{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: tnv1.TailnetGrantSpec{
+			TailnetRef: tnv1.TailnetRef{Name: tn.Name}, Sources: []string{"fixture-denied@"}, Target: tnv1.GrantTarget{Tag: ingress.Status.Tag}, Ports: []int32{port},
+		}}
+		if lifetime > 0 {
+			grant.Spec.ExpiresAt = &metav1.Time{Time: time.Now().Add(lifetime)}
+		}
+		x.create(grant)
+		grants = append(grants, grant)
+		eventually(t, "grant applied", func() bool { return grantIs(grant, "Granted") })
+		return grant
 	}
-	converge("grant-expiry-convergence")
-	probeDenied("grant-expired")
-	probeAllowed("allowed-after-grant", x.peer.Name)
+	// A held connection stays open across control requests. Every exchange on it is kept with its
+	// time relative to expiresAt of the grant under test, including those of a failed run.
+	type holdRecord struct {
+		Variant  string  `json:"variant"`
+		Phase    string  `json:"phase"`
+		Role     string  `json:"role"`
+		Start    float64 `json:"startSeconds"`
+		End      float64 `json:"endSeconds"`
+		Valid    bool    `json:"valid"`
+		OK       bool    `json:"ok"`
+		Held     bool    `json:"held"`
+		TimedOut bool    `json:"timedOut"`
+	}
+	var holds []holdRecord
+	t.Cleanup(func() { x.save("hold-observations.json", holds) })
+	seconds := func(at, expiry time.Time) float64 { return math.Round(at.Sub(expiry).Seconds()*10) / 10 }
+	holdInput, _ := json.Marshal(map[string]string{"target": target})
+	holdOpen := func(variant, role, pod string, expiry time.Time) {
+		t.Helper()
+		eventually(t, "L4 held connection opened with a first exchange", func() bool {
+			start := time.Now()
+			b, err := x.proxy(pod, 9081, "hold-l4", string(holdInput))
+			var got l4Observation
+			valid := err == nil && len(b) <= 1024 && json.Unmarshal(b, &got) == nil
+			holds = append(holds, holdRecord{Variant: variant, Phase: "open", Role: role, Start: seconds(start, expiry), End: seconds(time.Now(), expiry), Valid: valid, OK: got.OK, Held: got.Connected, TimedOut: got.TimedOut})
+			return valid && got == (l4Observation{OK: true, Connected: true})
+		})
+	}
+	holdExchange := func(variant, phase, role, pod string, expiry time.Time) holdRecord {
+		t.Helper()
+		start := time.Now()
+		b, err := x.proxy(pod, 9081, "hold-l4-exchange", string(holdInput))
+		var raw struct {
+			OK       *bool `json:"ok"`
+			Held     *bool `json:"held"`
+			TimedOut *bool `json:"timedOut"`
+		}
+		got := holdRecord{Variant: variant, Phase: phase, Role: role, Start: seconds(start, expiry), End: seconds(time.Now(), expiry)}
+		if err == nil && len(b) <= 1024 && json.Unmarshal(b, &raw) == nil && raw.OK != nil && raw.Held != nil && raw.TimedOut != nil {
+			got.Valid, got.OK, got.Held, got.TimedOut = !*raw.OK || (*raw.Held && !*raw.TimedOut), *raw.OK, *raw.Held, *raw.TimedOut
+		}
+		holds = append(holds, got)
+		if !got.Valid {
+			t.Fatal("L4 held-connection probe unavailable or malformed")
+		}
+		return got
+	}
+	// revocationPhase: the denied user has just been admitted. One connection of each user is
+	// opened and exchanged on while revoke withdraws the access at about ref; revoke returns when
+	// the operator has applied the withdrawal. The allowed user's connection is the control and
+	// must never fail. The denied user's connection must work until ref and must fail no later
+	// than 5 s after fresh dials are denied: the agent ends a connection that its packet filter
+	// would not admit again. While the two nodes are still peers the failure must not be a
+	// timeout, which separates a connection that the agent closed from one that only stalled.
+	revocationPhase := func(variant string, peers bool, ref time.Time, revoke func(round func(string))) map[string]any {
+		t.Helper()
+		probeAllowed(variant+"-active", denied.Name)
+		holdOpen(variant, "control", x.peer.Name, ref)
+		holdOpen(variant, "subject", denied.Name, ref)
+		summary := map[string]any{"lastSuccessSeconds": nil, "firstFailureSeconds": nil, "failureTimedOut": nil}
+		alive := true
+		round := func(phase string) {
+			t.Helper()
+			if !holdExchange(variant, phase, "control", x.peer.Name, ref).OK {
+				t.Fatal("held connection of the allowed user failed")
+			}
+			if !alive {
+				return
+			}
+			got := holdExchange(variant, phase, "subject", denied.Name, ref)
+			if got.OK {
+				summary["lastSuccessSeconds"] = got.End
+				return
+			}
+			if got.Start < -2 {
+				t.Fatal("held connection of the admitted user failed before the revocation")
+			}
+			alive = false
+			summary["firstFailureSeconds"], summary["failureTimedOut"] = got.Start, got.TimedOut
+		}
+		revoke(round)
+		summary["revocationAppliedSeconds"] = seconds(time.Now(), ref)
+		// One-second samples first: a denied dial below can take 5 s and would hide when the
+		// connection ended.
+		for range 5 {
+			if !alive {
+				break
+			}
+			round("revoked")
+			time.Sleep(time.Second)
+		}
+		converge(variant + "-convergence")
+		denial := time.Now()
+		summary["newConnectionsDeniedSeconds"] = seconds(denial, ref)
+		for alive && time.Since(denial) < 5*time.Second {
+			round("new-connections-denied")
+			time.Sleep(time.Second)
+		}
+		if alive {
+			t.Fatal("held connection of the revoked user survived the revocation")
+		}
+		if peers && summary["failureTimedOut"] == true {
+			t.Fatal("held connection of the revoked user stalled; the agent did not close it")
+		}
+		probeDenied(variant + "-denied")
+		for range 2 {
+			round("after-revocation")
+			time.Sleep(time.Second)
+		}
+		probeAllowed(variant+"-allowed-after", x.peer.Name)
+		return summary
+	}
+	// A time-bound TailnetGrant: at expiresAt the operator withdraws it; no object is touched.
+	expiry := func(variant string, peers bool) map[string]any {
+		t.Helper()
+		grant := newGrant("fixture-denied-l4-"+variant, 8443, 120*time.Second)
+		return revocationPhase(variant, peers, grant.Spec.ExpiresAt.Time, func(round func(string)) {
+			eventuallyWithin(t, 150*time.Second, "time-bound grant expired", func() bool { round("admitted"); return grantIs(grant, "Expired") })
+			if time.Now().Before(grant.Spec.ExpiresAt.Time) {
+				t.Fatal("grant reported Expired before expiresAt")
+			}
+		})
+	}
+	// The other revocations happen when the test says so: a few exchanges first, then the change,
+	// then the wait until the operator has applied a policy without the access.
+	immediate := func(variant string, change func()) map[string]any {
+		t.Helper()
+		ref := time.Now().Add(15 * time.Second)
+		return revocationPhase(variant, true, ref, func(round func(string)) {
+			for time.Now().Before(ref) {
+				round("admitted")
+				time.Sleep(time.Second)
+			}
+			if !policyReady() {
+				t.Fatal("current L4 policy unavailable")
+			}
+			oldHash := tn.Status.Policy.AppliedHash
+			change()
+			eventually(t, "revocation applied", func() bool { return policyReady() && tn.Status.Policy.AppliedHash != oldHash })
+		})
+	}
+	// Without another rule the two nodes stop being peers at expiresAt.
+	revocations := map[string]any{"isolated": expiry("isolated", false)}
+	// With a permanent grant to a port the ingress does not expose, the two nodes stay peers after
+	// every later revocation. That grant alone must not open the exposed port.
+	newGrant("fixture-denied-l4-peer", 9, 0)
+	probeDenied("peered-before-grant")
+	revocations["peered"] = expiry("peered", true)
+	// Deleting a grant is the documented way to revoke it early.
+	permanent := newGrant("fixture-denied-l4-deleted", 8443, 0)
+	revocations["deleted"] = immediate("deleted", func() {
+		if f.kube.Delete(t.Context(), permanent) != nil {
+			t.Fatal("grant deletion rejected")
+		}
+	})
+	// The allowFrom group of the ingress loses the user in the base policy.
+	setAllowed(true)
+	revocations["group"] = immediate("group", func() { setAllowed(false) })
 	if !ready() || !policyReady() || f.kube.Get(t.Context(), client.ObjectKeyFromObject(&deployment), &deployment) != nil || deployment.Generation != generation {
 		t.Fatal("L4 fixture health or agent template changed")
 	}
@@ -477,6 +633,6 @@ func TestIngressL4(t *testing.T) {
 			t.Fatal("ACL sequence replaced or restarted a participant")
 		}
 	}
-	x.save("result.json", map[string]any{"realChartAndReconciler": true, "generatedAgentStartupGate": true, "l4ByteExchange": true, "separateUserACLNegative": true, "denyAllowDenyRecovery": true, "sameParticipants": true, "probes": results, "egressSubnetRoutingTested": false, "httpCoexistenceTested": false, "aclNegativeAddress": "tailnet-ipv4", "negativeSamplesPerPhase": l4NegativeSamples, "dnsACLNegativeTested": false, "immediateRevocationTested": false, "timeBoundGrant": true, "establishedConnectionsAtExpiryTested": false})
-	t.Log("gate: generated L4 ingress, IPv4/MagicDNS byte exchange, independent user IPv4 deny/allow/deny with fixed timeout/no-route samples and positive controls; unchanged participants; revocation convergence recorded separately; time-bound TailnetGrant allows the denied user until expiresAt and new connections are denied after it")
+	x.save("result.json", map[string]any{"realChartAndReconciler": true, "generatedAgentStartupGate": true, "l4ByteExchange": true, "separateUserACLNegative": true, "denyAllowDenyRecovery": true, "sameParticipants": true, "probes": results, "egressSubnetRoutingTested": false, "httpCoexistenceTested": false, "aclNegativeAddress": "tailnet-ipv4", "negativeSamplesPerPhase": l4NegativeSamples, "dnsACLNegativeTested": false, "immediateRevocationTested": false, "timeBoundGrant": true, "establishedConnectionsAtExpiryTested": true, "establishedConnectionsCutOnRevocation": true, "revocations": revocations})
+	t.Log("gate: generated L4 ingress, IPv4/MagicDNS byte exchange, independent user IPv4 deny/allow/deny with fixed timeout/no-route samples and positive controls; unchanged participants; revocation convergence recorded separately; the denied user is admitted and revoked by a time-bound TailnetGrant (without and with another rule that keeps the nodes peers), by a deleted grant and by the allowFrom group; each time new connections are denied and a connection opened before fails within 5 s of that denial, closed by the agent where the nodes stay peers")
 }

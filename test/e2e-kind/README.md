@@ -6,7 +6,7 @@ created. Neither touches an existing kube-context, Docker socket or host configu
 | Runner | Tests | Typical duration |
 | --- | --- | --- |
 | `hack/e2e-kind.sh` | `TestInstall`, `TestLeaderFailover` | 3–4 min |
-| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP`, `TestIngressL4`; opt-in gateway gates below | About 13 min of test time and 15 min in total; full test-process budget 26 min, HTTP-only 22 min, L4-only 10 min (setup/cleanup additional) |
+| `hack/e2e-kind-projection.sh` | `TestPodNetworkGate`, `TestFixtureCAProjection`, `TestHeadscaleHTTPS`, `TestAgentHTTPSPeer`, `TestIngressHTTP`, `TestIngressL4`; opt-in gateway gates below | About 19 min of test time and 22 min in total; full test-process budget 35 min, HTTP-only 22 min, L4-only 18 min with about 8.7 min used (setup/cleanup additional) |
 | `hack/e2e-kind-projection.sh --rest-only` | `TestEgressReach`, `TestRestartNoFlap`, `TestMagicDNSRename`, `TestIngressIdentityPersists` | 26-minute test-process budget, about 10 min used; setup/cleanup additional |
 | `hack/e2e-kind-projection.sh --gateway-fresh-only` | `TestGatewayFreshPod` | 10-minute test-process budget; setup/cleanup additional |
 
@@ -166,6 +166,33 @@ Each negative stage requires three fresh IPv4 dials that fail with the HTTP ACL 
 Only revocation has a separate bounded convergence window before these assertions; initial denial has none.
 Unclassified MagicDNS failures do not count as ACL evidence. Positive controls and successful temporary access
 help distinguish denial from an unusable peer/backend, but do not prove every ACL behavior.
+Four revocation phases follow. Each lets the denied user reach TCP 8443, then revokes that access:
+
+| Phase | Access | Revocation |
+| --- | --- | --- |
+| `isolated` | `TailnetGrant` with `expiresAt` 120 s ahead; no other rule between the two nodes | `expiresAt`; no object changes |
+| `peered` | The same, after a permanent grant to TCP 9 (not exposed) that keeps the nodes peers; three fresh dials prove that this grant alone does not open 8443 | `expiresAt`; no object changes |
+| `deleted` | Permanent `TailnetGrant` | The test deletes the grant |
+| `group` | The user is in the `allowFrom` group | The test removes the user from the group in the base policy |
+
+A time-bound grant must report `Granted`, then `Expired` not before `expiresAt`. In `deleted` and `group` the
+test waits until `status.policy.appliedHash` of the `Tailnet` changed. After a bounded convergence three fresh
+dials must be denied in every phase.
+
+In each phase both peers hold one connection open: `/hold-l4` opens it with a first exchange and
+`/hold-l4-exchange` runs one more exchange on it, with a 5 s deadline. The test exchanges on both once per second
+before the revocation, for up to 5 s after the operator applied it, and for up to 5 s after the denial samples.
+The allowed user's connection is the control and must never fail. The denied user's connection must work until
+2 s before the revocation and must fail not later than 5 s after the denial samples; in the three phases where
+the nodes stay peers the failure must not be a timeout, which shows that the agent closed the connection.
+`hold-observations.json` retains every exchange with its time relative to the revocation, and `result.json`
+records per phase (`revocations`) the last successful exchange, the first failed exchange, the time when the
+operator had applied the revocation and the time of the denial samples.
+Three runs (two `--l4-only`, one full) measured the start of the first failed exchange: `isolated` 0.7 to 1.8 s
+after the revocation, as a timeout; `peered` 1.5 and 2.5 s; `deleted` 1.2 to 2.2 s; `group` 1.2 to 2.3 s. The
+first run sampled `peered` at 1.4 s (success) and 6.5 s (failure) only; the one-second samples after the
+revocation were added after it. The control connection had no failed exchange.
+
 Final checks require unchanged peer/agent identities and restart counts, an unchanged agent Deployment generation,
 and a Ready ingress. `probe-observations.json` retains every attempt, including convergence and failed-run observations.
 Probe results expose only bounded booleans, a fixed dial-error category and fixed phase/address-kind labels, not
@@ -173,13 +200,18 @@ credentials or raw network errors. The HTTP cluster runs the kubelet with `syncF
 and Secret updates reach running pods well inside the 90 s wait budget.
 
 The peer helper has fixed ports and framing, bounded deadlines/concurrency, strict control JSON and no arbitrary dial mode.
+It holds at most one connection; a failed exchange closes it. The backend keeps a held connection for at most 12 minutes
+in one of its four slots. The test does not observe the backend end of a held connection; the agent unit tests
+cover that the agent closes its backend connection with a revoked connection.
 Its optional `--identity=denied` selects one fixed second hostname.
 The HTTP ACL fixture combines it with `--serving-ca=cert-manager`; control-server trust remains separate and unchanged.
 This runner still preloads verified cert-manager assets for L4-only mode, but that test does not install cert-manager.
 
 Not covered here: NetworkPolicy semantics of production CNIs, DERP/STUN traffic, L4 egress/subnet routing,
 published images, arm64 execution, or long-running operation.
-Other gaps: DNS-specific ACL denial, immediate revocation of new/established connections, HTTP/2 extended CONNECT,
+Other gaps: DNS-specific ACL denial, immediate revocation of new connections, revocation of an established HTTP
+connection or WebSocket (`mode: http`; agent unit tests only), established connections to a site target through the
+gateway, a deleted client node, HTTP/2 extended CONNECT,
 and long-lived WebSockets across rotation/retirement.
 Bounded negative observations are not exhaustive ACL coverage.
 
