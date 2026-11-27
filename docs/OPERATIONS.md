@@ -177,3 +177,30 @@ approved one for 4 h. Review `<spoke>-policy-fragment-pending` in the operator n
 `kubectl annotate tailnet <hub> tsunaro.io/approve-spoke.<spoke>=<pendingHash>`. Until then the hub
 merges the approved fragment minus anything the spoke removed, so removals land without approval and
 additions wait — a long-pending fetch means a spoke change nobody has looked at.
+
+## Monitoring: console access request pending
+
+`TailnetConsoleAccessRequestPending` (info): a `TailnetAccessRequest` of the tailnet has waited
+15 min for a decision. A console admin approves or rejects it on the console's **Requests** page;
+nobody decides their own request. With `console.accessManagement.fourEyes` a user's request needs
+two admins and an admin's request one other admin, so a single admin cannot clear it. The requests
+stay as objects: `kubectl get tailnetaccessrequests` lists them with their phase.
+
+## Monitoring: console audit chain broken
+
+`TailnetConsoleAuditChainBroken`: the console found a break in its audit log — a changed, missing
+or cut line, or an anchor ConfigMap `<name>-console-audit` that names another head, for example
+after a restore of only the volume or only the ConfigMap. The console records the break in the log
+and lists it on the **Audit log** page; the pod log says `audit chain broken` with the entry number.
+Compare the listed entries with a backup and with the `audit head` lines kept outside the cluster.
+
+A recorded break stays, and so does the alert. To start a new chain once the break is explained,
+archive the old log and empty the anchor. The approvals of pending requests are only in the log:
+after archiving, those requests count no approval and must be approved again.
+
+```sh
+kubectl -n <ns> scale deployment <name>-console --replicas=0
+# On the volume: move audit.jsonl to audit-<date>.jsonl (the console reads only audit.jsonl).
+kubectl -n <ns> patch configmap <name>-console-audit --type=json -p '[{"op":"remove","path":"/data"}]'
+kubectl -n <ns> scale deployment <name>-console --replicas=1
+```

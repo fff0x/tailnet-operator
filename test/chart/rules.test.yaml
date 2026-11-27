@@ -379,3 +379,40 @@ tests:
               summary: A spoke fragment has waited for approval for four hours
               description: Approval mode Manual holds a valid fetched fragment until the Tailnet carries tsunaro.io/approve-spoke.<spoke> with the pending hash. Review the <spoke>-policy-fragment-pending ConfigMap and status.spokes[].pendingDelta.
               runbook_url: docs/OPERATIONS.md#monitoring-spoke-approval-pending
+  - name: A console access request alerts after fifteen minutes and clears on decision
+    interval: 1m
+    input_series:
+      - series: 'tailnet_console_access_requests_pending{tailnet="lab"}'
+        values: '1x20 0x10'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: TailnetConsoleAccessRequestPending
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TailnetConsoleAccessRequestPending
+        exp_alerts:
+          - exp_labels: {tailnet: lab, severity: info}
+            exp_annotations:
+              summary: An access request waits for a console admin
+              description: At least one TailnetAccessRequest of this tailnet has waited fifteen minutes for a decision. Approve or reject it on the console's Requests page. With four-eyes approval a second admin is needed.
+              runbook_url: docs/OPERATIONS.md#monitoring-console-access-request-pending
+      - eval_time: 25m
+        alertname: TailnetConsoleAccessRequestPending
+        exp_alerts: []
+  - name: An audit chain break alerts at once and an intact chain does not
+    interval: 1m
+    input_series:
+      - series: 'tailnet_console_audit_chain_breaks{namespace="release-system"}'
+        values: '0x5 1x5'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TailnetConsoleAuditChainBroken
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: TailnetConsoleAuditChainBroken
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: The console's audit log no longer proves its history
+              description: The hash chain of the console audit log or its anchor ConfigMap does not match. Somebody changed, truncated or restored the log or the anchor. A recorded break stays until the log is archived and started anew.
+              runbook_url: docs/OPERATIONS.md#monitoring-console-audit-chain-broken

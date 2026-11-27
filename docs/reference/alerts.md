@@ -33,6 +33,8 @@ replaces the whole bundled group.
 | `TailnetSpokeUnreachable` | warning | `tailnet_spoke_reachable` has been 0 for 1 h (kubeconfig, RBAC or network) | [spoke unreachable](../OPERATIONS.md#monitoring-spoke-unreachable) |
 | `TailnetSpokeFragmentInvalid` | warning | `tailnet_spoke_fragment_valid` has been 0 for 15 min | [spoke fragment invalid](../OPERATIONS.md#monitoring-spoke-fragment-invalid) |
 | `TailnetSpokeApprovalPending` | info | `tailnet_spoke_fragment_pending` has been 1 for 4 h (`approval: Manual`) | [spoke approval pending](../OPERATIONS.md#monitoring-spoke-approval-pending) |
+| `TailnetConsoleAccessRequestPending` | info | a console access request of the tailnet has waited 15 min for a decision | [console access request pending](../OPERATIONS.md#monitoring-console-access-request-pending) |
+| `TailnetConsoleAuditChainBroken` | warning | the console's last check found a break in its audit log; stays until the log is archived | [console audit chain broken](../OPERATIONS.md#monitoring-console-audit-chain-broken) |
 
 The `runbook_url` annotation of every rule is the repository-relative path of its runbook
 (`docs/OPERATIONS.md#monitoring-…`); prefix it with your docs base URL in Alertmanager templates.

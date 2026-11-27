@@ -168,3 +168,20 @@
         summary: A spoke fragment has waited for approval for four hours
         description: Approval mode Manual holds a valid fetched fragment until the Tailnet carries tsunaro.io/approve-spoke.<spoke> with the pending hash. Review the <spoke>-policy-fragment-pending ConfigMap and status.spokes[].pendingDelta.
         runbook_url: docs/OPERATIONS.md#monitoring-spoke-approval-pending
+    - alert: TailnetConsoleAccessRequestPending
+      expr: max by (tailnet) (tailnet_console_access_requests_pending) > 0
+      for: 15m
+      labels:
+        severity: info
+      annotations:
+        summary: An access request waits for a console admin
+        description: At least one TailnetAccessRequest of this tailnet has waited fifteen minutes for a decision. Approve or reject it on the console's Requests page. With four-eyes approval a second admin is needed.
+        runbook_url: docs/OPERATIONS.md#monitoring-console-access-request-pending
+    - alert: TailnetConsoleAuditChainBroken
+      expr: max(tailnet_console_audit_chain_breaks) > 0
+      labels:
+        severity: warning
+      annotations:
+        summary: The console's audit log no longer proves its history
+        description: The hash chain of the console audit log or its anchor ConfigMap does not match. Somebody changed, truncated or restored the log or the anchor. A recorded break stays until the log is archived and started anew.
+        runbook_url: docs/OPERATIONS.md#monitoring-console-audit-chain-broken
