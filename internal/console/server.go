@@ -20,7 +20,12 @@ import (
 //go:embed assets
 var assets embed.FS
 
-const contentSecurityPolicy = "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+// The only script is the embedded page module; it may fetch the console's own pages.
+const contentSecurityPolicy = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; " +
+	"form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+
+// pollInterval is how often the overview's module reloads the map and tables.
+const pollInterval = 10 * time.Second
 
 // Server is the console's HTTP surface.
 type Server struct {
@@ -29,6 +34,7 @@ type Server struct {
 	dir    *directory
 	log    logr.Logger
 	pages  map[string]*template.Template
+	poll   time.Duration
 }
 
 type page struct {
@@ -54,7 +60,11 @@ func New(cfg Config, reader client.Reader, log logr.Logger) (*Server, error) {
 	}
 	pages := map[string]*template.Template{}
 	for _, name := range []string{"overview", "access", "message"} {
-		t, err := template.ParseFS(assets, "assets/layout.html", "assets/"+name+".html")
+		files := []string{"assets/layout.html", "assets/" + name + ".html"}
+		if name == "overview" {
+			files = append(files, "assets/map.html")
+		}
+		t, err := template.New(name).Funcs(template.FuncMap{"add": func(a, b int) int { return a + b }}).ParseFS(assets, files...)
 		if err != nil {
 			return nil, err
 		}
@@ -62,7 +72,7 @@ func New(cfg Config, reader client.Reader, log logr.Logger) (*Server, error) {
 	}
 	return &Server{
 		auth:   &authenticator{cfg: cfg, seal: seal, now: time.Now, client: &http.Client{Timeout: 10 * time.Second}},
-		reader: reader, dir: newDirectory(cfg.OperatorURL, cfg.TokenFile), log: log, pages: pages,
+		reader: reader, dir: newDirectory(cfg.OperatorURL, cfg.TokenFile), log: log, pages: pages, poll: pollInterval,
 	}, nil
 }
 

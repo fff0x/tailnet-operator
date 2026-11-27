@@ -25,7 +25,8 @@ func TestSecurityHeaders(t *testing.T) {
 func TestStaticAssetsAndHealth(t *testing.T) {
 	c := newTestConsole(t, nil)
 	for path, ctype := range map[string]string{"/static/console.css": "text/css", "/static/logo.svg": "image/svg+xml",
-		"/healthz": "text/plain", "/readyz": "text/plain"} {
+		"/static/console.js": "text/javascript",
+		"/healthz":           "text/plain", "/readyz": "text/plain"} {
 		resp := c.do(t, http.MethodGet, path, nil)
 		if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), ctype) {
 			t.Errorf("%s: %d %q", path, resp.StatusCode, resp.Header.Get("Content-Type"))
@@ -33,6 +34,23 @@ func TestStaticAssetsAndHealth(t *testing.T) {
 	}
 	if resp := c.do(t, http.MethodGet, "/static/../auth.go", nil); resp.StatusCode == http.StatusOK {
 		t.Error("source file served")
+	}
+}
+
+// The page module is the only script, it is loaded by the overview alone, and the CSP admits no
+// other source.
+func TestScriptOnlyOnOverview(t *testing.T) {
+	if !strings.Contains(contentSecurityPolicy, "script-src 'self';") || strings.Contains(contentSecurityPolicy, "unsafe") {
+		t.Fatalf("CSP %q", contentSecurityPolicy)
+	}
+	c := newTestConsole(t, nil)
+	sc := cookie(c.signIn(t, flow{returnTo: "/"}, map[string]any{"groups": []string{"users"}}), sessionCookie)
+	const tag = `<script type="module" src="/static/console.js"></script>`
+	for path, want := range map[string]bool{"/": true, "/access": false} {
+		body, _ := io.ReadAll(c.do(t, http.MethodGet, path, []*http.Cookie{sc}).Body)
+		if strings.Contains(string(body), tag) != want || strings.Count(string(body), "<script") != map[bool]int{true: 1}[want] {
+			t.Errorf("%s: script present = %t, want %t", path, !want, want)
+		}
 	}
 }
 

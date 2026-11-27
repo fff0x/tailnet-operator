@@ -97,6 +97,43 @@ h3:first-of-type { margin-top: 0; }
 .state--bad { color: var(--state-bad); }
 .state--bad::before { background: var(--state-bad); }
 
+/* Map: layers as in the site's tour art (grid, ghost frame, wire, surface, solid). */
+.legend { margin: 0 0 1rem; color: var(--site-muted); font-size: .8125rem; }
+.map { margin: 0 0 1.5rem; }
+.map svg {
+  display: block; width: 100%; max-width: 60rem; height: auto; color: var(--site-text);
+  font-family: var(--mono); font-size: 12px; stroke-linecap: round; stroke-linejoin: round;
+}
+.map svg :is(path, rect, circle) { vector-effect: non-scaling-stroke; }
+.map svg text { fill: currentColor; stroke: none; }
+.map__grid { fill: none; stroke: currentColor; stroke-width: 1; opacity: .09; }
+.map__wire { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: .65; }
+.map__wire--dashed { stroke-dasharray: 4 4; }
+.map__frame { fill: currentColor; fill-opacity: .03; stroke: currentColor; stroke-opacity: .35; stroke-dasharray: 6 6; }
+.map__frame--dashed { stroke: var(--state-bad); stroke-opacity: .8; }
+.map svg .map__title { font-size: 15px; font-weight: 600; font-family: system-ui, sans-serif; }
+.map svg :is(.map__sub, .map__label, .map__heading, .map__more, .map__value--plain, .map__value--unknown) { fill: var(--site-muted); }
+.map svg .map__heading { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.map svg .map__value--ok { fill: var(--state-ok); }
+.map svg .map__value--bad { fill: var(--state-bad); }
+.map__cell { fill: currentColor; fill-opacity: .07; stroke: currentColor; stroke-opacity: .45; stroke-width: 1; }
+.map__node { outline: none; }
+.map__node:is(:hover, :focus) .map__cell { fill: var(--site-brand); fill-opacity: .12; stroke: var(--site-brand); stroke-opacity: 1; }
+.map__node:focus-visible .map__cell { stroke-width: 2; }
+.map__node--more .map__cell { stroke-dasharray: 3 5; }
+.map__mark { fill: var(--site-border-strong); }
+.map__mark--ok { fill: var(--state-ok); }
+.map__mark--bad { fill: var(--state-bad); }
+.map__nodes { fill: none; stroke: var(--site-border-strong); stroke-width: 1.5; }
+.map__nodes--online { fill: var(--state-ok); stroke: var(--state-ok); }
+.map__nodes--offline { stroke: var(--state-bad); }
+.map-tip {
+  position: absolute; z-index: 10; max-width: 24rem; padding: .5rem .625rem; pointer-events: none;
+  border: 1px solid var(--site-border-strong); border-top: 2px solid var(--site-brand);
+  background: var(--site-background); color: var(--site-text); font: .75rem/1.5 var(--mono); white-space: pre-line;
+}
+.map-tip[hidden] { display: none; }
+
 @media (max-width: 640px) {
   .bar, .main { padding-inline: 1rem; }
 }

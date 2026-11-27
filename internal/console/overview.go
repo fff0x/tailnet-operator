@@ -66,6 +66,8 @@ type siteRow struct {
 }
 
 type overview struct {
+	Maps      []tailnetMap
+	PollMS    int64 // how often the page module reloads the live part; 0 disables it
 	Tailnets  []tailnetRow
 	Spokes    []spokeRow
 	Ingresses []ingressRow
@@ -132,16 +134,9 @@ func (s *Server) loadOverview(ctx context.Context) (overview, error) {
 	}
 	for i := range ins.Items {
 		in := &ins.Items[i]
-		row := ingressRow{Namespace: in.Namespace, Name: in.Name, Tailnet: in.Spec.TailnetRef.Name, Tag: in.Status.Tag,
-			Hosts: in.Status.Hosts, AllowFrom: maskUsers(in.Spec.AllowFrom), Ready: condState(in.Status.Conditions, "Ready")}
-		for _, e := range in.Spec.Exposes {
-			mode := e.Mode
-			if mode == "" {
-				mode = "l4" // the API default; only an object that skipped admission lacks it
-			}
-			row.Ports = append(row.Ports, fmt.Sprintf("%d/%s", e.Port, mode))
-		}
-		o.Ingresses = append(o.Ingresses, row)
+		o.Ingresses = append(o.Ingresses, ingressRow{Namespace: in.Namespace, Name: in.Name, Tailnet: in.Spec.TailnetRef.Name,
+			Tag: in.Status.Tag, Hosts: in.Status.Hosts, Ports: exposePorts(in), AllowFrom: maskUsers(in.Spec.AllowFrom),
+			Ready: condState(in.Status.Conditions, "Ready")})
 	}
 	for i := range sites.Items {
 		st := &sites.Items[i]
@@ -152,6 +147,25 @@ func (s *Server) loadOverview(ctx context.Context) (overview, error) {
 		}
 		o.Sites = append(o.Sites, row)
 	}
+	for i := range tns.Items {
+		tn := &tns.Items[i]
+		var tIns []tnv1.TailnetIngress
+		var tSites []tnv1.TailnetSite
+		for _, in := range ins.Items {
+			if in.Spec.TailnetRef.Name == tn.Name {
+				tIns = append(tIns, in)
+			}
+		}
+		for _, st := range sites.Items {
+			if st.Spec.TailnetRef.Name == tn.Name {
+				tSites = append(tSites, st)
+			}
+		}
+		data, err := s.dir.get(ctx, tn.Name)
+		o.Maps = append(o.Maps, buildMap(tn, tIns, tSites, data, err))
+	}
+	slices.SortFunc(o.Maps, func(a, b tailnetMap) int { return strings.Compare(a.Name, b.Name) })
+	o.PollMS = s.poll.Milliseconds()
 	slices.SortFunc(o.Tailnets, func(a, b tailnetRow) int { return strings.Compare(a.Name, b.Name) })
 	slices.SortFunc(o.Spokes, func(a, b spokeRow) int { return strings.Compare(a.Tailnet+"/"+a.Name, b.Tailnet+"/"+b.Name) })
 	slices.SortFunc(o.Ingresses, func(a, b ingressRow) int {

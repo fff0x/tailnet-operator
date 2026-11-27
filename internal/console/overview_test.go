@@ -23,7 +23,8 @@ func cond(t, status, reason string) metav1.Condition {
 func sampleObjects() []client.Object {
 	return []client.Object{
 		&tnv1.Tailnet{ObjectMeta: metav1.ObjectMeta{Name: "lab"},
-			Spec: tnv1.TailnetSpec{Server: "https://hs.example", Policy: tnv1.PolicySpec{BaseConfigMap: "base", Mode: "Apply"}},
+			Spec: tnv1.TailnetSpec{Server: "https://hs.example", Policy: tnv1.PolicySpec{BaseConfigMap: "base", Mode: "Apply",
+				Spokes: []tnv1.SpokeRef{{Name: "zeta"}, {Name: "alpha"}}}},
 			Status: tnv1.TailnetStatus{Version: "0.29.6",
 				Policy:     &tnv1.PolicyStatus{Generated: tnv1.PolicyGenerated{Tags: 7, Grants: 12, Routes: 2}},
 				Conditions: []metav1.Condition{cond("PolicyApplied", "True", "Applied")},
@@ -101,6 +102,9 @@ func TestPolicyStateColours(t *testing.T) {
 
 func TestOverviewPageMasksAndEscapes(t *testing.T) {
 	c := newTestConsole(t, nil, sampleObjects()...)
+	op, _, _ := fakeOperator(t, `[{"id":"1","name":"alice","email":"alice@example.com"}]`,
+		`"{\"grants\":[{\"src\":[\"alice@\"],\"dst\":[\"tag:wiki\"],\"ip\":[\"tcp:443\"]}]}"`)
+	c.dir = newDirectory(op.URL, tokenFile(t, "tok"))
 	sc := cookie(c.signIn(t, flow{returnTo: "/"}, map[string]any{"groups": []string{"admins"}, "name": `<b>Eve</b>`}), sessionCookie)
 	resp := c.do(t, http.MethodGet, "/", []*http.Cookie{sc})
 	body, _ := io.ReadAll(resp.Body)
@@ -117,6 +121,22 @@ func TestOverviewPageMasksAndEscapes(t *testing.T) {
 	for _, leak := range []string{"alice@", "bob@example.com", "<script>", "<b>Eve"} {
 		if strings.Contains(html, leak) {
 			t.Errorf("page contains %q", leak)
+		}
+	}
+	// The map: one per Tailnet inside the live part, with the poll interval; rule 8 for its text.
+	start, end := strings.Index(html, `<figure class="map">`), strings.Index(html, "</figure>")
+	if start < 0 || end < start || !strings.Contains(html, `data-live data-poll="10000"`) {
+		t.Fatalf("no map or live part:\n%s", html)
+	}
+	fig := html[start:end]
+	for _, want := range []string{`aria-label="Map of Tailnet lab"`, "Hub · lab", "apps/wiki", "office", "Spoke · alpha", "Spoke · zeta", "map__nodes--offline"} {
+		if !strings.Contains(fig, want) {
+			t.Errorf("map lacks %q", want)
+		}
+	}
+	for _, leak := range []string{"alice", "db-1", "wiki-1", "network team", "group:staff", "&lt;script&gt;"} {
+		if strings.Contains(fig, leak) {
+			t.Errorf("map contains %q", leak)
 		}
 	}
 	writePreview(t, "overview.html", html)

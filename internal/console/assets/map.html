@@ -1,0 +1,34 @@
+{{define "map"}}
+<figure class="map">
+<svg viewBox="0 0 960 {{.Height}}" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Map of Tailnet {{.Name}}">
+  <path class="map__grid" d="{{.Grid}}"/>
+  {{range .Links}}<path class="map__wire{{if .Dashed}} map__wire--dashed{{end}}" d="{{.D}}"/>{{end}}
+  {{template "box" .Hub}}
+  {{range .Spokes}}{{template "box" .}}{{end}}
+</svg>
+{{if .Problem}}<figcaption class="notice notice--bad">The operator's console API did not answer for this Tailnet: node state is unknown and spoke tags are missing.</figcaption>{{end}}
+</figure>
+{{end}}
+
+{{define "box"}}{{$b := .}}
+<g class="map__box">
+  <rect class="map__frame{{if .Dashed}} map__frame--dashed{{end}}" x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}"/>
+  <text class="map__title" x="{{add .X 12}}" y="{{add .Y 26}}">{{.Title}}</text>
+  {{if .Sub}}<text class="map__sub" x="{{add .X 12}}" y="{{add .Y 46}}">{{.Sub}}</text>{{end}}
+  {{range .Rows}}<text class="map__label" x="{{add $b.X 12}}" y="{{.Y}}">{{.Label}}</text><text class="map__value map__value--{{or .Value.Class "plain"}}" x="{{add $b.X 132}}" y="{{.Y}}">{{.Value.Text}}</text>{{end}}
+  {{range .Lists}}
+  <text class="map__heading" x="{{add $b.X 12}}" y="{{.Y}}">{{.Heading}}</text>
+  {{if .Empty}}<text class="map__label" x="{{add $b.X 12}}" y="{{.EmptyY}}">{{.Empty}}</text>{{end}}
+  {{range .Cells}}
+  <g class="map__node{{if .More}} map__node--more{{end}}" tabindex="0" role="img" aria-label="{{.Tip}}">
+    <title>{{.Tip}}</title>
+    <rect class="map__cell" x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="32"/>
+    {{if .More}}<text class="map__more" x="{{add .X 12}}" y="{{add .Y 21}}">{{.Label}}</text>{{else}}
+    <rect class="map__mark map__mark--{{.Ready.Class}}" x="{{add .X 10}}" y="{{add .Y 12}}" width="8" height="8"/>
+    <text x="{{add .X 26}}" y="{{add .Y 21}}">{{.Label}}</text>
+    {{if .Nodes}}<circle class="map__nodes map__nodes--{{.Nodes}}" cx="{{add .X (add .W -14)}}" cy="{{add .Y 16}}" r="4"/>{{end}}{{end}}
+  </g>
+  {{end}}
+  {{end}}
+</g>
+{{end}}

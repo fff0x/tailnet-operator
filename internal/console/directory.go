@@ -15,48 +15,88 @@ import (
 	"tsunaro.io/tailnet-operator/internal/headscale"
 )
 
-// ponytail: every answer is kept for directoryTTL, so a page shows a grant or a user change up to
-// 15 s late and the operator sees at most two calls per Tailnet in that time. A watch would remove
-// the delay.
+// ponytail: every answer, an error too, is kept for directoryTTL, so a page shows a grant, a user
+// or a node change up to 15 s late, and the operator sees at most three calls per Tailnet in that
+// time. One lock serialises the reads, so a slow Tailnet delays the others, and the page, by up to
+// loadTimeout. A watch would remove the delay; a lock per Tailnet would remove the blocking.
 const directoryTTL = 15 * time.Second
+
+// loadTimeout bounds the three reads of one Tailnet together. The overview waits for every Tailnet
+// in turn, so an operator that drops the packets must cost far less than the server's write timeout.
+const loadTimeout = 3 * time.Second
 
 // tailnetData is what the operator's console API returns for one Tailnet. Users are personal data:
 // they stay in memory for directoryTTL and never reach a log.
 type tailnetData struct {
 	Users  []headscale.User
+	Nodes  []taggedNode
 	Policy string
 }
 
-// directory reads Headscale users and the live policy from the operator. The projected token is
-// read on every call, because the kubelet rotates the file.
+// taggedNode keeps what the map needs; the node's name is not even decoded.
+type taggedNode struct {
+	Online bool     `json:"online"`
+	Tags   []string `json:"tags"`
+}
+
+// directory reads Headscale users, tagged nodes and the live policy from the operator. The
+// projected token is read on every call, because the kubelet rotates the file.
 type directory struct {
 	base      string
 	tokenFile string
 	client    *http.Client
 	now       func() time.Time
-	mu        sync.Mutex
+	timeout   time.Duration
+	fetch     sync.Mutex // held while reading the operator
+	mu        sync.Mutex // guards cache
 	cache     map[string]cachedData
 }
 
 type cachedData struct {
 	at   time.Time
 	data tailnetData
+	err  error
 }
 
 func newDirectory(base, tokenFile string) *directory {
 	return &directory{base: strings.TrimSuffix(base, "/"), tokenFile: tokenFile, client: &http.Client{Timeout: 10 * time.Second},
-		now: time.Now, cache: map[string]cachedData{}}
+		now: time.Now, timeout: loadTimeout, cache: map[string]cachedData{}}
+}
+
+func (d *directory) cached(tailnet string) (cachedData, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	c, ok := d.cache[tailnet]
+	return c, ok && d.now().Sub(c.at) < directoryTTL
 }
 
 func (d *directory) get(ctx context.Context, tailnet string) (tailnetData, error) {
-	d.mu.Lock()
-	c, ok := d.cache[tailnet]
-	d.mu.Unlock()
-	if ok && d.now().Sub(c.at) < directoryTTL {
-		return c.data, nil
+	if c, ok := d.cached(tailnet); ok {
+		return c.data, c.err
 	}
+	d.fetch.Lock()
+	defer d.fetch.Unlock()
+	if c, ok := d.cached(tailnet); ok {
+		return c.data, c.err
+	}
+	bounded, cancel := context.WithTimeout(ctx, d.timeout)
+	data, err := d.load(bounded, tailnet)
+	cancel()
+	if ctx.Err() != nil {
+		return data, err // the caller left; the operator's answer is unknown
+	}
+	d.mu.Lock()
+	d.cache[tailnet] = cachedData{at: d.now(), data: data, err: err}
+	d.mu.Unlock()
+	return data, err
+}
+
+func (d *directory) load(ctx context.Context, tailnet string) (tailnetData, error) {
 	var users struct {
 		Users []headscale.User `json:"users"`
+	}
+	var nodes struct {
+		Nodes []taggedNode `json:"nodes"`
 	}
 	var policy struct {
 		Policy string `json:"policy"`
@@ -64,14 +104,13 @@ func (d *directory) get(ctx context.Context, tailnet string) (tailnetData, error
 	if err := d.read(ctx, tailnet, "users", &users); err != nil {
 		return tailnetData{}, err
 	}
+	if err := d.read(ctx, tailnet, "nodes", &nodes); err != nil {
+		return tailnetData{}, err
+	}
 	if err := d.read(ctx, tailnet, "policy", &policy); err != nil {
 		return tailnetData{}, err
 	}
-	data := tailnetData{Users: users.Users, Policy: policy.Policy}
-	d.mu.Lock()
-	d.cache[tailnet] = cachedData{at: d.now(), data: data}
-	d.mu.Unlock()
-	return data, nil
+	return tailnetData{Users: users.Users, Nodes: nodes.Nodes, Policy: policy.Policy}, nil
 }
 
 // read never returns response text: the error names the path and the status only.

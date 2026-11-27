@@ -1,6 +1,13 @@
 {{define "content"}}
 <h1>Overview</h1>
-<p class="lede">What the operator on this hub reports. The page reads the Kubernetes API when it loads.</p>
+<p class="lede">What the operator on this hub reports. <span class="live" data-live-status>The page shows the state when it loaded; reload for the current one.</span></p>
+
+<div data-live data-poll="{{.Body.PollMS}}">
+<section class="panel">
+  <h2>Map</h2>
+  <p class="legend">Square: <code>Ready</code> (green true, red false, grey unknown); on a spoke tag, its nodes (green online, red offline, grey unknown). Circle on an ingress: its node online (filled), offline (red ring), unknown (grey ring). A dashed spoke is not reachable.</p>
+  {{range .Body.Maps}}<h3>Tailnet <code>{{.Name}}</code></h3>{{template "map" .}}{{else}}<p class="muted">No Tailnet.</p>{{end}}
+</section>
 
 <section class="panel">
   <h2>Tailnets</h2>
@@ -53,4 +60,6 @@
   </table></div>
   {{else}}<p class="muted">No TailnetSite.</p>{{end}}
 </section>
+</div>
 {{end}}
+{{define "scripts"}}<script type="module" src="/static/console.js"></script>{{end}}
