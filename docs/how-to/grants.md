@@ -92,7 +92,8 @@ grants nothing and is not reported.
 - The operator schedules its own reconcile for the next `expiresAt`. No object change is necessary.
   The integration test accepts at most 15 seconds between `expiresAt` and the removal from the
   live policy.
-- An expired object stays, with `Ready=False/Expired`. The operator does not delete it.
+- An expired object stays, with `Ready=False/Expired`. The operator does not delete it. The console
+  deletes its own expired grants after `console.accessManagement.retentionDays`.
 - To extend a grant, set a new `expiresAt`. To make it permanent, remove the field.
 - To revoke a grant early, delete the object or set `expiresAt` to a time in the past.
 - With `console.accessManagement`, console admins create, extend and revoke grants in the web

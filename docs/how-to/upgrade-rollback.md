@@ -21,7 +21,8 @@ LIVE_CR_FILE="$live" task test-validation; rm -f -- "$live"
    the policy controller of the new operator cannot start its watch. The operator process then exits
    after the cache sync timeout (2 minutes) and restarts in a loop. The console with
    `console.accessManagement` needs the `TailnetAccessRequest` CRD: without it the console runs,
-   but the Requests page answers 503 and every request fails with 502 (status 404).
+   but the Requests page answers 503 and every request fails with 502 (status 404). A console that
+   expires requests needs the CRD of this release, whose `phase` admits `Expired`.
 2. `helm upgrade` (or apply the new `deploy/`). The operator re-rolls every agent whose image changed;
    agent Deployments use `Recreate`, so each affected CR's data path is interrupted for the restart.
 3. `kubectl get tailnet` — `COMPAT=Compatible`, `POLICY=InSync` or `Applied`, `DNS=Configured` (or `CannotVerify` without a gateway).

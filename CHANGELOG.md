@@ -44,7 +44,7 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
     tag or addresses inside a TailnetSite of a policy-owning Tailnet), ports prefilled from the
     target, recipients from the Headscale users with a provider identifier and the live policy's
     groups, and a fixed duration from 1 hour to 30 days or permanent. Revoking sets `expiresAt` to
-    now; the console never deletes a grant and changes only those labelled
+    now; the console changes only grants labelled
     `app.kubernetes.io/managed-by: tailnet-console`. Users get 403; without the switch the pages
     do not exist. The chart adds `create`, `update` and `patch` on TailnetGrants, a
     PersistentVolumeClaim and a ConfigMap `<name>-console-audit` (both kept on uninstall), and a
@@ -65,6 +65,14 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
     status names nobody: approvals are counted from the audit log, and only admins see who
     decided. A request whose grant was written but whose status was not counts as decided; only
     **Approve** closes it (`request.close`). Apply the CRD before upgrading (`task crd-upgrade`).
+  - **Observed changes and cleanup.** Every minute the console compares all TailnetGrants with
+    its log and records changes made outside it as `grant.observed`, without a person, and an
+    expiry the operator confirmed as `grant.expired`. With `console.accessManagement.retentionDays`
+    (default 30, 0 turns it off) it deletes its own grants that the operator reports `Expired`
+    and decided requests that many days later, and lets pending requests expire (phase
+    `Expired`); each step is in the log first. The chart grants `delete` only with a retention
+    above 0. A user revokes a console grant that names them alone, at once; a grant that expired
+    already cannot be revoked (409).
   - **Four-eyes approval (`console.accessManagement.fourEyes`, off by default).** An admin's new
     grant or extension becomes a request that another admin approves, and a user's request needs
     two admins; revoking acts at once.

@@ -177,6 +177,7 @@ console:
   accessManagement:
     enabled: true
     fourEyes: false          # true: a second admin approves every new grant and extension
+    retentionDays: 30        # 0: delete nothing; see "Observed changes and cleanup"
     audit:
       size: 1Gi              # never rotated; one change is about 1 KiB
       storageClassName: ""   # empty: the cluster's default
@@ -187,7 +188,7 @@ The chart then adds, in the release namespace:
 
 - `create`, `update` and `patch` on `tailnetgrants`, `get`, `list`, `watch` and `create` on
   `tailnetaccessrequests`, and `update` and `patch` on their status to the ClusterRole
-  `<name>-console`, but no `delete`;
+  `<name>-console`; `delete` on both kinds only with `retentionDays` above 0;
 - the PersistentVolumeClaim `<name>-console-audit` (`ReadWriteOnce`), mounted at
   `/var/lib/tsunaro-console`, and `fsGroup: 65532` for the pod;
 - the ConfigMap `<name>-console-audit`, rendered without data, and a Role with `get`, `update` and
@@ -227,13 +228,18 @@ changes only the grants it created, which carry the label
 The server checks every field again against the same lists. The grant is named `console-` plus ten
 random characters. **Extend** sets a new `expiresAt` from now with the same durations; on an
 expired grant the button says **Renew**. **Revoke** sets `expiresAt` to now: the operator removes
-the rule at its next reconcile, and the object stays. To change ports or recipients, revoke the
-grant and create a new one. The operator's checks still apply: a grant whose target goes away
+the rule at its next reconcile, and the object stays until the
+[cleanup](#observed-changes-and-cleanup) deletes it. A grant that expired already cannot be
+revoked ("Already expired", 409). To change ports or recipients, revoke the grant and create a new
+one. The operator's checks still apply: a grant whose target goes away
 reports `TargetUnknown`, see [Grant temporary access](grants.md).
 
 With `fourEyes`, **Create grant** and **Extend** make a request instead (the button says
 **Request grant**), which another admin approves on **Requests**; **Revoke** still acts at once. A
 notice on the page says so.
+
+A user revokes a console grant that names them alone on **Requests**; it acts at once, also with
+`fourEyes`, and the audit log names the user. Any other grant answers "Not your grant" (403).
 
 ### Requests
 
@@ -244,8 +250,8 @@ admin every request. A request asks for a new grant or for a new expiry of a con
    person who asks, as `<providerId>@`. The list holds only Tailnets whose Headscale knows that
    person by the provider identifier (see [My access](#my-access)); whoever never signed in to the
    tailnet with the identity provider is offered nothing.
-2. **Ask to extend** is offered for console grants whose `sources` are exactly the person's own
-   reference. Admins extend on **Grants**.
+2. **Ask to extend** and **Revoke** are offered for console grants whose `sources` are exactly the
+   person's own reference. Admins extend on **Grants**.
 3. A request needs approvals by admins other than the requester:
 
    | Requested by | `fourEyes: false` | `fourEyes: true` |
@@ -273,13 +279,14 @@ admin every request. A request asks for a new grant or for a new expiry of a con
    back, revoke the grant. When a later extension has replaced `tsunaro.io/extended-by`, the older
    request is an ordinary pending request again.
 
-The request's status names nobody: `phase` (`Pending`, `Approved`, `Rejected`, `Withdrawn`; empty
-means pending), `decidedAt` and `grantName`. Who approved, rejected or withdrew is only in the
+The request's status names nobody: `phase` (`Pending`, `Approved`, `Rejected`, `Withdrawn`,
+`Expired`; empty means pending), `decidedAt` and `grantName`. Who approved, rejected or withdrew is only in the
 [audit log](#audit-log): the console counts a request's approvals from its `request.approve`
 entries, one per person. When the console cannot read the log, it shows and decides no request
 ("Requests unavailable", 503). Admins see the approvers and the deciding person by name; the
 requester sees how many approved and when the request was decided. Its `spec` never changes.
-The console never deletes a request; `kubectl get tnar` lists them.
+With `retentionDays`, a request nobody decided expires and decided requests are deleted, see
+[Observed changes and cleanup](#observed-changes-and-cleanup); `kubectl get tnar` lists them.
 
 ### Audit log
 
@@ -302,21 +309,55 @@ Every change is first written to `/var/lib/tsunaro-console/audit.jsonl`, one JSO
    or changed ConfigMap, or a log that ends before or after the ConfigMap's head.
 6. Every newly found break gets its own entry `chain.broken`, and the log continues after it. The
    page lists every break ever found; the pod log says `audit chain broken` with the entry number.
-7. Nothing is deleted or rotated.
+7. The log is never rotated.
 
 Actions are `grant.create`, `grant.extend`, `grant.revoke`, `grant.failed`, `request.create`,
-`request.approve`, `request.reject`, `request.withdraw`, `request.close` and `chain.broken`. The
+`request.approve`, `request.reject`, `request.withdraw`, `request.close` and `chain.broken`; the
+next section adds `grant.observed`, `grant.expired`, `grant.delete`, `request.expire` and
+`request.delete`. The
 last approval of a request is recorded as `grant.create` or `grant.extend`, with the request, the
 requester and every approver in `details`; its actor is the last approver. Entries of a request
 carry its name in `details.request`; a following `grant.failed` names only the grant and the
 failed action. The console also checks the chain every
 10 minutes in the background for the metric below.
-**Audit log** shows the newest 200 entries, newest first, with a link to older ones.
+**Audit log** shows the newest 200 entries, newest first, with a link to older ones. An entry
+without a person shows `unknown` (an observed change), `operator` (a confirmed expiry) or
+`console`.
 
 The chain shows changes made on the volume alone. Whoever can write both the volume and the
 ConfigMap, such as a cluster admin, can rewrite the log unnoticed by the console; the head in the
-pod log, if your log store keeps it, is the third copy to compare. Changes made with `kubectl` or
-Git and the operator's own expiries are not in this log.
+pod log, if your log store keeps it, is the third copy to compare.
+
+### Observed changes and cleanup
+
+At start and then every minute the console compares every TailnetGrant, from Git and `kubectl`
+too, with the state its log gives:
+
+1. The state is tailnet, recipients, target, ports, `expiresAt`, description and the label
+   `app.kubernetes.io/managed-by: tailnet-console`. A grant the log does not know, a different
+   state or a missing grant becomes one entry `grant.observed` without a person, with
+   `details.change` `created`, `changed` or `deleted` and the state. The first run records every
+   grant once as the starting state.
+2. A console change whose write failed (`grant.failed`) leaves the state as before. A grant that
+   was written although its answer was lost therefore shows up as `grant.observed`.
+3. When the operator reports a grant `Ready=False/Expired` for its current generation, the console
+   records `grant.expired` once per `expiresAt`.
+4. A change undone within the minute leaves no entry, and the log does not name who made an
+   observed change; the API server's audit log does.
+5. When the console cannot read its log or the grants, the run records nothing and the next one
+   catches up.
+
+With `retentionDays` N above 0 the console cleans up at start and then every hour:
+
+1. It deletes a console grant once the operator reports it `Expired` and its `expiresAt` lies N
+   days back. It never deletes other grants, nor a grant whose expiry the operator has not
+   confirmed.
+2. A pending request N days old gets the phase `Expired`; approvals so far do not extend it. A
+   request whose grant is written already does not expire.
+3. It deletes a request whose `decidedAt` lies N days back.
+4. Each step is in the log first (`grant.delete`, `request.expire`, `request.delete`, with the last
+   state and `details.retentionDays`). A deletion carries the `resourceVersion` it read: an object
+   changed meanwhile stays, `grant.failed` follows, and the cleanup waits for the next hour.
 
 ### Metrics
 
@@ -409,4 +450,7 @@ subject, a name or a mail address.
 | The audit page says the chain is broken | A line was changed, removed or cut, or the ConfigMap was reset or deleted, for example by a restore of only one of the two | Compare the listed entry numbers with a backup and the `audit head` lines of the pod log; the break stays listed |
 | A recipient is missing from the list | The Headscale user has no provider identifier: it never signed in with the identity provider | Let the person sign in to the tailnet once; or choose a group of the live policy |
 | A target is missing from the list | The Tailnet does not write its policy, the ingress has no `status.tag` yet, or the spoke tag has no node and no live rule | Set the policy mode to `DryRun` or `Apply`; wait for the ingress to be Ready |
+| The audit log has many `grant.observed` entries for one grant | Something changes the grant outside the console again and again, for example Flux reverting a `kubectl` change | Change the grant where it is defined, in Git or in the console |
+| An expired console grant is not deleted | `retentionDays` is 0, fewer than that many days passed since `expiresAt`, or the operator has not reported `Ready=False/Expired` (policy not written, operator down) | Check the grant's `Ready` condition and the Tailnet's `PolicyApplied` |
+| A request shows `Expired` | Nobody decided it within `retentionDays` | Ask again; route `TailnetConsoleAccessRequestPending` to the admins |
 | "My access" says the tailnet has no user for you | No Headscale user has the provider identifier that Headscale builds from the console's issuer and your `sub` | Sign in to the tailnet once with the same identity provider; check that Headscale's OIDC issuer equals `console.oidc.issuer` |
