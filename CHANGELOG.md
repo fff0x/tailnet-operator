@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-11-28
+
 ### Fixed
 
 - Console: the **Ports** and **Matched by** columns of the My Access table no longer break a value
