@@ -4,6 +4,8 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-28
+
 ### Added
 
 - **Web console (`console.enabled`).** A third program in the operator image,

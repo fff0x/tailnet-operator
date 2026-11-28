@@ -20,6 +20,23 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
+## Web console, grants and access requests (v0.28.0)
+
+Two new CRDs, `tailnetgrants` and `tailnetaccessrequests`, ship with this release; apply them
+before the upgrade (`task crd-upgrade`, or let Helm's `crds: CreateReplace` apply them on install
+and upgrade). `TailnetSite` changes in one description line only (who may *reach* a site's prefixes
+is now a base grant **or** a `TailnetGrant`); no field or validation changes, and the other four
+kinds are unchanged.
+
+**New agent images are required.** The agent now closes connections a policy change revoked, so
+the `agentImage` digest moves and **every agent rolls once** on upgrade; pin operator and agent
+digests together. Expect one short interruption per agent as it restarts.
+
+The web console, its access management (admin-managed `TailnetGrant`s, user access requests and the
+hash-chained audit log) and four-eyes approval are all **off by default** (`console.enabled`,
+`console.accessManagement.enabled`, `console.accessManagement.fourEyes`). A cluster that leaves
+them off sees only the two new CRDs and the one-time agent roll.
+
 ## Undeclared groups and Ready-change events (v0.27.1)
 
 Controller-only: the CRDs do not change, and the agent image is unchanged — with a pinned
