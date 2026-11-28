@@ -3,7 +3,7 @@
     <thead><tr><th>Destination</th><th>Ports</th><th>Matched by</th><th>Origin</th><th>Expires</th></tr></thead>
     <tbody>{{range .}}<tr>
       <td>{{range $i, $t := .Targets}}{{if $i}}<br>{{end}}{{if $t.Masked}}<span class="muted">{{$t.Value}}</span>{{else}}<code>{{$t.Value}}</code>{{end}}{{with $t.Name}}<span class="target__name">{{.}}</span>{{end}}{{end}}</td>
-      <td>{{template "list" .Ports}}</td><td>{{template "list" .Via}}</td><td>{{.Origin}}</td><td>{{or .Expires "—"}}</td>
+      <td class="nowrap">{{template "list" .Ports}}</td><td class="nowrap">{{template "list" .Via}}</td><td>{{.Origin}}</td><td>{{or .Expires "—"}}</td>
     </tr>{{end}}</tbody>
   </table></div>
 {{end}}

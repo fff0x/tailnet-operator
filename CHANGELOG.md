@@ -4,6 +4,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed
+
+- Console: the **Ports** and **Matched by** columns of the My Access table no longer break a value
+  across lines.
+
 ## [0.28.1] - 2026-11-28
 
 ### Security
