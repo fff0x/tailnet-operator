@@ -20,8 +20,9 @@ routing, one policy writer, IPv4 gateway) are collected in [Limitations](limitat
 | Helm | 3 or 4 | Chart has no CRD dependencies by default; monitoring objects are opt-in |
 | Architectures | `linux/amd64`, `linux/arm64` | One multi-arch image carries operator, agent and gateway; the pinned `tailscale`/`coredns` gateway digests are multi-arch indexes |
 
-## Web console, grants and access requests (v0.28.0)
+## Web console, grants and access requests (v0.28.1)
 
+v0.28.0 was not accepted by the release audit; v0.28.1 is the first release with these changes.
 Two new CRDs, `tailnetgrants` and `tailnetaccessrequests`, ship with this release; apply them
 before the upgrade (`task crd-upgrade`, or let Helm's `crds: CreateReplace` apply them on install
 and upgrade). `TailnetSite` changes in one description line only (who may *reach* a site's prefixes

@@ -4,7 +4,13 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
-## [0.28.0] - 2026-11-28
+## [0.28.1] - 2026-11-28
+
+### Security
+
+- `github.com/go-jose/go-jose/v4` 4.1.9 (CVE-2026-116587, reachable through the console's OIDC
+  sign-in). The v0.28.0 image carries the affected version and failed the release audit; it is
+  not accepted for use. Use v0.28.1.
 
 ### Added
 
@@ -116,6 +122,11 @@ Notable changes are recorded here using [Keep a Changelog](https://keepachangelo
 - **A generated grant that loses an undeclared source is rendered once.** When the drop of an
   undeclared tag or group makes a generated or spoke grant equal to another grant of the rendered
   policy, the operator no longer renders the duplicate. Base grants stay unchanged.
+
+## [0.28.0] - 2026-11-28
+
+Tagged but not released: the image failed the release audit (see 0.28.1, *Security*). All of its
+changes are listed under 0.28.1.
 
 ## [0.27.1] - 2026-11-25
 
